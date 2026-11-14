@@ -6,7 +6,8 @@ import type { LoopExecution } from "../loop.ts";
 import type { TopicReview } from "./review.ts";
 export const TOPIC_TYPE = { apiVersion: "aide.dev/v1alpha5", kind: "Topic" } as const;
 export const DEFAULT_TOPIC_ID = "default";
-export interface TopicSpec { maxNotes?: number; address?: import("../address/model.ts").AddressRef; id: string; name?: string; default?: boolean; review?: TopicReview;
+export const GATE_TOPIC_ID = "gate";
+export interface TopicSpec { gate?: boolean; maxNotes?: number; address?: import("../address/model.ts").AddressRef; id: string; name?: string; default?: boolean; review?: TopicReview;
   people?: import("../person/model.ts").PersonRefs; topicKey?: string; parentRef?: ResourceRef & { uid: string } }
 export interface TopicStatus extends ResourceContext {
   weaveReview?: { version: string; at: string };
@@ -39,7 +40,7 @@ export interface TopicStatus extends ResourceContext {
   receipts: Array<{ key: string; responseId: string }>;
 }
 export type TopicResource = Resource<TopicSpec, TopicStatus>;
-export type TopicDeletionBlock = "busy" | "work" | "default" | "children" | "unabsorbed";
+export type TopicDeletionBlock = "busy" | "work" | "default" | "gate" | "children" | "unabsorbed";
 export type TopicDeletion = { deleted: true } | { deleted: false; reason: "missing" | "changed" | TopicDeletionBlock };
 /** The transactional validator owns deletion rules; callers can present expected refusals without duplicating them. */
 export class TopicDeletionBlocked extends Error {

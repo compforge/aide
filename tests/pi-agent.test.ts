@@ -47,6 +47,89 @@ import type { HarnessEvent, HarnessSessionReference } from "../src/host/harness/
 
 type Reply = { text: string; stop?: string; thought?: string; pause?: Promise<void> } | { tool: string; args: unknown; pause?: Promise<void> } | { error: true } | { hold: true };
 
+/** @case Gate uses its independent native session, reads domain evidence and delegates a Task whose cited result returns to Gate. */
+test("Gate native loop reads across roots, delegates analysis and resumes after restart", { timeout: 45_000 }, async t => {
+  let aide: Aide, phase = 0, gateStep = 0, taskStep = 0;
+  let firstUid = "", secondUid = "";
+  let evidence: { id: string; uid: string; version: string };
+  const currentInput = () => aide.topics.inputStore.query("topic", aide.topics.resource("gate")!.metadata.uid)
+    .find(i => !i.status.assess?.completedAt)!.metadata.name;
+  const fixture = await setup(t, request => {
+    const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
+    for (const name of ["list_topics", "read_topic", "list_notes", "read_note", "list_work", "read_work", "read_input"]) assert.ok(names.includes(name), name);
+    assert.ok(!names.includes("move_topic"));
+    if (names.includes("report_task")) {
+      const work = aide.work("gate").list()[0]!;
+      const ids = aide.topics.inputStore.query("handlePending", work.uid!).map(i => i.metadata.name);
+      switch (taskStep++) {
+        case 0: return { tool: "read_topic", args: { uid: secondUid } };
+        case 1: return { tool: "read_note", args: { noteId: evidence.id } };
+        case 2: return { tool: "say", args: { text: "跨领域分析结论", notes: [{ uid: evidence.uid, version: evidence.version }] } };
+        case 3: return { tool: "report_task", args: { inputIds: ids, report: "Compared domain evidence", action: "done" } };
+        default: return { text: "Analysis reported" };
+      }
+    }
+    assert.ok(names.includes("assess_input"));
+    for (const name of ["bash", "write", "edit", "upsert_note", "summarize_topic", "retire_note"]) assert.ok(!names.includes(name), name);
+    if (phase === 0) switch (gateStep++) {
+      case 0: return { tool: "list_topics", args: {} };
+      case 1: return { tool: "read_topic", args: { uid: firstUid } };
+      case 2: return { tool: "read_topic", args: { uid: secondUid } };
+      case 3: return { tool: "read_note", args: { noteId: evidence.id } };
+      case 4: return { tool: "cite_output", args: { notes: [{ uid: evidence.uid, version: evidence.version }] } };
+      case 5: return { tool: "assess_input", args: { inputId: currentInput(), summary: "Compared current evidence" } };
+      default: return { text: "两个领域的进展有共同点。" };
+    }
+    if (phase === 1) switch (gateStep++) {
+      case 0: return { tool: "list_work", args: { kind: "task" } };
+      case 1: return { tool: "create_work", args: { kind: "task", title: "Cross-topic analysis", instruction: "Compare both domains and report in Gate", trigger: null, inputId: currentInput() } };
+      case 2: return { tool: "assess_input", args: { inputId: currentInput(), summary: "Delegated analysis" } };
+      default: return { text: "已创建分析事项，结果会回到 Gate。" };
+    }
+    assert.match(JSON.stringify(request.messages), /两个领域的进展有共同点/);
+    return gateStep++ === 0 ? { tool: "assess_input", args: { inputId: currentInput(), summary: "Follow-up answered" } } : { text: "继续上次讨论。" };
+  });
+  const home = join(fixture.config.cwd, "gate-native-home");
+  const { ConfigSchema } = await import("../src/config.ts");
+  const open = () => new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", config: ConfigSchema.parse({ plugins: { personal: { weave: { enabled: false } } } }),
+    defaultHarnessConfig: { id: "default", harness: "pi" }, createAdapter: (target, ports) => createHarnessAdapter(target, {
+      ...ports, targetConfig: { harness: target.harness },
+      ...(target.harness === "gate" ? { gateSession: aide.gateSession(ports.scope, fixture.config.config) } : {}),
+      ...(target.harness === "task" ? { taskSession: aide.taskSession(ports.scope, fixture.config.config) } : {}),
+    }) }, pino({ level: "silent" }));
+  aide = open();
+  try {
+    const first = await aide.topics.ensure("first"), second = await aide.topics.ensure("second");
+    firstUid = first.metadata.uid; secondUid = second.metadata.uid;
+    const { writeSummary, summaryReference } = await import("../plugins/personal/note/summary.ts");
+    const resources = aide.runtime.plugins.resourceClient("personal");
+    const updated = await writeSummary(resources, first, { text: "Domain A verified facts", sensitivity: "L1", visibility: "any" });
+    evidence = summaryReference(aide.topics.resources, updated)!;
+    await aide.receive(fixtureIncoming({ channelId: "web", topicId: "gate", id: "question", text: "比较两个领域的进展" }));
+    await aide.settled();
+    const gate = aide.topics.resource("gate")!;
+    assert.equal(gate.status.agent?.harness, "gate"); assert.ok(gate.status.agent?.sessionId);
+    assert.equal(aide.topics.inputs("gate")[0]!.status.assess?.result?.summary, "Compared current evidence");
+    assert.ok(aide.outputs().some(o => o.text.includes("两个领域的进展")));
+    assert.equal(aide.work("gate").list().length, 0);
+    phase = 1; gateStep = 0;
+    await aide.receive(fixtureIncoming({ channelId: "web", topicId: "gate", id: "analysis", text: "委托一个深入分析任务" }));
+    await aide.settled();
+    const task = aide.work("gate").list()[0]!;
+    assert.equal(task.status, "done", JSON.stringify(task));
+    const output = aide.outputs().find(o => o.text === "跨领域分析结论");
+    assert.ok(output); assert.deepEqual(output.target, { kind: "channel", channelId: "web", endpoint: "gate" });
+    assert.equal(summaryText(aide.topics.resources, aide.topics.resource("first")!), "Domain A verified facts");
+    assert.equal(aide.topics.resource("first")!.status.agent, undefined);
+    const session = aide.topics.resource("gate")!.status.agent;
+    await aide.close(); aide = open(); phase = 2; gateStep = 0;
+    await aide.receive(fixtureIncoming({ channelId: "web", topicId: "gate", id: "followup", text: "接着刚才说" }));
+    await aide.settled();
+    assert.deepEqual(aide.topics.resource("gate")!.status.agent, session);
+    assert.ok(aide.outputs().some(o => o.text.includes("继续上次讨论。")), JSON.stringify(aide.outputs()));
+  } finally { await aide.close(); }
+});
+
 function messageText(content: unknown): string {
   return typeof content === "string" ? content : (content as Array<{ text?: string }>).map(p => p.text ?? "").join("\n");
 }

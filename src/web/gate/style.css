@@ -1,0 +1,9 @@
+@import '../topics/style.css';
+main.gate-main { display: flex; max-width: 1080px; }
+.gate-main > .topic { width: 100%; border-left: 0; }
+.gate-main .topic-header { flex-wrap: wrap; }
+#evidence { flex: none; max-height: 35vh; overflow: auto; padding: 12px; border: 1px solid #d8dfd5; border-radius: 8px; margin-bottom: 12px; }
+#evidence[hidden] { display: none; }
+#evidence summary { cursor: pointer; }
+#evidence-body { padding-top: 12px; color: #20342b; font-size: 14px; }
+@media (max-width: 760px) { main.gate-main { height: calc(100dvh - 140px); } }

@@ -25,7 +25,7 @@ export async function groupTopics(resources: ResourceClient, weave: WeaveResourc
   const versions = new Map(await Promise.all(all.map(async t => [t.metadata.uid, understandingVersion(t, await readNotes(resources, t.metadata.uid, "subject"))] as const)));
   const resolve = (ref: { uid: string; version: string }) => {
     const topic = all.find(t => t.metadata.uid === ref.uid);
-    if (!topic || topic.metadata.deletionTimestamp || topic.spec.default || topic.spec.parentRef) throw new Error("Only available non-Default roots can be grouped");
+    if (!topic || topic.metadata.deletionTimestamp || topic.spec.gate || topic.spec.default || topic.spec.parentRef) throw new Error("Only available non-Default roots can be grouped");
     if (separationCoolingDown(topic))
       throw new Error("Topic organization is cooling down; respect the recorded boundary and retry later");
     if (versions.get(topic.metadata.uid) !== ref.version) throw new Error("Topic understanding changed; read again");

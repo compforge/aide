@@ -1,5 +1,7 @@
 # Web Channel
 
+统一对话入口见 [Gate](../personal/gate.md)：独立 Agent、跨 Topic 问答和分析委托。
+
 Web 是 Aide 的浏览器 Channel，提供会话导航、聊天、工作列表与用户交互。与 Lark 的共同边界见 [Channel](README.md)。
 
 ## 前后端分工

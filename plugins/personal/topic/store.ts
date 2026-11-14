@@ -1,9 +1,11 @@
+import { webAddress } from "../../../src/channel/address.ts";
 import { AddressRefSchema, type AddressRef } from "../address/model.ts";
 import { OUTPUT_TYPE } from "../output/model.ts";
 import { Addresses, type AddressTarget } from "../address/service.ts";
 import { replyIdentity } from "../address/reply.ts";
 import { commitStatus } from "../status.ts";
 import { agentCall } from "../observation/reference.ts";
+import { ensureGateTopic } from "../gate/topic.ts";
 import { ensureDefaultTopic } from "./default.ts";
 import { topicSubtree } from "./tree.ts";
 import { resourceRef, belongsToTopic } from "../input/state.ts";
@@ -15,7 +17,7 @@ import { receiverIdentity, type SayInput, type SayReceipt } from "../output/mode
 import { InputStore } from "../input/store.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import type { ResourceClientChange } from "../../../src/host/plugin/resource/client.ts";
-import { DEFAULT_TOPIC_ID, TOPIC_TYPE, initialTopicName, type Topic, type TopicResource, type TopicInput, type TopicRun, type TopicSpec, type TopicStatus } from "./model.ts";
+import { DEFAULT_TOPIC_ID, GATE_TOPIC_ID, TOPIC_TYPE, initialTopicName, type Topic, type TopicResource, type TopicInput, type TopicRun, type TopicSpec, type TopicStatus } from "./model.ts";
 import { outputView, type OutputDraft, type OutputView } from "../output/view.ts";
 import { OutputStore } from "../output/store.ts";
 import { outputWrite } from "../output.ts";
@@ -51,6 +53,7 @@ export class TopicStore {
   get(id: string): Topic | undefined { const r = this.resource(id); return r && this.project(r); }
   /** @spec The creating Channel supplies its address and first-input name before asynchronous routing; later attachment cannot replace either. */
   async ensure(id: string, address?: AddressTarget, name?: string): Promise<TopicResource> {
+    if (id === GATE_TOPIC_ID) return ensureGateTopic(this.client);
     if (id === DEFAULT_TOPIC_ID) return ensureDefaultTopic(this.client);
     const previous = this.resources.find<TopicSpec, TopicStatus>(TOPIC_TYPE, topicKey(id));
     if (previous?.metadata.deletionTimestamp) throw new Error("Topic is being deleted; retry after deletion completes");
@@ -185,6 +188,13 @@ export class TopicStore {
       // A direct reply identifies its sender; explicit receivers (including []) remain the caller's decision.
       if (receivers === undefined && reply.sender) receivers = [reply.sender];
       if (!target) throw new Error(`Reply Input has no address: ${options.respondToInputId}`);
+    }
+    if (initial.spec.gate) {
+      // @spec Gate and its Work reply to the persistent Gate Web address, independently of Me's notification default.
+      // @link docs/personal/gate.md
+      const gateTarget = new Addresses(this.resources.storage.home).ref(webAddress(initial.spec.id));
+      if (target && target.uid !== gateTarget.uid) throw new Error("Gate outputs must remain in Gate");
+      target = gateTarget;
     }
     // A repeated tool call keeps its admitted destination even if new immediate Inputs have arrived.
     if (!target && previous) {

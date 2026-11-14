@@ -15,7 +15,7 @@ export interface TopicListItem {
 }
 const field = (alias: string, path: string) => `json_extract(${alias}.data, '$.object.${path}')`;
 const activeTopic = (alias: string) => `${alias}.scope = 'personal' AND ${alias}.kind = 'aide.dev/Topic' AND ${field(alias, "apiVersion")} = '${TOPIC_TYPE.apiVersion}'
-  AND ${field(alias, "metadata.namespace")} = 'v1' AND ${field(alias, "metadata.deletionTimestamp")} IS NULL`;
+  AND ${field(alias, "metadata.namespace")} = 'v1' AND ${field(alias, "metadata.deletionTimestamp")} IS NULL AND coalesce(${field(alias, "spec.gate")}, 0) = 0`;
 const activeInput = `r.scope = 'personal' AND r.kind = 'aide.dev/Input' AND ${field("r", "apiVersion")} = '${INPUT_TYPE.apiVersion}' AND ${field("r", "metadata.namespace")} = 'v1'
   AND ${field("r", "metadata.deletionTimestamp")} IS NULL`;
 // Ordered resource indexes bound latest-activity lookup to the newest matching entry, not the whole history.

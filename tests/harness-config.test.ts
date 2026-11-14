@@ -47,7 +47,7 @@ test("Chief config validates model and package declarations without echoing valu
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-for (const harness of ["pi", "chief", "task", "routine"] as const)
+for (const harness of ["pi", "chief", "gate", "task", "routine"] as const)
 test(`${harness}: resolves nested package skills relative to config and rejects missing packages without installing`, async () => {
   const home = mkdtempSync(join(tmpdir(), "aide-harness-packages-"));
   const file = join(home, "config.yaml");
@@ -71,7 +71,7 @@ test(`${harness}: resolves nested package skills relative to config and rejects 
 });
 
 /** @case An interrupted sync leaves a dead holder; the next invocation recovers without a manual retry. */
-for (const harness of ["pi", "chief", "task", "routine"] as const)
+for (const harness of ["pi", "chief", "gate", "task", "routine"] as const)
 test(`${harness}: sync CLI recovers a stale service lock, excludes a live holder and accepts empty packages`, async () => {
   const home = mkdtempSync(join(tmpdir(), "aide-harness-cli-"));
   writeFileSync(join(home, "config.yaml"), JSON.stringify({ harnesses: { [harness]: { packages: [] } } }));
@@ -97,7 +97,7 @@ test(`${harness}: sync CLI recovers a stale service lock, excludes a live holder
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-for (const harness of ["pi", "chief", "task", "routine"] as const)
+for (const harness of ["pi", "chief", "gate", "task", "routine"] as const)
 test(`${harness}: Git packages install explicitly and a changed ref cannot silently load the cached checkout`, async () => {
   const home = mkdtempSync(join(tmpdir(), "aide-harness-git-"));
   const repo = join(home, "origin");
@@ -226,7 +226,7 @@ test("defaultHarness is an Aide root setting with a Pi default and strict regist
       writeFileSync(file, JSON.stringify({ defaultHarness: harness }));
       expect(loadConfig(file).defaultHarness).toBe(harness);
     }
-    for (const value of [null, "", "chief", "route", "task", "routine", "unknown", "cx", 42]) {
+    for (const value of [null, "", "gate", "chief", "route", "task", "routine", "unknown", "cx", 42]) {
       writeFileSync(file, JSON.stringify({ defaultHarness: value }));
       expect(() => loadConfig(file)).toThrow("defaultHarness");
     }

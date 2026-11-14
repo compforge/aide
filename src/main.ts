@@ -35,9 +35,9 @@ await withAsyncFileLock(path, async () => {
   const observation = new PiObservations(resolve(home, "observations/pi"), ObservationConfigSchema.parse(config.observation ?? {}), log);
   log.info({ observation: ObservationConfigSchema.parse(config.observation ?? {}) }, "Resolved Pi observation policy");
   const observed = (config: PiConfig) => ({ ...config, observation });
-  const harnesses = { ...resolved, chief: observed(resolved.chief), route: observed(resolved.route), weave: observed(resolved.weave),
+  const harnesses = { ...resolved, gate: observed(resolved.gate), chief: observed(resolved.chief), route: observed(resolved.route), weave: observed(resolved.weave),
     task: observed(resolved.task), routine: observed(resolved.routine), pi: resolved.pi && observed(resolved.pi) };
-  const sessionConfigs: Record<string, PiConfig | undefined> = { chief: harnesses.chief, route: harnesses.route, weave: harnesses.weave,
+  const sessionConfigs: Record<string, PiConfig | undefined> = { gate: harnesses.gate, chief: harnesses.chief, route: harnesses.route, weave: harnesses.weave,
     task: harnesses.task, routine: harnesses.routine, pi: harnesses.pi };
   const connectors = await Connectors.load(config.connectors, { environment, registration: environment.AIDE_CONNECTOR_REGISTRATION ?? options.connectorRegistration, baseDir: dirname(file), log: (message, attributes) => log.info(attributes, message) });
   try {
@@ -51,7 +51,8 @@ await withAsyncFileLock(path, async () => {
       },
       cwd, timezone, defaultHarnessConfig: harnesses.defaultHarnessConfig,
       createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, rootDir: home,
-        targetConfig: target.harness === "weave" ? { harness: "weave" } : target.harness === "routine" ? { harness: "routine" } : target.harness === "task" ? { harness: "task" } : target.harness === "route" ? { harness: "route" } : target.harness === "chief" ? { harness: "chief" } : harnesses.defaultHarnessOptions,
+        targetConfig: target.harness === "gate" ? { harness: "gate" } : target.harness === "weave" ? { harness: "weave" } : target.harness === "routine" ? { harness: "routine" } : target.harness === "task" ? { harness: "task" } : target.harness === "route" ? { harness: "route" } : target.harness === "chief" ? { harness: "chief" } : harnesses.defaultHarnessOptions,
+        ...(target.harness === "gate" ? { gateSession: aide.gateSession(ports.scope, harnesses.gate) } : {}),
         ...(target.harness === "weave" ? { weaveSession: aide.weaveSession(ports.scope, harnesses.weave) } : {}),
         ...(target.harness === "route" ? { routeSession: aide.routeSession(ports.scope, harnesses.route) } : {}),
         ...(target.harness === "pi" ? { piConfig: harnesses.pi } : {}),

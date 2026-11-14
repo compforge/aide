@@ -35,6 +35,7 @@ export interface Agent {
   notify?: boolean;
   complete?: boolean;
   route?(prompt: string): Promise<string>;
+  gate?(prompt: string): Promise<string>;
   chief?(prompt: string): Promise<string>;
   execute(work: Work & { inputs: Array<{ inputId: string; text: string; note?: string }> }): Promise<Outcome | string>;
 }
@@ -76,6 +77,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const data = { inputs: [{ id: inputId }], topics: resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE).filter(c => !c.spec.parentRef && !c.metadata.deletionTimestamp).map(c => ({ ...(c.spec as object), uid: c.metadata.uid })) };
             return agent.route?.(JSON.stringify(data)) ?? JSON.stringify({ decisions: [{ inputId, topicUids: [], reason: "No match" }] });
           })()
+          : target.harness === "gate" ? agent.gate?.(prompt) ?? "Gate reply"
           : target.harness === "chief"
           ? agent.chief?.(prompt) ?? "你好"
           : ["task", "routine"].includes(target.harness) ? (() => {
@@ -107,7 +109,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
               await deliver(context, new InputStore(home).get(decision.inputId)!, destinations, decision.reason);
             }
           }
-          if (target.harness === "chief" && topicId) {
+          if (["chief", "gate"].includes(target.harness) && topicId) {
             const all = await resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE);
             const c = all.find(c => c.spec.id === topicId)!;
             const run = c.status.execution;

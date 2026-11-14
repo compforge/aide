@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gate · Aide</title>
+<link rel="icon" href="/favicon.ico" sizes="32x32" type="image/vnd.microsoft.icon">
+<link rel="stylesheet" href="/gate.css">
+<header><h1 class="brand"><img src="/icon.png" width="32" height="32" alt="">Aide</h1><span class="muted">把事情交给我，持续为你推进。</span><nav class="main-tabs" aria-label="主导航"><a href="/gate" aria-current="page">Gate</a><a href="/inputs">Inputs</a><a href="/">Topics</a><a href="/people">Persons</a><a href="/addresses">Addresses</a><a href="/outputs">Outputs</a></nav><span id="connection" class="muted" aria-live="polite"></span></header>
+<main class="gate-main">
+  <section class="topic" aria-label="与 Aide 对话">
+    <div class="topic-header"><h2>Gate</h2><span class="muted">提问、综合信息，或交代一件事。</span></div>
+    <details id="evidence" hidden><summary>引用的 Note</summary><div id="evidence-body" class="markdown"></div></details>
+    <div id="topic-tabs" class="detail-tabs" role="tablist" aria-label="Gate 内容">
+      <button id="tab-dialogue" type="button" role="tab" aria-controls="panel-dialogue" aria-selected="true">对话</button>
+      <button id="tab-tasks" type="button" role="tab" aria-controls="panel-tasks" aria-selected="false" tabindex="-1">事项 <span id="task-count">0</span></button>
+      <button id="tab-routines" type="button" role="tab" aria-controls="panel-routines" aria-selected="false" tabindex="-1">安排 <span id="routine-count">0</span></button>
+    </div>
+    <div id="poll-notice" role="status"></div>
+    <div id="approvals" aria-label="等待你处理的执行请求" aria-live="polite"></div>
+    <p id="work-notice" role="status" class="muted"></p>
+    <div id="panel-dialogue" class="topic-panel dialogue-panel" role="tabpanel" aria-labelledby="tab-dialogue">
+      <div id="messages" tabindex="0" role="log" aria-label="消息记录"><div class="history-loading"><span id="history-notice" class="muted" role="status"></span><button id="history-retry" type="button" hidden>重试加载</button></div><div id="history"></div><section id="activity" aria-label="Aide 执行进展" hidden></section></div>
+      <form id="composer"><textarea id="input" aria-label="向 Aide 提问或交代事情" placeholder="向 Aide 提问或交代事情…" maxlength="32000" required disabled></textarea><button id="send" type="submit" disabled>发送</button></form>
+      <div id="notice" role="status">正在连接 Gate…</div>
+    </div>
+    <section id="panel-tasks" class="topic-panel" role="tabpanel" aria-labelledby="tab-tasks" tabindex="0" hidden><div id="tasks"></div></section>
+    <section id="panel-routines" class="topic-panel" role="tabpanel" aria-labelledby="tab-routines" tabindex="0" hidden><div id="routines"></div></section>
+  </section>
+</main>
+<script type="module" src="/gate.js"></script>
+</html>

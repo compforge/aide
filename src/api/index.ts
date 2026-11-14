@@ -16,7 +16,8 @@ import { validInputResult } from "../host/approval/answer.ts";
 import { IncomingSchema, webTopicLocator } from "../channel/message.ts";
 import { browseTopics } from "../../plugins/personal/topic/browse.ts";
 import { browseTopicChildren } from "../../plugins/personal/topic/children.ts";
-import { DEFAULT_TOPIC_ID } from "../../plugins/personal/topic/model.ts";
+import { NOTE_TYPE, noteView, type NoteSpec, type NoteStatus } from "../../plugins/personal/note/model.ts";
+import { GATE_TOPIC_ID, DEFAULT_TOPIC_ID } from "../../plugins/personal/topic/model.ts";
 import { browsePersons } from "../../plugins/personal/person/browse.ts";
 import { topicSummary, topicRecent, browseTopicNotes } from "./topic.ts";
 import { topicView } from "../channel/view.ts";
@@ -141,6 +142,24 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         }
         json(response, 200, { ...settings.snapshot(), defaultAddress: aide.defaultAddress() });
         return;
+      }
+      if (request.method === "GET" && url.pathname === "/gate/state") {
+        await aide.start();
+        const gate = await aide.topics.ensure(GATE_TOPIC_ID);
+        json(response, 200, { topicId: gate.spec.id, uid: gate.metadata.uid }); return;
+      }
+      if (request.method === "GET" && url.pathname === "/gate/note") {
+        const { id } = z.object({ id: z.string().min(1).max(250) }).strict().parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        const resources = aide.topics.resources;
+        const note = resources.find<NoteSpec, NoteStatus>(NOTE_TYPE, id)
+          ?? resources.page<NoteSpec, NoteStatus>(NOTE_TYPE, { limit: 1, matchIndex: { name: "uid", value: id } }).items[0];
+        if (!note || note.metadata.deletionTimestamp) { json(response, 404, { error: "Note 已不存在。" }); return; }
+        json(response, 200, noteView(note)); return;
+      }
+      if (request.method === "POST" && url.pathname === "/gate/messages") {
+        const input = IncomingSchema.pick({ id: true, text: true }).strict().parse(await body(request));
+        json(response, 200, await receive({ ...input, topicId: GATE_TOPIC_ID, source: webAddress(GATE_TOPIC_ID) })); return;
       }
       if (request.method === "GET" && url.pathname === "/health") {
         const health = aide.health();
@@ -398,6 +417,7 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
           busy: "主题还有待处理输入、执行或正在整理，请处理完成后再删除。",
           work: "主题还有事项或安排，请先删除这些工作。",
           default: "默认主题不能删除。",
+          gate: "Gate 入口不能删除。",
           children: "主题还有子主题，请先处理子主题。",
           unabsorbed: "父主题尚未吸收该主题的最新理解，暂时不能删除。",
         };

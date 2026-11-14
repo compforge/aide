@@ -71,6 +71,7 @@ export class Aide {
   ]);
   inputDefinition(origin: Pick<InputSpec, "origin" | "originId">) {
     if (["aide:review", "aide:triage", "aide:organize"].includes(origin.origin)) return { id: origin.origin, label: ({ "aide:review": "回顾", "aide:triage": "分理", "aide:organize": "组织" } as Record<string, string>)[origin.origin]!, icon: iconFor("harness:chief") };
+    if (origin.origin === "chief" && origin.originId === "personal.gate") return { id: origin.originId, label: "Gate 请求", icon: iconFor("harness:chief") };
     if (origin.origin === "chief" && origin.originId === "personal.chief") return { id: origin.originId, label: "Chief 请求", icon: iconFor("harness:chief") };
     const definition = this.inputDefinitions.get(`${origin.origin}:${origin.originId}`);
     if (!definition) throw new Error(`Unknown input definition: ${origin.origin}:${origin.originId}`);
@@ -164,7 +165,7 @@ export class Aide {
       cwd: options.cwd,
       instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ weave: parsePersonalConfig(config?.plugins.personal).weave, route: parsePersonalConfig(config?.plugins.personal).route, topic: parsePersonalConfig(config?.plugins.personal).topic, task: parsePersonalConfig(config?.plugins.personal).task, routine: parsePersonalConfig(config?.plugins.personal).routine, watches: this.watches,
         forgeConnectionRevisions, repositorySources: sources.repositories, pullRequestSources: sources.pullRequests, environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
-      harness: { harnesses: [{ ...this.defaultHarnessConfig }, { id: "weave", harness: "weave" }, { id: ROUTE_HARNESS, harness: "route" }, { id: "chief", harness: "chief" }, { id: "task", harness: "task" }, { id: "routine", harness: "routine" }],
+      harness: { harnesses: [{ ...this.defaultHarnessConfig }, { id: "weave", harness: "weave" }, { id: ROUTE_HARNESS, harness: "route" }, { id: "chief", harness: "chief" }, { id: "gate", harness: "gate" }, { id: "task", harness: "task" }, { id: "routine", harness: "routine" }],
         defaultHarness: this.defaultHarnessConfig.id, createAdapter: options.createAdapter },
       plugins: { maxTotalConcurrency: config?.reconcile?.maxTotalConcurrency, connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.topics.changed(change); this.notify(); },
@@ -257,6 +258,8 @@ export class Aide {
   routineSession(scope: Parameters<Personal["routineSession"]>[0], config: Parameters<Personal["routineSession"]>[1]) { return this.personal.routineSession(scope, config); }
 
   taskSession(scope: Parameters<Personal["taskSession"]>[0], config: Parameters<Personal["taskSession"]>[1]) { return this.personal.taskSession(scope, config); }
+
+  gateSession(scope: Parameters<Personal["gateSession"]>[0], config: Parameters<Personal["gateSession"]>[1]) { return this.personal.gateSession(scope, config); }
 
   chiefSession(scope: Parameters<Personal["chiefSession"]>[0], config: Parameters<Personal["chiefSession"]>[1]) {
     return this.personal.chiefSession(scope, config);
