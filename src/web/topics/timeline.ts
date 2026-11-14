@@ -1,284 +1,119 @@
 import { preserveTranscriptPosition } from './scroll.ts';
-import { byId as $, element, find } from '../shared/dom.ts';
+import { byId as $, element } from '../shared/dom.ts';
 import { updateMarkdown } from '../shared/markdown.ts';
 import { request, errorMessage } from '../shared/http.ts';
-import { historyBlocks, replyText, processPreview, replyLabels, toolLabels } from '../../channel/reply-layout.ts';
+import { createProcessPane, executionLabel, executionDuration } from './process.ts';
 import type { TopicBlock, TopicView } from '../../channel/view.ts';
-type LiveActivity = NonNullable<TopicView['meta']['activity']> & {
-  harnesses: TopicBlock[]; answers: TopicBlock[];
-  blocks: (TopicBlock & { kind: string; text: string })[];
-};
-const outputText = (block: TopicBlock) => block.label ? `**${block.label}**\n\n${block.content}` : block.content;
-const inputLabels: Record<string, string> = { queued: '待处理', running: '处理中', done: '已处理', quiet: '已查看 · 保持安静', failed: '处理失败' };
 
-export function createTimeline(topicId: string | null, signal: AbortSignal, expandLatest = false) {
-  let lastMessages = '';
-  const messageNodes = new Map<string, { version: string; node: HTMLDetailsElement }>();
-  /**
-   * @spec Only an expanded message fetches and renders its body; unchanged identities reuse their mounted detail.
-   * @spec Topic changes abort detail requests; replaced rows reject late responses and offer retry on failure.
-   * @link docs/channel/web.md#实时进展与历史
-   */
-  function messageRow(block: TopicBlock, defaultOpen: boolean) {
-    const identity = block.lazy!;
-    const version = JSON.stringify([identity, block.status, block.content]);
-    const saved = messageNodes.get(block.id);
-    if (saved?.version === version) return saved.node;
-    const node = replyRegion('message-detail:' + block.id, '', saved?.node.open ?? defaultOpen);
-    node.className = 'message message-list-item'; node.dataset.scrollKey = block.id;
-    const heading = find(node, 'summary');
-    const label = block.type === 'input' ? block.label || '输入' : 'Aide';
-    const statuses: Record<string, string> = { ...inputLabels, pending: '待投递', sending: '投递中', delivered: '已送达', uncertain: '结果待确认', cancelled: '已取消' };
-    heading.append(element('code', block.id.replace(/^(input|message):/, ''), 'message-id'),
-      element('span', label + ' · ' + (statuses[block.status ?? ''] || block.status || ''), 'muted'),
-      element('time', new Date(block.at!).toLocaleString(), 'muted'),
-      element('span', block.content || '点击消息 ID 查看正文与过程', 'message-list-preview'));
-    const body = element('div', undefined, 'message-detail'); node.append(body);
-    const entry = { version, node }; messageNodes.set(block.id, entry);
-    let loading = false, loaded = false;
-    async function load() {
-      if (!node.open || loading || loaded || signal.aborted || !topicId) return;
-      loading = true; body.replaceChildren(element('p', '加载消息详情…', 'muted'));
-      try {
-        const view = await request<TopicView>('/topics/message?' + new URLSearchParams({ topicId,
-          topicUid: identity.topicUid, id: block.id, uid: identity.uid }), { signal });
-        if (signal.aborted || messageNodes.get(block.id) !== entry) return;
-        const render = () => {
-          renderMessages(view.blocks, null, body);
-          for (const detail of body.querySelectorAll<HTMLDetailsElement>('.reply-envelope, .reply-part[data-kind="answer"]')) {
-            detail.open = true; detail.dataset.state = 'full';
-          }
-        };
-        // Auto-opened replies grow after the stream update; keep following only readers already at the bottom.
-        if (expandLatest) preserveTranscriptPosition($('messages'), render);
-        else render();
-        loaded = true;
-      } catch (error) {
-        if (signal.aborted || messageNodes.get(block.id) !== entry) return;
-        const retry = element('button', '重试'); retry.type = 'button';
-        retry.addEventListener('click', () => void load());
-        body.replaceChildren(element('p', errorMessage(error), 'error'), retry);
-      } finally { loading = false; }
+/**
+ * @spec Main conversation contains Input/Output bodies; process detail is read only in the shared right pane.
+ * @spec Visible history loads ten identities at a time and at most three bodies concurrently; completed bodies are cached by resource version.
+ * @link docs/channel/web.md#实时进展与历史
+ */
+export function createTimeline(topicId: string | null, signal: AbortSignal) {
+  const pane = createProcessPane(topicId, signal);
+  const rows = new Map<string, { version: string; node: HTMLElement }>();
+  const queue: (() => Promise<void>)[] = [];
+  let requests = 0, topicUid = '', linked = false;
+  function pump() {
+    while (requests < 3 && queue.length && !signal.aborted) {
+      requests++; void queue.shift()!().finally(() => { requests--; pump(); });
     }
-    node.addEventListener('toggle', () => { if (node.open) void load(); });
-    if (node.open) void load();
-    return node;
   }
-  function identityBadge(drawing: string | undefined, label: string | undefined) {
-    const badge = element('span', undefined, 'identity-badge'); badge.title = label ?? '';
-    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    icon.classList.add('identity-icon'); icon.setAttribute('aria-hidden', 'true');
-    for (const [name, value] of Object.entries({ viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })) icon.setAttribute(name, value);
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', drawing ?? ''); icon.append(path);
-    badge.append(icon, element('span', label)); return badge;
+  signal.addEventListener('abort', () => { queue.length = 0; }, { once: true });
+  function processButton(id: string, text: string, phase?: string) {
+    const state = phase && ['running', 'queued', 'completed', 'failed', 'cancelled', 'uncertain'].includes(phase) ? executionLabel(phase) + ' · ' : '';
+    const button = element('button', state + '查看过程 →', 'process-link'); button.type = 'button';
+    button.setAttribute('aria-controls', 'process-pane');
+    button.addEventListener('click', () => pane.open(id, topicUid, text, button)); return button;
   }
-  function replyHeading(node: HTMLElement, title: string, executions: TopicBlock[]) {
-    const heading = find(node, 'summary'); heading.replaceChildren(element('span', title));
-    const harnesses = new Map(executions.filter((block) => block.harness).map((block) => [block.harness, block]));
-    for (const block of harnesses.values()) heading.append(identityBadge(block.icon, block.label));
-  }
-  function receivedInput(block: TopicBlock) {
-    const source = block.origin === 'source' || ['aide:review', 'aide:triage', 'aide:organize'].includes(block.origin ?? '');
-    const originLabel = ['aide:review', 'aide:triage', 'aide:organize'].includes(block.origin ?? '') ? '系统' : source ? 'Source' : 'Channel';
-    const summary = block.type === 'summary';
-    const node = element('article', undefined, 'message received-input ' + (source || summary ? 'source' : 'user'));
+  function message(block: TopicBlock) {
+    const node = element('article', undefined, 'message ' + (block.type === 'input' ? block.role === 'user' ? 'user' : 'source' : 'aide'));
     node.dataset.scrollKey = block.id;
-    if (block.inputId) node.dataset.inputId = block.inputId;
-    const header = element('div', undefined, 'input-heading');
-    header.append(identityBadge(block.icon, summary ? block.label : originLabel + (block.label ? ' · ' + block.label : '') + (block.relation === 'sent' ? ' · 你' : '')));
-    if (block.sender?.name) {
-      const sender = element('a', '人物资料');
-      sender.href = '/people?' + new URLSearchParams({ person: block.sender.name, ...(block.sender.uid ? { uid: block.sender.uid } : {}) });
-      header.append(sender);
-    }
-    if (!summary) header.append(element('time', new Date(block.at!).toLocaleString(), 'input-time'));
-    if (block.inputId) {
-      const processing = element('a', '处理 Timeline'); processing.href = '/inputs?' + new URLSearchParams({ input: block.inputId }); header.append(processing);
-    }
-    if (source) header.append(element('span', inputLabels[block.status ?? ''] || block.status, 'input-status'));
-    const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, block.content);
+    const header = element('div', undefined, 'message-heading');
+    header.append(element('strong', block.type === 'input' ? block.role === 'user' ? '你' : block.label || '观察' : 'Aide'));
+    if (block.at) header.append(element('time', new Date(block.at).toLocaleString(), 'muted'));
+    if (block.group_id && (block.type === 'message' || block.group_id !== block.inputId)) header.append(processButton(block.group_id, block.content, block.type === 'message' && !block.lazy ? block.status : undefined));
+    const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, block.content || (block.generation === 'open' ? '正在准备回答…' : '暂无正文。'));
     node.append(header, body);
-    if (block.detail) {
-      const details = replyRegion('input:' + block.inputId + ':evidence', '输入详情', false);
-      details.className = 'input-evidence reply-region';
-      if (block.detail) details.append(element('pre', block.detail));
-      node.append(details);
+    if (block.generation === 'failed') node.append(element('p', '这次回答已中断，请核对后重新交办。', 'error'));
+    if (block.type === 'message' && block.label) node.append(element('p', block.label, 'delivery-status'));
+    const details = element('details', undefined, 'message-metadata'); details.append(element('summary', '消息详情'));
+    details.append(element('code', block.id));
+    if (block.detail) details.append(element('p', block.detail));
+    if (block.origin) details.append(element('p', [block.origin, block.label].filter(Boolean).join(' · ')));
+    if (block.sender) {
+      const sender = element('a', '人物资料'); sender.href = '/people?' + new URLSearchParams({ person: block.sender.name, ...(block.sender.uid ? { uid: block.sender.uid } : {}) }); details.append(sender);
+    }
+    if (block.inputId) {
+      const link = element('a', '输入处理记录'); link.href = '/inputs?' + new URLSearchParams({ input: block.inputId }); details.append(link);
+    }
+    node.append(details); return node;
+  }
+  function row(block: TopicBlock) {
+    const version = JSON.stringify(block), saved = rows.get(block.id);
+    if (saved?.version === version) return saved.node;
+    const node = message(block), entry = { version, node }; rows.set(block.id, entry);
+    if (block.lazy && topicId) {
+      const identity = block.lazy;
+      node.classList.add('loading-message');
+      let failure: HTMLElement | undefined;
+      async function load() {
+        if (signal.aborted || rows.get(block.id) !== entry) return;
+        failure?.remove();
+        try {
+          const view = await request<TopicView>('/topics/message?' + new URLSearchParams({ topicId: topicId!, topicUid: identity.topicUid, id: block.id, uid: identity.uid }), { signal });
+          if (signal.aborted || rows.get(block.id) !== entry) return;
+          const full = view.blocks.find(item => item.id === block.id);
+          if (!full) throw new Error('消息已回收。');
+          preserveTranscriptPosition($('messages'), () => {
+            const rendered = message(full); node.className = rendered.className; node.replaceChildren(...rendered.childNodes);
+          });
+        } catch (error) {
+          if (signal.aborted || rows.get(block.id) !== entry) return;
+          const retry = element('button', '重试正文'); retry.type = 'button';
+          retry.addEventListener('click', () => { retry.remove(); queue.push(load); pump(); }, { once: true });
+          failure = element('div'); failure.append(element('p', errorMessage(error), 'error'), retry); node.append(failure);
+        }
+      }
+      queue.push(load);
     }
     return node;
   }
-  const regionChoices = new Map<string, boolean>();
-  function replyRegion(id: string, title: string, defaultOpen: boolean) {
-    const node = element('details', undefined, 'reply-region');
-    node.dataset.blockId = id; node.open = regionChoices.get(id) ?? defaultOpen;
-    const summary = element('summary', title);
-    summary.addEventListener('click', () => {
-      regionChoices.set(id, !node.open);
-      if (node.dataset.phase) node.dataset.state = !node.open ? 'full' : isLive(node.dataset.phase) ? 'live' : 'compact';
-      if (node.dataset.kind === 'answer' && isLive(node.dataset.phase)) requestAnimationFrame(() => {
-        const preview = find(node, '.reply-preview'); preview.scrollTop = preview.scrollHeight;
-      });
-    });
-    node.append(summary); return node;
-  }
-  const isLive = (phase: string | undefined) => phase === 'running' || phase === 'queued';
-  /** @spec Execution phase and reader expansion are independent; streaming and completion preserve explicit choices. */
-  function replyPart(id: string, title: string, phase: string, kind: string) {
-    const node = replyRegion(id, '', kind === 'answer' && phase === 'failed');
-    node.dataset.kind = kind; node.dataset.title = title;
-    const summary = find(node, 'summary');
-    summary.append(element('span', title, 'reply-part-title'), element('span', '', 'reply-toggle'), element('div', '', 'reply-preview'));
-    node.classList.add('reply-part');
-    updatePart(node, phase, []);
-    return node;
-  }
-  function updatePart(node: HTMLDetailsElement, phase: string, lines: string[]) {
-    node.dataset.phase = phase;
-    node.dataset.state = node.open ? 'full' : isLive(phase) ? 'live' : 'compact';
-    const preview = find(node, '.reply-preview');
-    const signature = JSON.stringify(lines);
-    if (preview.dataset.signature !== signature) {
-      preview.dataset.signature = signature;
-      preview.replaceChildren(...lines.map((line) => element('span', line, 'reply-preview-line')));
-    }
-    find(node, '.reply-part-title').textContent = node.dataset.title + ' · ' + (replyLabels[phase] || phase);
-    if (isLive(phase) && node.dataset.kind === 'answer') preview.scrollTop = preview.scrollHeight;
-  }
-  function updateAnswer(node: HTMLDetailsElement, phase: string, answer: string) {
-    if (!regionChoices.has(node.dataset.blockId!)) node.open = phase === 'failed';
-    updatePart(node, phase, [answer.trim() ? replyText(answer) : phase === 'failed' ? '本次处理已中断，请核对后重新交办。' : phase === 'done' ? '回复已完成' : '等待生成回答…']);
-    updateMarkdown(find(node, '.message-body'), answer || (phase === 'failed' ? '本次处理已中断，请核对后重新交办。' : '等待生成回答…'));
-  }
-  function updateProcess(node: HTMLDetailsElement, phase: string, blocks: { type: string; content: string; status?: string }[]) {
-    const preview = processPreview(phase, blocks);
-    updatePart(node, phase, isLive(phase) ? ['思考：' + preview.thought, '工具：' + preview.tool] : [preview.summary]);
-  }
-  function appendProgress(parent: HTMLElement, blocks: TopicBlock[], expanded: Map<string | undefined, boolean>) {
-    for (const block of blocks) {
-      const node = progressNode(block.type); node.dataset.blockId = block.id;
-      if (node instanceof HTMLDetailsElement) node.open = expanded.get(block.id) ?? true;
-      updateProgress(node, block.type, block.content, block.status, block.detail);
-      parent.append(node);
-    }
-  }
-  /** @spec Each Input renders one collapsible reply with independently collapsible process and answer regions; final text appears once. */
-  function renderMessages(blocks: TopicBlock[], activity: TopicView["meta"]["activity"], target = $('history')) {
-    const history = historyBlocks(blocks, activity);
-    const signature = JSON.stringify(history);
-    if (target.id === 'history') {
-      if (signature === lastMessages) return;
-      lastMessages = signature;
-    }
-    const expanded = new Map([...target.querySelectorAll('details')].map((node) => [node.dataset.blockId, node.open]));
-    target.replaceChildren();
-    if (!history.length) {
-      const empty = element('div', undefined, 'empty');
-      empty.append(element('h2', '从一件具体的事开始'), element('p', '例如：总结工作目录里的 README；每天上午检查项目进展；关注某件事，发生变化时告诉我。'));
-      target.append(empty);
-    }
-    const rendered = new Set();
-    const roots = history.filter((block) => !block.parent_id);
-    const latest = new Set(expandLatest ? roots.slice(-2).map(b => b.id) : []);
-    for (const block of roots) {
-      if (block.lazy) { target.append(messageRow(block, latest.has(block.id))); continue; }
-      if (block.type === 'input' || block.type === 'summary') {
-        target.append(receivedInput(block)); continue;
-      }
-      const groupId = block.group_id || block.id;
-      if (rendered.has(groupId)) continue;
-      rendered.add(groupId);
-      const group = block.group_id ? roots.filter((item) => item.group_id === block.group_id) : [block];
-      const executions = new Set(group.filter((item) => item.type === 'execution').map((item) => item.id));
-      const children = history.filter((item) => executions.has(item.parent_id ?? ''));
-      const answers = group.filter((item) => item.type === 'message' && item.role === 'aide');
-      const answer = answers.map(outputText).join('\n\n');
-      const process = children.filter((item) => item.type !== 'text' || !answers.some(answer => answer.content === item.content));
-      const failed = group.some((item) => item.status === 'failed' || item.status === 'interrupted');
-      const phase = failed ? 'failed' : 'done';
-      const title = 'Aide · ' + replyLabels[phase];
-      const node = replyRegion('input:' + groupId + ':whole', title, true);
-      node.className = 'message aide assistant-reply reply-envelope'; node.dataset.inputId = groupId; node.dataset.scrollKey = 'reply:' + groupId;
-      replyHeading(node, title, group.filter((item) => item.type === 'execution'));
-      if (executions.size || block.group_id || process.length) {
-        const thought = replyPart('input:' + groupId + ':think', '过程', phase, 'process');
-        updateProcess(thought, phase, process);
-        appendProgress(thought, process, expanded);
-        if (!process.length) thought.append(element('p', '没有可展示的思考或工具记录。', 'muted'));
-        node.append(thought);
-      }
-      if (answer) {
-        const reply = replyPart('input:' + groupId + ':answer', '回答', phase, 'answer');
-        const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, answer);
-        reply.append(body); updateAnswer(reply, phase, answer); node.append(reply);
-      }
-      target.append(node);
-    }
-  }
-  let activityId: string | undefined;
-  const activityNodes = new Map<string, HTMLElement>();
-  function progressNode(kind: string) {
-    const node = element(kind === 'text' ? 'div' : 'details', undefined, 'activity-block ' + kind);
-    if (node instanceof HTMLDetailsElement) { node.open = true; node.append(element('summary')); }
-    node.append(element('div', '', 'activity-content')); return node;
-  }
-  function updateProgress(node: HTMLElement, kind: string, text: string, status?: string, detail?: string) {
-    if (kind === 'thought') find(node, 'summary').textContent = '思考过程';
-    if (kind === 'tool') find(node, 'summary').textContent = text + ' · ' + (toolLabels[status ?? ''] || status || '状态未知');
-    const content = find(node, '.activity-content');
-    const value = kind === 'tool' ? detail || '' : text;
-    if (kind === 'tool') {
-      if (content.textContent !== value) content.textContent = value;
-    } else {
-      content.classList.add('markdown'); updateMarkdown(content, value);
-    }
-  }
-  function renderActivity(activity: LiveActivity | null) {
-    const area = $('activity');
-    area.hidden = !activity;
-    area.dataset.phase = activity?.phase ?? '';
-    if (!activity) { area.replaceChildren(); activityNodes.clear(); activityId = undefined; return; }
-    if (activity.id !== activityId) {
-      activityId = activity.id; activityNodes.clear(); area.replaceChildren();
-      const envelope = replyRegion('input:' + activity.id + ':whole', 'Aide · 正在处理', true); envelope.className = 'reply-envelope'; envelope.dataset.scrollKey = 'activity:' + activity.id;
-      const heading = find(envelope, 'summary'); heading.id = 'activity-heading'; heading.className = 'activity-heading'; heading.setAttribute('role', 'status');
-      const thought = replyPart('input:' + activity.id + ':think', '过程', activity.phase, 'process'); thought.id = 'activity-thought';
-      const reply = replyPart('input:' + activity.id + ':answer', '回答', activity.phase, 'answer');
-      const body = element('div', undefined, 'markdown message-body'); body.id = 'activity-answer'; reply.append(body);
-      envelope.append(thought, reply); area.append(envelope);
-    }
-    const last = activity.blocks.at(-1);
-    const label = activity.phase === 'failed' ? '处理已中断' : activity.phase === 'queued' ? '正在排队'
-      : last?.kind === 'tool' && last.status === 'in_progress' ? '正在调用工具'
-      : last?.kind === 'thought' ? '正在思考' : last?.kind === 'text' ? '正在回复' : '正在处理';
-    replyHeading(find(area, '.reply-envelope'), 'Aide · ' + label + (activity.phase === 'failed' ? '' : '…') + (activity.queued ? ` · ${activity.queued} 条待处理` : ''), activity.harnesses);
-    const answer = activity.answers.map(outputText).join('\n\n');
-    let failure = area.querySelector<HTMLElement>('.activity-error');
-    if (activity.error && !failure) { failure = element('p', undefined, 'error activity-error'); find(area, '.reply-envelope').append(failure); }
-    if (failure) { failure.textContent = activity.error ?? ''; failure.hidden = !activity.error; }
-    updateAnswer($('activity-answer').parentElement as HTMLDetailsElement, activity.phase, answer);
-    const process = activity.blocks.filter((block) => block.kind !== 'text' ||
-      !activity.answers.some(answer => answer.content === block.text));
-    updateProcess($<HTMLDetailsElement>('activity-thought'), activity.phase, process.map((block) => ({ type: block.kind, content: block.text, status: block.status })));
-    const ids = new Set(process.map((block) => block.id));
-    for (const [id, node] of activityNodes) if (!ids.has(id)) { node.remove(); activityNodes.delete(id); }
-    for (const block of process) {
-      let node = activityNodes.get(block.id);
-      if (!node) { node = progressNode(block.kind); activityNodes.set(block.id, node); $('activity-thought').append(node); }
-      updateProgress(node, block.kind, block.text, block.status, block.detail);
-    }
-  }
-
   function render(view: TopicView, preservePosition = false) {
-    preserveTranscriptPosition($("messages"), () => {
-      renderMessages(view.blocks, view.meta.activity);
-      const activity = view.meta.activity;
-      const liveIds = new Set(view.blocks.filter((block) => block.type === 'execution' &&
-        (block.status === 'running' || (activity && block.group_id === activity.id))).map((block) => block.id));
-      renderActivity(activity && { ...activity,
-        harnesses: view.blocks.filter((block) => block.type === 'execution' && liveIds.has(block.id)),
-        answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === activity.id),
-        blocks: view.blocks.filter((block) => liveIds.has(block.parent_id ?? ''))
-          .map((block) => ({ ...block, kind: block.type, text: block.content })) });
+    topicUid = view.meta.topic_uid ?? view.blocks.find(b => b.lazy)?.lazy?.topicUid ?? topicUid;
+    preserveTranscriptPosition($('messages'), () => {
+      const messages = view.blocks.filter(b => b.type === 'input' || b.type === 'message' || b.type === 'summary');
+      $('history').replaceChildren(...messages.map(row));
+      if (!messages.length) $('history').append(element('p', '从一件具体的事开始，向 Aide 提问或交代事情。', 'empty'));
+      const activity = view.meta.activity, area = $('activity');
+      const executions = view.blocks.filter(b => b.type === 'execution');
+      area.hidden = !activity;
+      if (activity) {
+        const active = executions.filter(b => b.status === 'running' || b.status === 'queued');
+        const header = element('div', undefined, 'activity-heading');
+        header.append(element('span', 'Aide · ' + executionLabel(activity.phase) + (activity.queued ? ` · ${activity.queued} 条待处理` : '')));
+        for (const run of active) if (run.group_id) header.append(processButton(run.group_id, '当前执行'));
+        if (!active.length && !activity.id.startsWith('queued:')) header.append(processButton(activity.id, '当前执行'));
+        area.replaceChildren(header);
+        if (activity.error) area.append(element('p', activity.error, 'error'));
+        area.dataset.phase = activity.phase;
+      }
+      // A completed execution without an Output still has a visible status and process entry.
+      for (const run of executions) if (run.status !== 'running' && run.status !== 'queued' && !messages.some(b => b.type === 'message' && b.group_id === run.group_id)) {
+        const status = element('div', undefined, 'execution-status');
+        status.append(element('span', `Aide · ${executionLabel(run.status)}${executionDuration(run)}`));
+        if (run.group_id) status.append(processButton(run.group_id, '执行记录'));
+        if (run.detail) status.append(element('p', run.detail, 'error'));
+        $('history').append(status);
+      }
     }, preservePosition);
+    pump();
+    if (!linked && topicUid) {
+      linked = true;
+      const url = new URL(location.href), id = url.searchParams.get('process');
+      if (id) pane.open(id, url.searchParams.get('processTopicUid') || topicUid, '所选执行');
+    }
   }
-  return { render };
+  return { render, pause: pane.pause, show: pane.show };
 }

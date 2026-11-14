@@ -125,6 +125,7 @@ test("Recreated Topic has fresh execution context and no old outputs or progress
   assert.ok(view.blocks.some((b) => b.content.includes("新答案")));
   assert.equal(view.blocks.some((b) => /旧答案|旧请求|旧工作|继续吗/.test(b.content)), false);
   assert.equal(view.blocks.filter((b) => b.type === "execution").length, 1);
+  assert(!JSON.stringify(topicView(aide, "me", undefined, { process: false })).includes("旧工作"), "Lightweight transcript also fences retired Work incarnations");
   await receiveDomain(aide, fixtureIncoming({ channelId: "web", id: "old", topicId: "me", text: "旧请求" })); await aide.settled();
   assert.equal(calls, 2);
   assert.equal(aide.outputs().some((m) => m.text === "旧请求"), false);

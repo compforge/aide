@@ -6,7 +6,7 @@ import type { TopicResource } from "./model.ts";
 import type { TopicStore } from "./store.ts";
 
 const PAGE_SIZE = 10;
-export interface HistorySelection { summaries?: boolean; message?: { id: string; uid: string }; liveExecutions?: ReadonlySet<string> }
+export interface HistorySelection { summaries?: boolean; process?: boolean; executionId?: string; message?: { id: string; uid: string }; liveExecutions?: ReadonlySet<string> }
 export interface HistoryItem {
   id: string; uid: string; version: string; type: "input" | "message"; at: string;
   preview: string; origin?: InputSpec["origin"]; originId?: string; executionId?: string; status: string;
@@ -48,10 +48,11 @@ export function topicHistory(store: TopicStore, topic: TopicResource, members: r
         )
     )`;
     const message = selection.message;
+    const execution = selection.executionId;
     const messageKey = message?.id.startsWith("input:") ? store.inputStore.key(message.id.slice(6))
       : message?.id.startsWith("message:") ? store.outputStore.key(message.id.slice(8)) : "";
     const rows = storage.db.prepare(`${candidates}, selected AS MATERIALIZED (
-      SELECT key, created FROM candidates ${message ? "WHERE key=?" : cursor ? "WHERE (created, key) < (?, ?)" : ""}
+      SELECT key, created FROM candidates ${message ? "WHERE key=?" : execution ? `WHERE key IN (SELECT r.key FROM resources r WHERE coalesce(${field("spec.executionId")}, ${field("status.assess.completedBy.executionId")}, ${field("status.assess.executionId")})=?)` : cursor ? "WHERE (created, key) < (?, ?)" : ""}
       ORDER BY created DESC, key DESC LIMIT ${PAGE_SIZE + 1}
     ) SELECT r.key, r.created, r.uid,
       CASE WHEN r.kind='aide.dev/Input' THEN 'input:' ELSE 'message:' END || ${field("metadata.name")} AS id,
@@ -64,7 +65,7 @@ export function topicHistory(store: TopicStore, topic: TopicResource, members: r
       FROM selected c JOIN resources r ON r.key=c.key ${message ? "WHERE r.uid=?" : ""}
       ORDER BY r.created DESC, r.key DESC`)
       .all(uids, uids, topic.metadata.uid, topic.spec.id, topic.metadata.creationTimestamp, topic.spec.id,
-        ...(message ? [messageKey, message.uid] : cursor ? [cursor.at, cursor.key] : []));
+        ...(message ? [messageKey, message.uid] : execution ? [execution] : cursor ? [cursor.at, cursor.key] : []));
     const page = rows.slice(0, PAGE_SIZE), last = page.at(-1);
     const objects = page.filter(row => !selection.summaries || row.type === "message" && selection.liveExecutions?.has(row.executionId as string))
       .map(row => storage.read(row.key as string)!.object);

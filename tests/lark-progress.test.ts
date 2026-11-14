@@ -75,11 +75,12 @@ test("Lark sends one checked stream card, preserves reply coordinates and finali
 test("Reader expansion survives stream updates and completion", async t => {
   const f = setup(t); await f.send(open(1, "思考"));
   const panels = f.card.body.elements;
-  assert.deepEqual(panels.map(p => [p.element_id, p.expanded]), [["answer_panel", true], ["process_panel", false]]);
-  panels[0]!.expanded = false; panels[1]!.expanded = true;
+  assert.equal(panels[0]!.tag, "markdown");
+  const process = panels.find(p => "expanded" in p)!;
+  assert("expanded" in process); assert.equal(process.expanded, false); process.expanded = true;
   await f.send(open(2, "继续思考", "回答")); await f.reopen(); await f.send(completed(2, "继续思考", "回答"));
-  assert.equal(panels[0]!.expanded, false); assert.equal(panels[1]!.expanded, true);
-  assert.match(panels[1]!.header.title.content, /已完成/);
+  assert.equal(process.expanded, true);
+  assert.match(process.header.title.content, /已完成/);
   const patches = f.calls.filter(c => c.kind === "patch").map(c => c.args[1]);
   assert(!JSON.stringify(patches).includes('"expanded"'));
   assert(!JSON.stringify(patches).includes('"elements"'));
@@ -102,7 +103,7 @@ test("Long stream answers retain their complete tail through idempotent text par
   await f.send(completed(1, "", text));
   const tail = f.calls.filter(c => c.kind === "text").map(c => String(c.args[1])).join("");
   const panels = f.card.body.elements;
-  const prefix = panels.flatMap(p => p.elements ?? []).find(e => e.element_id === "content")!.content!.split("\n\n（内容较长")[0]!;
+  const prefix = panels.flatMap(p => "elements" in p ? p.elements : [p]).find(e => e.element_id === "content")!.content!.split("\n\n（内容较长")[0]!;
   assert.equal(prefix + tail, text);
   const count = f.calls.length; await f.reopen(); await f.send(completed(1, "", text));
   assert.equal(f.calls.length, count);
@@ -206,7 +207,7 @@ test("Card serialization budget includes escaped content without losing the answ
   const payload = f.calls.find(c => c.kind === "create")!.args[0];
   assert(Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(payload) })) <= 28_000);
   const panels = f.card.body.elements;
-  const rendered = panels.flatMap(p => p.elements ?? []).find(e => e.element_id === "content")!.content!;
+  const rendered = panels.flatMap(p => "elements" in p ? p.elements : [p]).find(e => e.element_id === "content")!.content!;
   const prefix = rendered.split("\n\n（内容较长")[0]!;
   const tail = f.calls.filter(c => c.kind === "text").map(c => String(c.args[1])).join("");
   assert.equal(prefix + tail, text);
@@ -225,15 +226,16 @@ test("Lark renders tool updates from the selected mail and retains them at compl
 });
 
 
-// @case Completed answers remain full Markdown in one expanded panel, without duplicated previews or nested wrappers.
+// @case Completed answers are top-level Markdown, without duplicated previews or nested wrappers.
 test("Completed card exposes the whole Markdown answer once and keeps process separate", async t => {
   const f = setup(t);
   const text = "首段\n\n第二段\n\n第三段\n\n第四段 searchable-tail-42\n\n```ts\nconsole.log('hello');\n```";
   await f.send(completed(1, "过程详情", text));
   const panels = f.card.body.elements;
   assert.equal(panels.length, 2);
-  assert.equal(panels[0]!.expanded, true); assert.equal(panels[1]!.expanded, false);
-  assert.equal(panels[0]!.elements[0]!.content, text);
-  assert.equal(panels[1]!.elements[0]!.content, "过程详情");
+  const answer = panels[0]!, process = panels[1]!;
+  assert("content" in answer); assert.equal(answer.content, text); assert.equal(answer.tag, "markdown");
+  assert("elements" in process); assert.equal(process.expanded, false);
+  assert.equal(process.elements[0]!.content, "过程详情");
   assert.equal(JSON.stringify(f.card).split("searchable-tail-42").length - 1, 1);
 });

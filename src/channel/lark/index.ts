@@ -73,7 +73,8 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
   private readonly chatNames = new Map<string, { name?: string; until: number }>();
 
   constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "registerOutputTransport" | "canSpeak">,
-    private readonly transport: LarkTransport, private readonly log: Logger) {
+    private readonly transport: LarkTransport, private readonly log: Logger,
+    private readonly processLink?: (message: OutputMessage) => Promise<string | undefined>) {
     this.acceptInput = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
     this.prefix = `lark:${appId}:`;
     this.path = join(home, "channels", `lark-${createHash("sha256").update(appId).digest("hex").slice(0, 16)}.json`);
@@ -260,6 +261,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
         think: Array.from(content.think).slice(-2000).join(""), content: Array.from(content.text).slice(0, 4000).join(""), overflow: Array.from(content.text).length > 4000, messageIds: [] };
       view.process = processPreview(view.phase, [{ type: "thought", content: content.think }, ...content.tools.map(t => ({ type: "tool", content: t.title ?? t.toolCallId, status: t.status ?? undefined }))]);
       view.think = Array.from(mailProcess(content)).slice(-2000).join("");
+      view.processUrl = await this.processLink?.(message);
       while (Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(view, content.phase === "open")) })) > 28_000) {
         view.think = Array.from(view.think).slice(-Math.floor(Array.from(view.think).length * 0.75)).join("");
         view.content = Array.from(view.content).slice(0, Math.floor(Array.from(view.content).length * 0.75)).join("");

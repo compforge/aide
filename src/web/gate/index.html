@@ -18,9 +18,11 @@
     <div id="approvals" aria-label="等待你处理的执行请求" aria-live="polite"></div>
     <p id="work-notice" role="status" class="muted"></p>
     <div id="panel-dialogue" class="topic-panel dialogue-panel" role="tabpanel" aria-labelledby="tab-dialogue">
+      <div class="dialogue-main">
       <div id="messages" tabindex="0" role="log" aria-label="消息记录"><div class="history-loading"><span id="history-notice" class="muted" role="status"></span><button id="history-retry" type="button" hidden>重试加载</button></div><div id="history"></div><section id="activity" aria-label="Aide 执行进展" hidden></section></div>
       <form id="composer"><textarea id="input" aria-label="向 Aide 提问或交代事情" placeholder="向 Aide 提问或交代事情…" maxlength="32000" required disabled></textarea><button id="send" type="submit" disabled>发送</button></form>
       <div id="notice" role="status">正在连接 Gate…</div>
+      </div>
     </div>
     <section id="panel-handoffs" class="topic-panel" role="tabpanel" aria-labelledby="tab-handoffs" tabindex="0" hidden><div id="handoffs"></div><button id="handoffs-more" type="button" hidden>加载更多</button></section>
   </section>

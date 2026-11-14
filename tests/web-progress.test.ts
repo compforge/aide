@@ -121,7 +121,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   sink({ kind: "agent_message_chunk", invocationId: turnId, payload: { messageId: "text-a", content: { type: "text", text: "正在整理" } } });
   await until(() => first.views.some((view) => view.blocks.some((block) => block.content === "正在整理")));
   const progress = first.views.at(-1)!;
-  assert.equal(progress.blocks.filter((block) => block.parent_id).length, 3);
+  assert.equal(progress.blocks.filter((block) => block.parent_id).length, 0, "Transcript SSE never carries process detail");
   assert.equal(progress.blocks.find((block) => block.type === "execution")!.status, "running");
   assert.equal(progress.blocks.find((block) => block.type === "execution")!.harness, "gate");
   assert.equal(progress.blocks.find((block) => block.type === "execution")!.icon, HARNESS_IDENTITIES.gate.icon);
@@ -129,18 +129,20 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(channel.originId, CHANNELS.web.id, "HTTP selects its own Channel identity");
   assert.equal(channel.label, CHANNELS.web.label);
   assert.equal(channel.icon, CHANNELS.web.icon);
-  assert.equal(progress.blocks.find((block) => block.type === "tool")!.detail, "/tmp/README");
+  assert.doesNotMatch(JSON.stringify(progress), /先检查资料|\/tmp\/README/);
   assert.doesNotMatch(JSON.stringify(progress), /另一会话/);
   assert.equal(aide.outputs().filter((message) => message.role === "aide").length, 2, "Each active Input has a durable Output before its answer finishes");
   sink({ kind: "agent_message_chunk", invocationId: turnId, payload: { messageId: "text-a", content: { type: "text", text: "重点" } } });
-  await until(() => first.events.some((event) => event.op === "append"));
-  assert.equal(first.views.at(-1)!.blocks.at(-1)!.content, "正在整理重点");
+  await until(() => first.views.at(-1)?.blocks.some(b => b.type === "message" && b.content === "正在整理重点") === true);
+  assert(first.events.some(event => event.op === "append"));
+  assert.equal(first.views.at(-1)!.blocks.find(b => b.type === "message")!.content, "正在整理重点");
   await first.close();
   sink({ kind: "agent_message_chunk", invocationId: turnId, payload: { messageId: "text-a", content: { type: "text", text: "，请稍候" } } });
+  await until(() => aide.outputs().some(message => message.text === "正在整理重点，请稍候"));
   const second = await connect("gate");
   await until(() => second.views.length > 0);
   assert.equal(second.events[0]!.op, "start");
-  assert.equal(second.views[0]!.blocks.at(-1)!.content, "正在整理重点，请稍候");
+  assert.equal(second.views[0]!.blocks.find(b => b.type === "message")!.content, "正在整理重点，请稍候");
   release(); await aide.settled();
   await until(() => second.views.at(-1)?.meta.activity === null && second.views.at(-1)!.blocks.find((block) => block.type === "input")?.status === "done" && second.views.at(-1)!.blocks.filter((block) => block.type === "message").length === 1);
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.role === "aide").length, 1);
@@ -152,8 +154,17 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(response.status, 200);
   const detail = await response.json() as TopicView;
   assert.equal(detail.blocks.find(block => block.id === row.id)!.content, "正在整理重点，请稍候\n\n最终答复");
-  assert.equal(detail.blocks.find(block => block.type === "thought")!.content, "先检查资料");
-  assert.equal(detail.blocks.find(block => block.type === "tool")!.detail, "/tmp/README");
+  assert.equal(detail.blocks.some(block => block.parent_id), false, "Body fetch does not load process detail");
+  const processQuery = new URLSearchParams({ topicId: "gate", topicUid: row.lazy!.topicUid, executionId: row.group_id! });
+  const processResponse = await fetch(base + "/topics/process?" + processQuery);
+  assert.equal(processResponse.status, 200);
+  const process = await processResponse.json() as TopicView;
+  assert.equal(process.blocks.find(block => block.type === "thought")!.content, "先检查资料");
+  assert.match(process.blocks.find(block => block.type === "tool")!.detail!, /\/tmp\/README/);
+  processQuery.set("executionId", "foreign-execution");
+  assert.equal((await fetch(base + "/topics/process?" + processQuery)).status, 404);
+  processQuery.set("topicUid", "replaced-topic");
+  assert.equal((await fetch(base + "/topics/process?" + processQuery)).status, 404);
   const completed = topicView(aide, "gate");
   assert.equal(completed.meta.context, undefined, "Knowledge panels do not ride on dialogue SSE");
   assert.equal(completed.blocks.find((block) => block.type === "execution")!.status, "completed");
@@ -166,11 +177,11 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(completed.blocks.find((block) => block.role === "user")!.inputId, aide.personal.topics.inputs("gate")[0]!.metadata.name);
   assert.equal(completed.blocks.find((block) => block.type === "execution")!.harness, "gate");
   assert.equal(completed.blocks.find((block) => block.type === "thought")!.content, "先检查资料");
-  assert.equal(completed.blocks.find((block) => block.type === "tool")!.detail, "/tmp/README");
+  assert.match(completed.blocks.find((block) => block.type === "tool")!.detail!, /\/tmp\/README/);
   assert.doesNotMatch(JSON.stringify(completed), /另一会话/);
   const refreshed = await connect("gate");
   await until(() => refreshed.views.length > 0);
-  assert.deepEqual(refreshed.views[0], JSON.parse(JSON.stringify(topicView(aide, "gate", undefined, { summaries: true }))));
+  assert.deepEqual(refreshed.views[0], JSON.parse(JSON.stringify(topicView(aide, "gate", undefined, { summaries: true, process: false }))));
   await refreshed.close();
   assert.equal(aide.works().length, 0);
   const resource = aide.topics.resource.bind(aide.topics);
@@ -196,7 +207,8 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   const reopened = new Aide(root, options, log);
   try {
     const restored = topicView(reopened, "gate");
-    assert.deepEqual(restored.blocks.filter(b => b.type === "input" || b.type === "message"), later.blocks.filter(b => b.type === "input" || b.type === "message"));
+    const bodies = (v: TopicView) => v.blocks.filter(b => b.type === "input" || b.type === "message").map(({ status, ...b }) => b);
+    assert.deepEqual(bodies(restored), bodies(later));
     assert.equal(restored.blocks.filter(b => b.type === "execution" || b.parent_id).length, 0, "Native execution history is not replayed by Aide");
     assert.doesNotMatch(JSON.stringify(topicView(reopened, "gate")), /另一会话/);
   } finally { await reopened.close(); }
@@ -366,8 +378,8 @@ test("Bound Channels preserve distinct input identities and rebuild user/source 
   const before = topicView(aide, "inbox");
   assert.equal(before.blocks.filter((block) => block.type === "input").length, 2);
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
-  assert.deepEqual(topicView(aide, "inbox").blocks.filter(b => b.type === "input" || b.type === "message"),
-    before.blocks.filter(b => b.type === "input" || b.type === "message"));
+  const bodies = (v: TopicView) => v.blocks.filter(b => b.type === "input" || b.type === "message").map(({ status, ...b }) => b);
+  assert.deepEqual(bodies(topicView(aide, "inbox")), bodies(before));
   await web({ id: "next", topicId: "inbox", source: webAddress("inbox"), text: "继续处理" }); await aide.settled();
   const history = aide.personal.topics.inputs().map((i) => ({ role: i.spec.origin === "channel" ? "user" : "source", text: i.spec.text }));
   assert.doesNotMatch(prompts.at(-1)!, /Recent topic:/, "Warm native history is not injected again");

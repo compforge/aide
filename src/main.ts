@@ -13,6 +13,7 @@ import { Connectors } from "../connectors/index.ts";
 import { Aide } from "./app.ts";
 import { createHarnessAdapter } from "./host/harness/registry.ts";
 import { httpChannel } from "./api/index.ts";
+import { processLink } from "./channel/process-link.ts";
 import { LarkChannel } from "./channel/lark/index.ts";
 import { larkTransport } from "./channel/lark/client.ts";
 import { withAsyncFileLock } from "./host/file-lock.ts";
@@ -24,6 +25,7 @@ const home = resolve(environment.AIDE_HOME ?? `${homedir()}/.aide`);
 const path = resolve(home, "host");
 const host = environment.AIDE_HOST ?? "0.0.0.0";
 const port = z.coerce.number().int().min(1).max(65535).parse(environment.AIDE_PORT ?? "7433");
+const webUrl = z.url().max(2048).refine(value => { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash; }, "AIDE_WEB_URL must be an HTTP(S) origin").optional().parse(environment.AIDE_WEB_URL);
 const timezone = environment.AIDE_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 new Intl.DateTimeFormat("en", { timeZone: timezone });
 
@@ -67,7 +69,8 @@ await withAsyncFileLock(path, async () => {
     aide.registerOutputTransport(requirementTransport(aide.outputStore, connectors));
     const bots = Object.entries(config.channels).filter(([, channel]) => channel.enabled).map(([id, channel]) => {
       const channelLog = log.child({ channelId: id, appId: channel.appId });
-      const bot = new LarkChannel(home, channel.appId, aide, transports.get(channel.appId)!, channelLog);
+      const bot = new LarkChannel(home, channel.appId, aide, transports.get(channel.appId)!, channelLog,
+        processLink(aide.topics, aide.addresses, ref => aide.privateMeAddress(ref), webUrl));
       void bot.start().catch(() => channelLog.error("Lark channel startup failed; check credentials and network"));
       return bot;
     });

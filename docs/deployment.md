@@ -12,6 +12,7 @@ Aide 以单个服务实例管理自己的状态目录。配置模型、CLI 和�
 | `AIDE_CWD` | CLI 执行工作目录，默认启动目录 |
 | `AIDE_HOST` | 监听地址，默认 `0.0.0.0`；仅本机访问可设为 `127.0.0.1` |
 | `AIDE_PORT` | 监听端口，默认 `7433` |
+| `AIDE_WEB_URL` | 可选，Me 可访问的 HTTP(S) origin；用于私聊卡片的执行过程链接，不含路径、查询或凭证 |
 | `AIDE_TIMEZONE` | 默认时区，默认服务器时区；可设 `Asia/Shanghai` |
 | `AIDE_CONFIG` | 全局 Connector、Harness 与 Plugin 配置，默认 `$AIDE_HOME/config.yaml`；[字段与优先级](configuration.md) |
 | `LOG_LEVEL` | 结构化日志级别，默认 `info` |

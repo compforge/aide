@@ -303,6 +303,12 @@ export class Aide {
     return addressRef(address);
   }
 
+  /** @spec Private presentation links require a current single-person Me audience, independently of default-contact routing. */
+  privateMeAddress(ref: AddressRef): boolean {
+    const audience = this.addresses.audience(ref);
+    return !audience.unavailable && !audience.muted && audience.private && audience.people.length === 1 && isMe(audience.people[0]!.spec, this.meMarks);
+  }
+
   async validateDefaultAddress(ref: AddressRef): Promise<void> {
     const audience = await this.outputAudience(ref);
     if (audience.unavailable || !audience.private || !audience.people.length || audience.people.some(p => !isMe(p.spec, this.meMarks)))
