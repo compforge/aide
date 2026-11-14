@@ -1,3 +1,4 @@
+import { isProcessingRoot } from "./boundary.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { ResourceClient, ResourceReader, ResourceRef } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, initialTopicName, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
@@ -13,7 +14,7 @@ export function topicPath(all: readonly TopicResource[], leaf: TopicResource): T
     if (current.metadata.deletionTimestamp || path.some(t => t.metadata.uid === current!.metadata.uid)) throw new Error("Topic path unavailable");
     path.push(current);
     const parent: TopicSpec["parentRef"] = current.spec.parentRef;
-    if (!parent) break;
+    if (!parent || isProcessingRoot(current)) break;
     current = all.find(t => t.metadata.uid === parent.uid && t.metadata.name === parent.name);
     if (!current) throw new Error("Topic parent no longer exists");
   }
@@ -27,6 +28,7 @@ export function topicPath(all: readonly TopicResource[], leaf: TopicResource): T
  */
 export function topicSubtree(root: TopicResource, children: (parent: TopicResource) => readonly TopicResource[]): TopicResource[] {
   if (root.metadata.deletionTimestamp) return [];
+  if (root.spec.gate) return [root];
   const topics = [root], seen = new Set([root.metadata.uid]);
   for (let index = 0; index < topics.length; index++) {
     for (const child of children(topics[index]!)) {
@@ -42,6 +44,7 @@ export function topicSubtree(root: TopicResource, children: (parent: TopicResour
 export async function readTopicSubtree(resources: ResourceReader, ref: ResourceRef): Promise<TopicResource[]> {
   const root = await resources.get<TopicSpec, TopicStatus>(ref);
   if (!root || root.metadata.deletionTimestamp) return [];
+  if (root.spec.gate) return [root];
   const topics = [root], seen = new Set([root.metadata.uid]);
   for (let index = 0; index < topics.length; index++) {
     const parent = topics[index]!;
@@ -65,7 +68,7 @@ export async function readTopicRoot(resources: ResourceReader, ref: ResourceRef)
   while (topic) {
     if (topic.metadata.deletionTimestamp || seen.has(topic.metadata.uid)) throw new Error("Topic path unavailable");
     seen.add(topic.metadata.uid);
-    if (!topic.spec.parentRef) return topic;
+    if (!topic.spec.parentRef || isProcessingRoot(topic)) return topic;
     topic = await resources.get<TopicSpec, TopicStatus>(topic.spec.parentRef);
     if (!topic) throw new Error("Topic parent no longer exists");
   }
@@ -79,7 +82,7 @@ export async function readTopicInScope(resources: ResourceReader, owner: TopicRe
   while (current && !current.metadata.deletionTimestamp && !seen.has(current.metadata.uid)) {
     if (current.metadata.uid === owner.metadata.uid) return target;
     seen.add(current.metadata.uid);
-    current = current.spec.parentRef ? await resources.get<TopicSpec, TopicStatus>(current.spec.parentRef) : undefined;
+    current = current.spec.parentRef && !isProcessingRoot(current) ? await resources.get<TopicSpec, TopicStatus>(current.spec.parentRef) : undefined;
   }
 }
 /** Summary changes drive maintenance; full context versions still fence Weave and deletion. */

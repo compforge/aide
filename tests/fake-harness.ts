@@ -1,3 +1,4 @@
+import { isDomainRoot } from "../plugins/personal/topic/boundary.ts";
 import { composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { InputAttention, inputAttention } from "../plugins/personal/input/model.ts";
 import { emptyConnectors } from "../src/connector/client.ts";
@@ -74,7 +75,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
           ? (() => {
             const resources = new PluginResourceStore({ home, pluginInstanceId: "personal" });
             const inputId = JSON.parse(prompt.split("\n").find(line => line.startsWith('{"inputId":'))!).inputId;
-            const data = { inputs: [{ id: inputId }], topics: resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE).filter(c => !c.spec.parentRef && !c.metadata.deletionTimestamp).map(c => ({ ...(c.spec as object), uid: c.metadata.uid })) };
+            const data = { inputs: [{ id: inputId }], topics: resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE).filter(c => isDomainRoot(c) && !c.metadata.deletionTimestamp).map(c => ({ ...(c.spec as object), uid: c.metadata.uid })) };
             return agent.route?.(JSON.stringify(data)) ?? JSON.stringify({ decisions: [{ inputId, topicUids: [], reason: "No match" }] });
           })()
           : target.harness === "gate" ? agent.gate?.(prompt) ?? "Gate reply"

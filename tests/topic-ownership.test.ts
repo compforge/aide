@@ -1,3 +1,4 @@
+import { digest } from "../plugins/personal/chief-model.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { patchStatus } from "../plugins/personal/status.ts";
 import assert from "node:assert/strict";
@@ -84,7 +85,7 @@ test("Detaching preserves a subtree, releases its root responsibility and preven
   const grandchild = await createChildTopic(f.resources, f.root(), { parentUid: child.metadata.uid, name: "Details", summary: "Details", reason: "Group details" }, "grandchild");
   await assert.rejects(moveTopic(f.resources, f.root(), { uid: child.metadata.uid, parentUid: grandchild.metadata.uid, reason: "Cycle" }), /cycle/);
   const independent = await moveTopic(f.resources, f.root(), { uid: child.metadata.uid, parentUid: null, reason: "Distinct sustained responsibility" });
-  assert.equal(independent.spec.parentRef, undefined);
+  assert.equal(independent.spec.parentRef?.name, digest("gate"));
   assert.equal(independent.status.idleReviewCount, 0);
   assert.equal(independent.status.reviewCheckedAt, null);
   assert.equal(independent.status.idleSince, independent.status.organization!.at);

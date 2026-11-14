@@ -1,3 +1,4 @@
+import { receiveDomain } from "./address-fixture.ts";
 import jsonPatch from "fast-json-patch";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { describeWorkloadChanges } from "../plugins/personal/source/environment/changes.ts";
@@ -120,7 +121,7 @@ test("Real Runner groups deferred observations by canonical environment and rest
   await aide.start(); await aide.settled();
   assert.ok(reads >= 3); assert.equal(prompts.length, 0);
   const initialReads = reads;
-  await aide.receive(fixtureIncoming({ channelId: "web", topicId: "other", id: "hello", text: "hello" })); await aide.settled();
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web", topicId: "other", id: "hello", text: "hello" })); await aide.settled();
   assert.equal(reads, initialReads, "Opening another Session must not duplicate the observer");
   current = snapshot("B");
   const poll = async () => {

@@ -21,7 +21,7 @@ const pageText = (value: unknown, start: number) => {
 };
 export const topicURL = (id: string) => id === "gate" ? "/gate" : `/?topic=${encodeURIComponent(id)}`;
 
-/** @spec Gate and Gate-owned Work share global read tools; every call revalidates the live owner, and none mutates domain resources.
+/** @spec Gate has global read tools; every call revalidates the live owner, and none mutates domain resources.
  * @link docs/personal/gate.md
  */
 export function gateReadTools(store: Store, active: () => unknown): ToolDefinition[] {
@@ -77,7 +77,7 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
             title: value.title, status: value.status, report: value.lastReport?.text.slice(0, 500), url: topicURL(value.topicId) }; });
         return result({ items, scanned: page.items.length, continue: page.metadata.continue });
       } }),
-    tool({ name: "read_work", label: "Read Work", description: "Read Task or Routine in bounded text pages. Domain Work is read-only; Gate can mutate only its own Work.",
+    tool({ name: "read_work", label: "Read Work", description: "Read Task or Routine in bounded text pages. Work is read-only; request changes through its domain Chief.",
       parameters: Type.Object({ id: text, offset }),
       async execute(_id, { id, offset = 0 }) {
         const work = WORK_TYPES.map(type => store.resources.find<WorkSpec, WorkAgentStatus>(type, id)).find(Boolean);

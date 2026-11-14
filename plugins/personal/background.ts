@@ -1,3 +1,4 @@
+import { isDomainRoot } from "./topic/boundary.ts";
 import { previewNoteReference } from "./note/model.ts";
 import { summaryText, summaryReference } from "./note/summary.ts";
 import { notes } from "./note/query.ts";
@@ -31,7 +32,7 @@ function topicPart(store: Store, c: TopicResource | undefined) {
 export function topicCandidates(store: Store, query?: string, parentUid?: string) {
   return store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
     { matchIndex: parentUid ? { name: "parent", value: parentUid } : { name: "root", value: "root" } })
-    .filter(c => !c.metadata.deletionTimestamp && (parentUid ? c.spec.parentRef?.uid === parentUid : !c.spec.parentRef)
+    .filter(c => !c.metadata.deletionTimestamp && (parentUid ? c.spec.parentRef?.uid === parentUid : isDomainRoot(c))
       && (!query || [c.spec.name, summaryText(store.resources, c)].join(" ").toLowerCase().includes(query.toLowerCase())))
     .sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid));
 }

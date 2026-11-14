@@ -14,13 +14,13 @@ import { httpChannel } from "../src/api/index.ts";
 import type { InputRequest } from "../src/host/message/types.ts";
 import type { ApprovalResult } from "../src/host/approval/types.ts";
 
-test("HTTP accepts Chief input durably and exposes asynchronous failure without replay", async (t) => {
+test("HTTP accepts Gate input durably and exposes asynchronous failure without replay", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-channel-"));
   const requests: string[] = [];
   let routes = 0;
   const log = pino({ level: "silent" });
   const aide = new Aide(dir, fakeOptions({
-    chief: async () => { if (++routes === 1) throw new Error("Model failed"); return "今天完成了三件事"; },
+    gate: async () => { if (++routes === 1) throw new Error("Model failed"); return "今天完成了三件事"; },
     execute: async () => ({ action: "done", report: "Read work log", notification: "今天完成了三件事", question: null, nextAt: null }),
   }, dir, requests), log);
   const server = httpChannel(aide, log);
@@ -56,8 +56,8 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   await aide.settled();
   assert.equal(aide.outputs().length, 1);
   assert.equal(mailView(aide.outputStore, aide.outputStore.list()[0]!).phase, "interrupted");
-  assert.equal(aide.topics.inputs("me")[0]!.consumption.phase, undefined);
-  assert.ok(aide.topics.resource("me")!.status.lastError);
+  assert.equal(aide.topics.inputs("gate")[0]!.consumption.phase, undefined);
+  assert.ok(aide.topics.resource("gate")!.status.lastError);
   assert.equal(aide.works().length, 0);
   const response = await fetch(`${url}/messages`, {
     method: "POST", headers: { "content-type": "application/json" },
@@ -66,16 +66,16 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   assert.equal(response.status, 200);
   const ack = await response.json() as { inputId: string; at: string };
   await aide.settled();
-  const outgoing = await (await fetch(`${url}/messages?topicId=me&role=all`)).json() as { text: string }[];
+  const outgoing = await (await fetch(`${url}/messages?topicId=gate&role=all`)).json() as { text: string }[];
   assert.equal(outgoing.length, 2);
   assert.equal(outgoing.at(-1)?.text, "今天完成了三件事");
-  const history = await (await fetch(`${url}/messages?topicId=me&role=all`)).json() as { role: string; text: string }[];
+  const history = await (await fetch(`${url}/messages?topicId=gate&role=all`)).json() as { role: string; text: string }[];
   assert.equal(history.length, 2);
   assert.ok(aide.personal.topics.inputStore.get(ack.inputId));
   assert.ok(history.every((message) => message.role === "aide"));
-  const works = await (await fetch(`${url}/work?topicId=me`)).json() as { status: string; id: string }[];
+  const works = await (await fetch(`${url}/work?topicId=gate`)).json() as { status: string; id: string }[];
   assert.deepEqual(works, []);
-  assert.equal((await fetch(`${url}/messages?topicId=me&after=missing`)).status, 400);
+  assert.equal((await fetch(`${url}/messages?topicId=gate&after=missing`)).status, 400);
   assert.deepEqual(await (await fetch(`${url}/work?topicId=other`)).json(), []);
 });
 

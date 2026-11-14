@@ -1,3 +1,4 @@
+import { isDomainRoot } from "../plugins/personal/topic/boundary.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
 import { summaryText } from "../plugins/personal/note/summary.ts";
 import { patchSummary } from "./summary-fixture.ts";
@@ -49,7 +50,7 @@ function fixture(t: { after(fn: () => Promise<void>): void }) {
     return aide.topics.inputStore.get(id)!;
   };
   const reviewed = () => Object.fromEntries(aide.topics.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE)
-    .filter(t => !t.spec.parentRef && t.status.weaveReview).map(t => [t.metadata.uid, t.status.weaveReview!]));
+    .filter(t => isDomainRoot(t) && t.status.weaveReview).map(t => [t.metadata.uid, t.status.weaveReview!]));
   const mark = async (entries: Record<string, { version: string; at: string }>) => {
     for (const topic of aide.topics.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE))
       if (entries[topic.metadata.uid]) await resources.patchStatus(topic, { weaveReview: entries[topic.metadata.uid] });
@@ -114,7 +115,7 @@ test("Weave rejects stale understanding and cycles but does not wait for uncerta
   await patchSummary(f.resources, f.refresh(a), { summary: "A late finding", lastError: "Inspect prior effects" });
   await assert.rejects(groupTopics(f.resources, await f.weave(), stale, 4000), /understanding changed/);
   await f.group(a, b);
-  const parent = f.aide.topics.resource(f.aide.topics.list().find(t => !t.parentRef)!.id)!;
+  const parent = f.aide.topics.resource(f.aide.topics.list().find(t => isDomainRoot({ spec: t }))!.id)!;
   await assert.rejects(f.resources.replace(parent, { ...parent.spec, parentRef: resourceRef(a) }, parent.status), /cycle/);
   assert.equal(f.refresh(a).status.lastError, "Inspect prior effects");
 });
@@ -124,7 +125,7 @@ test("Explicit Topic deletion checks child absorption, releases source key, and 
   const fact = await f.input("old", "a"), a = f.aide.topics.byKey("a")!, b = await ensureSourceTopic(f.resources, "b", "B");
   await f.resources.patchStatus(fact, { assess: { ...fact.status.assess, completedAt: new Date().toISOString() } });
   await f.group(a, b);
-  const parent = f.aide.topics.list().find(t => !t.parentRef)!;
+  const parent = f.aide.topics.list().find(t => isDomainRoot({ spec: t }))!;
   await patchSummary(f.resources, f.refresh(a), { summary: "Changed child finding", lastInputAt: "2000-01-01T00:00:00.000Z" });
   await collectTopic(f.context, f.refresh(a));
   assert.ok(f.aide.topics.resource(a.spec.id), "unabsorbed child survives");
@@ -141,7 +142,7 @@ test("Explicit Topic deletion checks child absorption, releases source key, and 
   assert.equal(f.aide.topics.byKey("a"), undefined);
   await f.input("new", "a");
   assert.notEqual(f.aide.topics.byKey("a")!.metadata.uid, a.metadata.uid);
-  assert.equal(f.aide.topics.byKey("a")!.spec.parentRef, undefined);
+  assert.ok(isDomainRoot(f.aide.topics.byKey("a")!));
   const fallback = await f.aide.topics.ensure("default");
   await assert.rejects(f.group(f.aide.topics.resource("default")!, b), /non-Default roots/);
   await assert.rejects(f.resources.delete(TOPIC_TYPE, fallback.metadata.name), /cannot be deleted/);
@@ -151,7 +152,7 @@ test("Nested Weave preserves the leaf path and propagates actual Input activity 
   const f = fixture(t); await f.initialize();
   const a = await ensureSourceTopic(f.resources, "a", "A"), b = await ensureSourceTopic(f.resources, "b", "B");
   await f.group(a, b);
-  const parent = f.aide.topics.list().find(t => !t.parentRef)!;
+  const parent = f.aide.topics.list().find(t => isDomainRoot({ spec: t }))!;
   const c = await ensureSourceTopic(f.resources, "c", "C");
   await f.group(f.aide.topics.resource(parent.id)!, c);
   const input = await f.input("fresh", "a");
@@ -171,7 +172,7 @@ test("Weave groups a large backlog without moving any Input or batching migratio
   const before = f.aide.topics.inputStore.list();
   await f.group(a, b);
   assert.deepEqual(f.aide.topics.inputStore.list(), before);
-  const root = f.aide.topics.resource(f.aide.topics.list().find(t => !t.parentRef)!.id)!;
+  const root = f.aide.topics.resource(f.aide.topics.list().find(t => isDomainRoot({ spec: t }))!.id)!;
   assert.equal(f.aide.topics.pending(root.metadata.uid).length, 120);
   assert.equal(f.aide.topics.pending(a.metadata.uid).length, 120);
   // The Input controller converges assignment after the structural transaction, without moving material.
@@ -223,7 +224,7 @@ test("A quiet changed child creates a review Input for root synthesis and can th
   const f = fixture(t); await f.initialize();
   const a = await ensureSourceTopic(f.resources, "absorb:a", "A"), b = await ensureSourceTopic(f.resources, "absorb:b", "B");
   await f.group(a, b);
-  const root = f.aide.topics.list().find(t => !t.parentRef)!;
+  const root = f.aide.topics.list().find(t => isDomainRoot({ spec: t }))!;
   await f.resources.patchStatus(f.aide.topics.resource(root.id)!, { notifiedWeaveRevision: 1 });
   await patchSummary(f.resources, f.refresh(a), { summary: "New evidence", lastInputAt: "2000-01-01T00:00:00.000Z" });
   const before = f.aide.topics.resource(root.id)!.status.lastInputAt;
@@ -253,7 +254,7 @@ test("Root Chief admits a bounded backlog with urgent Input first and independen
   const f = fixture(t);
   for (let i = 0; i < 10; i++) await f.input(`batch-${i}`, "batch");
   const root = f.aide.topics.byKey("batch")!;
-  const urgent = await f.aide.topics.submit("urgent", { origin: "channel", originId: "web", topicKey: "batch", attention: InputAttention.Immediate, text: "urgent question" });
+  const urgent = await f.aide.topics.submit("urgent", { origin: "channel", originId: "lark", topicKey: "batch", attention: InputAttention.Immediate, text: "urgent question" });
   await routeByRules(f.context, urgent);
   let prompts = 0;
   const execution: any = { executionId: "batch", withContext() { return this; }, verbs: { async action() { return { state: "success", value: { streaming: false } }; }, async harness(args: any) {
@@ -280,7 +281,7 @@ test("Unfinished synthesis retains failed review Inputs and backs off without re
   const f = fixture(t); await f.initialize();
   const a = await ensureSourceTopic(f.resources, "retry:a", "A"), b = await ensureSourceTopic(f.resources, "retry:b", "B");
   await f.group(a, b);
-  const root = f.aide.topics.list().find(t => !t.parentRef)!;
+  const root = f.aide.topics.list().find(t => isDomainRoot({ spec: t }))!;
   await f.resources.patchStatus(f.aide.topics.resource(root.id)!, { notifiedWeaveRevision: 1 });
   await patchSummary(f.resources, f.refresh(a), { summary: "Awaiting synthesis" });
   let prompts = 0;
@@ -361,7 +362,7 @@ test("Weave distinguishes a single candidate from its catalog and extends an exi
   const f = fixture(t); await f.initialize();
   const a = await ensureSourceTopic(f.resources, "existing-a", "A"), b = await ensureSourceTopic(f.resources, "existing-b", "B");
   await f.group(a, b);
-  const parent = f.aide.topics.resource(f.aide.topics.list().find(topic => !topic.parentRef)!.id)!;
+  const parent = f.aide.topics.resource(f.aide.topics.list().find(topic => isDomainRoot({ spec: topic }))!.id)!;
   const candidate = await ensureSourceTopic(f.resources, "new-child", "Related evidence");
   const other = await ensureSourceTopic(f.resources, "other", "Independent topic");
   const at = "2000-01-01T00:00:00.000Z";
@@ -438,7 +439,7 @@ test("Weave revisits unchanged roots above its soft target without spinning betw
   await f.mark(Object.fromEntries(Object.entries(f.reviewed()).map(([uid, value]) => [uid, { ...value, at: old }])));
   await reconcile(execution, await f.weave());
   assert.equal(prompts.length, 2);
-  assert.equal(f.aide.topics.list().filter(t => !t.parentRef).length, 2, "soft pressure does not force a grouping");
+  assert.equal(f.aide.topics.list().filter(t => isDomainRoot({ spec: t })).length, 2, "soft pressure does not force a grouping");
 });
 
 /** @case Reconciliation reads bounded indexed sets even when the catalog exceeds its soft target. */

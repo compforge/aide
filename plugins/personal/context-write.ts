@@ -19,7 +19,7 @@ export function requireContentWriter(target: Resource<unknown, unknown>, writer:
     if (actor.metadata.uid !== target.metadata.uid) throw new Error("Work may only edit its own content");
     return;
   }
-  requireTopic(writer.resource, context);
+  if (requireTopic(writer.resource, context).spec.gate) throw new Error("Gate cannot write domain knowledge");
   if (target.kind === "Person" || target.kind === "Address") return;
   let topic = target.kind === "Topic" ? requireTopic({ ...target, ...target.metadata }, context)
     : requireTopic((target.status as { topic?: import("@compforge/aide-plugin").ResourceRef }).topic, context);

@@ -7,7 +7,7 @@ import type { TopicResource } from "./topic/model.ts";
 
 /** Personal resolves the destination once. Channel delivery never infers it from business identity. */
 export function mailDraft(c: Readonly<TopicResource>, draft: Pick<OutputDraft, "text" | "topicId" | "target" | "receivers">,
-  association: { contentKind?: "agent"; replyToMessageId?: string; replyTo?: OutputSpec["replyTo"]; receivers?: ResourceRef[]; target?: Address; executionId?: string; producer?: ResourceRef; inputIds?: string[]; inputUids?: Record<string, string>; notes?: readonly NoteCitation[]; createdBy?: OutputSpec["createdBy"] } = {}): MailDraft {
+  association: { conversation?: OutputSpec["conversation"]; handoffId?: string; contentKind?: "agent"; replyToMessageId?: string; replyTo?: OutputSpec["replyTo"]; receivers?: ResourceRef[]; target?: Address; executionId?: string; producer?: ResourceRef; inputIds?: string[]; inputUids?: Record<string, string>; notes?: readonly NoteCitation[]; createdBy?: OutputSpec["createdBy"] } = {}): MailDraft {
   if (c.spec.id !== draft.topicId || c.metadata.deletionTimestamp) throw new Error("Output Topic is unavailable");
   const { target = draft.target ?? c.spec.address, receivers = draft.receivers, contentKind, notes, ...provenance } = association;
   if (!target) throw new Error(`Output target required for Topic: ${c.spec.id}`);

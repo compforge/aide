@@ -1,3 +1,4 @@
+import { receiveDomain } from "./address-fixture.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { moveMaterial, moveTopic } from "../plugins/personal/topic/organize.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
@@ -101,7 +102,7 @@ test("Recreated Topic has fresh execution context and no old outputs or progress
   }, execute: async () => ({ action: "done", report: "旧工作完成", notification: "旧工作回复", question: null, nextAt: null }) }, dir), log);
   const { server, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "old", topicId: "me", text: "旧请求" }));
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web", id: "old", topicId: "me", text: "旧请求" }));
   await aide.settled();
   const work = await aide.work("me").create({ kind: "task", title: "旧工作", instruction: "执行一次", trigger: null });
   await aide.settled();
@@ -114,7 +115,7 @@ test("Recreated Topic has fresh execution context and no old outputs or progress
   assert.ok(aide.outputs().some((o) => o.topicUid === oldResource.metadata.uid));
   assert.deepEqual(topicView(aide, "me").blocks, []);
   await aide.settled();
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "new", topicId: "me", text: "新请求" })); await aide.settled();
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web", id: "new", topicId: "me", text: "新请求" })); await aide.settled();
   const current = aide.personal.topics.resource("me")!;
   assert.notEqual(current.metadata.uid, oldResource.metadata.uid);
   assert.equal((await remove("me", Number(current.metadata.resourceVersion), { uid: oldResource.metadata.uid })).status, 409);
@@ -124,7 +125,7 @@ test("Recreated Topic has fresh execution context and no old outputs or progress
   assert.ok(view.blocks.some((b) => b.content.includes("新答案")));
   assert.equal(view.blocks.some((b) => /旧答案|旧请求|旧工作|继续吗/.test(b.content)), false);
   assert.equal(view.blocks.filter((b) => b.type === "execution").length, 1);
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "old", topicId: "me", text: "旧请求" })); await aide.settled();
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web", id: "old", topicId: "me", text: "旧请求" })); await aide.settled();
   assert.equal(calls, 2);
   assert.equal(aide.outputs().some((m) => m.text === "旧请求"), false);
 });

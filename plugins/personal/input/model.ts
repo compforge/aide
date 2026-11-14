@@ -28,6 +28,8 @@ export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha6", kind: "Input" } as 
 export interface InputSpec extends MaterialDisclosure {
   /** Producer-owned event key, stable across retries and intake paths; opaque to Personal. */
   inputKey?: string;
+  /** Explicit delegated request; communication address and original user evidence stay independent of domain ownership. */
+  handoff?: { id: string; gate: ResourceRef & { uid: string }; sourceInput: import("@compforge/aide-plugin").ResourceRef & { uid: string }; replyTo: import("../address/model.ts").AddressRef };
   /** Where the input was received; independent of its producer, sender and topic. */
   source?: import("../address/model.ts").AddressRef;
   /** Transport reply coordinates belong to this message, not the Address place. */

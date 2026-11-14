@@ -41,6 +41,7 @@ export function topicHistory(store: TopicStore, topic: TopicResource, members: r
       WHERE r.scope='personal' AND r.kind='aide.dev/Output' AND ${field("apiVersion")}='${OUTPUT_TYPE.apiVersion}'
         AND ${field("metadata.namespace")}='v1' AND ${field("metadata.deletionTimestamp")} IS NULL AND (
           ${field("spec.topic.uid")} IN (SELECT value FROM json_each(?))
+          OR ${field("spec.conversation.uid") }=?
           OR EXISTS (SELECT 1 FROM json_each(r.data, '$.object.spec.inputUids') ref JOIN inputs ON inputs.uid=ref.value)
           OR (${field("spec.topicId")}<>? AND r.created>=? AND ${field("status.delivery.target.kind")}='channel'
             AND ${field("status.delivery.target.channelId")}='web' AND ${field("status.delivery.target.endpoint") }=?)
@@ -62,7 +63,7 @@ export function topicHistory(store: TopicStore, topic: TopicResource, members: r
         WHEN ${field("status.assess.completedAt")} IS NOT NULL THEN 'done' ELSE 'queued' END AS status
       FROM selected c JOIN resources r ON r.key=c.key ${message ? "WHERE r.uid=?" : ""}
       ORDER BY r.created DESC, r.key DESC`)
-      .all(uids, uids, topic.spec.id, topic.metadata.creationTimestamp, topic.spec.id,
+      .all(uids, uids, topic.metadata.uid, topic.spec.id, topic.metadata.creationTimestamp, topic.spec.id,
         ...(message ? [messageKey, message.uid] : cursor ? [cursor.at, cursor.key] : []));
     const page = rows.slice(0, PAGE_SIZE), last = page.at(-1);
     const objects = page.filter(row => !selection.summaries || row.type === "message" && selection.liveExecutions?.has(row.executionId as string))

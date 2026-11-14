@@ -9,6 +9,7 @@ import { requireOrganization, requireTopic } from "./ownership.ts";
 export function guardWork(current: Resource<import("../model.ts").WorkSpecFields, WorkAgentStatus>, context: ResourceValidationContext, previous?: Resource<import("../model.ts").WorkSpecFields, WorkAgentStatus>) {
   if (previous && isDeepStrictEqual(previous.status.topic, current.status.topic)) return;
   const target = requireTopic(current.status.topic, context);
+  if (!previous && target.spec.gate) throw new Error("Gate delegates work to domain Chiefs; it cannot own new Work");
   if (previous) requireOrganization(current.status.organization, context, [requireTopic(previous.status.topic, context), target]);
   if (previous && (previous.status.execution || current.status.execution || workPhase(previous) === "running" || workPhase(current) === "running"))
     throw new Error("Finish Work execution before moving Topic ownership");

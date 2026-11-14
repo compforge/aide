@@ -235,7 +235,7 @@ test("only Default routes repeated source inputs without invoking Route; channel
     await aide.settled();
     assert.ok(aide.topics.input(`observation-${i}`, "default"));
   }
-  await aide.topics.submit("new-chat", { origin: "channel", originId: "web", text: "new topic", topicId: "chat" });
+  await aide.topics.submit("new-chat", { origin: "channel", originId: "fixture", text: "new topic", topicId: "chat" });
   await aide.settled();
   assert.ok(aide.topics.input("new-chat", "chat"));
   assert.equal(aide.topics.input("new-chat", "default"), undefined);

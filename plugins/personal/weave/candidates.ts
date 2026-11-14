@@ -1,3 +1,4 @@
+import { isDomainRoot } from "../topic/boundary.ts";
 import { previewNoteReference, type NoteReference } from "../note/model.ts";
 import type { TopicPersons } from "../topic/persons.ts";
 import { createHash } from "node:crypto";
@@ -6,7 +7,7 @@ import { summaryVersion } from "../topic/tree.ts";
 import { topicPage } from "../background.ts";
 
 export function weaveCandidates(topics: readonly TopicResource[]) {
-  return topics.filter(t => !t.metadata.deletionTimestamp && !t.spec.parentRef && !t.spec.default && !t.spec.gate)
+  return topics.filter(t => !t.metadata.deletionTimestamp && isDomainRoot(t) && !t.spec.default)
     .sort((a, b) => (a.status.lastInputAt ?? a.metadata.creationTimestamp).localeCompare(b.status.lastInputAt ?? b.metadata.creationTimestamp) || a.metadata.uid.localeCompare(b.metadata.uid));
 }
 /** @why Review receipts depend on the candidate-view contract as well as Topic understanding.

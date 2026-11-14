@@ -76,7 +76,8 @@ test("Channel creation captures its first address, bypasses Default and subseque
   const topic = aide.personal.topics;
   assert.deepEqual(aide.addresses.endpoint(topic.resource("opaque-topic")!.spec.address!), group);
   assert.equal(topic.resource("opaque-topic")!.spec.name, "群名称");
-  assert.deepEqual(aide.addresses.endpoint(aide.personal.topics.resource("inbox")!.spec.address!), inbox);
+  assert.equal(aide.personal.topics.resource("inbox"), undefined);
+  assert.ok(aide.topics.inputs("gate").some(i => i.spec.text === "hello"));
   const replies = aide.outputStore.list().filter(o => (aide.addresses.endpoint(o.spec.target) as ChannelAddress).endpoint === group.endpoint);
   assert.equal(replies.length, 1, "Only the explicit topic replies; Default receives no copy");
   await aide.receive({ id: "second", channelId: "lark", topicId: "opaque-topic", topicName: "不能覆盖已有名称", text: "second", source: elsewhere });

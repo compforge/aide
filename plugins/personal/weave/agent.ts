@@ -1,3 +1,4 @@
+import { isDomainRoot } from "../topic/boundary.ts";
 import { noteFields } from "../../../agents/context-tools.ts";
 import { summaryText, summaryReference } from "../note/summary.ts";
 import { notes } from "../note/query.ts";
@@ -43,7 +44,7 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
         async execute(_id, { uid, offset = 0 }) {
           active();
           const t = store.resources.page<TopicSpec, TopicStatus>(TOPIC_TYPE, { limit: 1, matchIndex: { name: "uid", value: uid } }).items[0];
-          if (!t || t.metadata.deletionTimestamp || t.spec.gate || t.spec.parentRef || t.spec.default) throw new Error("Root Topic unavailable");
+          if (!t || t.metadata.deletionTimestamp || !isDomainRoot(t) || t.spec.default) throw new Error("Root Topic unavailable");
           const text = JSON.stringify({ name: t.spec.name, persons: topicPersons(store, t), summary: summaryText(store.resources, t), summaryUid: summaryReference(store.resources, t)?.uid, summaryNote: summaryReference(store.resources, t), recent: notes(store.resources, t.metadata.uid, "subject"), organization: t.status.organization });
           return result({ uid, version: understandingVersion(t, notes(store.resources, t.metadata.uid, "subject")), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } },

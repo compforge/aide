@@ -1,4 +1,4 @@
-import { webAddress } from "../../../src/channel/address.ts";
+import { HANDOFF_TYPE, type HandoffSpec, type HandoffStatus } from "../handoff/model.ts";
 import { AddressRefSchema, type AddressRef } from "../address/model.ts";
 import { OUTPUT_TYPE } from "../output/model.ts";
 import { Addresses, type AddressTarget } from "../address/service.ts";
@@ -49,7 +49,7 @@ export class TopicStore {
   byKey(key: string): TopicResource | undefined {
     return this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { matchIndex: { name: "topicKey", value: key } })[0];
   }
-  list(): Topic[] { return this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE).filter((r) => !r.metadata.deletionTimestamp).map((r) => this.project(r as TopicResource)); }
+  list(): Topic[] { return this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE).filter((r) => !r.metadata.deletionTimestamp && !r.spec.gate).map((r) => this.project(r as TopicResource)); }
   get(id: string): Topic | undefined { const r = this.resource(id); return r && this.project(r); }
   /** @spec The creating Channel supplies its address and first-input name before asynchronous routing; later attachment cannot replace either. */
   async ensure(id: string, address?: AddressTarget, name?: string): Promise<TopicResource> {
@@ -153,7 +153,8 @@ export class TopicStore {
     const id = options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
     const previous = this.outputStore.get(id);
     if (options.respondToInputId && options.to) throw new Error("say cannot combine respondToInputId with to");
-    const inputIds = [...new Set([...(options.inputIds ?? (inputId ? [inputId] : [])), ...(options.respondToInputId ? [options.respondToInputId] : [])])];
+    if (options.respondToHandoffId && (options.respondToInputId || options.to || options.target)) throw new Error("Choose a single reply destination");
+    const inputIds = [...new Set([...(options.inputIds ?? (inputId && !options.respondToHandoffId ? [inputId] : [])), ...(options.respondToInputId ? [options.respondToInputId] : [])])];
     const attached = (id: string) => {
       const input = this.inputStore.get(id);
       const members = new Set(this.scope(initial.metadata.uid).map(t => t.metadata.uid));
@@ -166,6 +167,8 @@ export class TopicStore {
     let target = options.target && AddressRefSchema.parse(options.target);
     let replyToMessageId: string | undefined;
     let replyTo: import("../output/model.ts").OutputSpec["replyTo"];
+    let conversation = initial.spec.gate ? resourceRef(initial) : undefined;
+    let handoffId: string | undefined;
     let receivers = options.receivers === undefined ? undefined : [...options.receivers];
     if (options.to) {
       if (target || options.receivers !== undefined) throw new Error("say must choose contact Me or an explicit destination");
@@ -173,13 +176,27 @@ export class TopicStore {
       const destination = previous ? { target: previous.spec.target, receivers: previous.spec.receivers?.toJSON() } : await this.resolveContact();
       target = destination.target; receivers = destination.receivers;
     }
+    if (options.respondToHandoffId) {
+      const handoff = this.resources.find<HandoffSpec, HandoffStatus>(HANDOFF_TYPE, options.respondToHandoffId);
+      const delegated = handoff && this.inputStore.get(handoff.status.latestInputId);
+      const domainRef = delegated?.status.topic ?? handoff?.status.topic;
+      const domain = domainRef && this.byRef(domainRef);
+      const allowed = handoff && (owner ? delegated ? !!delegated.status.handle?.[owner.metadata.uid] : handoff.status.works.some(w => w.uid === owner?.metadata.uid)
+        : initial.spec.gate ? handoff.spec.gate.uid === initial.metadata.uid
+        : domain && this.scope(initial.metadata.uid).some(t => t.metadata.uid === domain.metadata.uid));
+      if (!handoff || handoff.metadata.deletionTimestamp || !allowed) throw new Error("Handoff reply is outside this owner's scope");
+      target = handoff.status.reply.address; replyToMessageId = handoff.status.reply.messageId;
+      receivers ??= handoff.status.reply.sender ? [handoff.status.reply.sender] : undefined;
+      conversation = handoff.spec.gate; handoffId = handoff.metadata.name;
+    }
     if (options.respondToInputId) {
       const replyInput = attached(options.respondToInputId), reply = replyInput.spec;
       const identity = replyIdentity(replyInput);
-      if (reply.origin !== "channel" && !(reply.origin === "source" && identity?.mentionMe))
+      if (!reply.handoff && reply.origin !== "channel" && !(reply.origin === "source" && identity?.mentionMe))
         throw new Error("Source reply requires an original group mention of Me within existing authority");
-      replyTo = { input: resourceRef(replyInput), key: identity?.key ?? replyInput.metadata.uid, ...(identity ? { messageId: identity.messageId } : {}) };
-      const priorReply = this.resources.page<import("../output/model.ts").OutputSpec, import("../output/model.ts").OutputStatus>(OUTPUT_TYPE, { limit: 1, matchIndex: { name: "reply", value: replyTo.key } }).items[0];
+      if (reply.handoff) { conversation = reply.handoff.gate; handoffId = reply.handoff.id; }
+      replyTo = reply.handoff ? undefined : { input: resourceRef(replyInput), key: identity?.key ?? replyInput.metadata.uid, ...(identity ? { messageId: identity.messageId } : {}) };
+      const priorReply = replyTo && this.resources.page<import("../output/model.ts").OutputSpec, import("../output/model.ts").OutputStatus>(OUTPUT_TYPE, { limit: 1, matchIndex: { name: "reply", value: replyTo.key } }).items[0];
       if (priorReply && priorReply.metadata.name !== id) return { outputId: priorReply.metadata.name, accepted: true };
       if (reply.source && (!target || target.uid === reply.source.uid)) {
         target ??= reply.source;
@@ -189,13 +206,6 @@ export class TopicStore {
       if (receivers === undefined && reply.sender) receivers = [reply.sender];
       if (!target) throw new Error(`Reply Input has no address: ${options.respondToInputId}`);
     }
-    if (initial.spec.gate) {
-      // @spec Gate and its Work reply to the persistent Gate Web address, independently of Me's notification default.
-      // @link docs/personal/gate.md
-      const gateTarget = new Addresses(this.resources.storage.home).ref(webAddress(initial.spec.id));
-      if (target && target.uid !== gateTarget.uid) throw new Error("Gate outputs must remain in Gate");
-      target = gateTarget;
-    }
     // A repeated tool call keeps its admitted destination even if new immediate Inputs have arrived.
     if (!target && previous) {
       target = previous.spec.target; replyToMessageId = previous.spec.replyToMessageId;
@@ -203,11 +213,14 @@ export class TopicStore {
     }
     if (!target) {
       const candidates = (inputIds.length ? inputIds : owner ? [] : this.pending(initial.metadata.uid).map(i => i.metadata.name)).map(attached)
-        .filter((i) => i.spec.origin === "channel" && inputAttention(i.spec) === InputAttention.Immediate);
+        .filter((i) => !!i.spec.handoff || i.spec.origin === "channel" && inputAttention(i.spec) === InputAttention.Immediate);
       if (candidates.length) {
         const first = candidates[0]!.spec.source;
         if (first && candidates.every(i => i.spec.source && first.uid === i.spec.source.uid)) {
           target = first;
+          const delegated = candidates.map(i => i.spec.handoff).filter(h => !!h);
+          if (delegated.length && delegated.every(h => h.id === delegated[0]!.id)) { conversation = delegated[0]!.gate; handoffId = delegated[0]!.id; }
+          if (receivers === undefined && candidates.every(i => i.spec.sender?.uid === candidates[0]!.spec.sender?.uid) && candidates[0]!.spec.sender) receivers = [candidates[0]!.spec.sender];
           const coordinates = new Set(candidates.map(i => i.spec.replyToMessageId));
           if (coordinates.size === 1) replyToMessageId = candidates[0]!.spec.replyToMessageId;
         }
@@ -240,7 +253,7 @@ export class TopicStore {
       const accepted = this.outputStore.get(id);
       const createdBy = accepted ? accepted.spec.createdBy
         : executionId ? agentCall((owner ?? c).status, options.idempotencyKey) : undefined;
-      const association = { ...(options.contentKind ? { contentKind: options.contentKind } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
+      const association = { ...(conversation ? { conversation } : {}), ...(handoffId ? { handoffId } : {}), ...(options.contentKind ? { contentKind: options.contentKind } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
       try {
         await commitStatus(this.client, [
           { operation: "patchStatus", resource: c, patch: {} },

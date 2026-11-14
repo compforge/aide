@@ -1,3 +1,4 @@
+import { receiveDomain } from "./address-fixture.ts";
 import { digest } from "../plugins/personal/chief-model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { webAddress } from "../src/channel/address.ts";
@@ -87,13 +88,13 @@ test("Default receives unmatched Inputs while hinted and Channel Inputs go direc
   await aide.settled();
   assert.ok(aide.personal.topics.input("hint", "group"));
   assert.equal(aide.personal.topics.input("hint", "default"), undefined);
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "channel", topicId: "group", text: "channel input" }));
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web", id: "channel", topicId: "group", text: "channel input" }));
   await aide.settled();
   const group = aide.personal.topics;
   const channel = group.inputs("group").find((input) => input.spec.text === "channel input")!;
   assert.equal(aide.personal.topics.input(channel.metadata.name, "default"), undefined);
   const before = aide.outputs().length;
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "channel", topicId: "group", text: "channel input" }));
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web", id: "channel", topicId: "group", text: "channel input" }));
   await aide.settled(); assert.equal(aide.outputs().length, before);
 });
 
@@ -102,7 +103,7 @@ test("Opening Default before any fallback input preserves its system identity an
   const root = mkdtempSync(join(tmpdir(), "aide-default-open-"));
   const aide = new Aide(root, fakeOptions({ async chief() { return "received"; }, async route() { throw new Error("Explicit Topic needs no model routing"); }, async execute() { throw new Error("No Work"); } }, root), log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "hello", topicId: "default", text: "hello" }));
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web", id: "hello", topicId: "default", text: "hello" }));
   await aide.settled();
   const fallback = aide.topics.resource("default")!;
   assert.equal(fallback.spec.default, true);

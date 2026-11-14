@@ -1,3 +1,4 @@
+import { isDomainRoot } from "./boundary.ts";
 import { assignInput } from "../input/assignment.ts";
 import { inputStatus } from "../status.ts";
 import { requireTopic } from "./ownership.ts";
@@ -45,7 +46,7 @@ export function idleReviewDelay(config: TopicReviewPolicy, count = 0): number {
 export function idleReviewSchedule(topic: Readonly<TopicResource>, config: TopicReviewPolicy) {
   const status = topic.status;
   const since = [status.idleSince ?? topic.metadata.creationTimestamp, status.reviewCheckedAt ?? ""].sort().at(-1)!;
-  const enabled = !topic.spec.parentRef && !topic.metadata.deletionTimestamp && topicReview(topic.spec.review).enabled;
+  const enabled = isDomainRoot(topic) && !topic.metadata.deletionTimestamp && topicReview(topic.spec.review).enabled;
   let reset = enabled && config.backoff ? status.idleReviewReset ?? null : null;
   if (reset && reset.at <= since) reset = null;
   if (enabled && config.backoff && !reset && status.lastInputAt && status.lastInputAt > since)
@@ -106,7 +107,7 @@ export async function createReviewInput(context: Pick<PluginContext, "resources"
 export function validateReviewRequest(input: { spec: InputSpec; status: InputStatus }, context: ResourceValidationContext) {
   const topic = requireTopic(input.status.topic, context);
   if (input.spec.originRef?.uid !== topic.metadata.uid) throw new Error("Internal Input target changed");
-  if (input.spec.origin === "aide:review" && (topic.spec.parentRef || topic.status.execution || (!topicReview(topic.spec.review).enabled && !["understanding", "note_pressure"].includes(String(input.spec.observation?.trigger)))))
+  if (input.spec.origin === "aide:review" && (!isDomainRoot(topic) || topic.status.execution || (!topicReview(topic.spec.review).enabled && !["understanding", "note_pressure"].includes(String(input.spec.observation?.trigger)))))
     throw new Error("Review requires an idle enabled root Topic");
 }
 

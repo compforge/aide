@@ -1,3 +1,4 @@
+import { isDomainRoot, isProcessingRoot } from "../topic/boundary.ts";
 import { assignInput } from "../input/assignment.ts";
 import { commitStatus } from "../status.ts";
 import type { AgentCall } from "../observation/reference.ts";
@@ -19,13 +20,13 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
     if (destinations.length !== 1) throw new Error("Route needs exactly one Topic destination");
     const topics = await Promise.all([...new Map(destinations.map(d => [d.uid, d])).values()].map(async d => {
       const c = await context.resources.get<TopicSpec, TopicStatus>({ ...TOPIC_TYPE, namespace: "v1", ...d });
-      if (!c || c.metadata.deletionTimestamp || (rootsOnly && (c.spec.parentRef || c.spec.gate))) throw new Error(`Topic no longer exists: ${d.uid}`);
+      if (!c || c.metadata.deletionTimestamp || (rootsOnly && !isDomainRoot(c))) throw new Error(`Topic no longer exists: ${d.uid}`);
       return c;
     }));
     const at = new Date().toISOString();
     const assess = input.status.assess ?? {};
     const touched = [...topics];
-    for (let c = topics[0]!; c.spec.parentRef;) {
+    for (let c = topics[0]!; c.spec.parentRef && !isProcessingRoot(c);) {
       const parent = await context.resources.get<TopicSpec, TopicStatus>(c.spec.parentRef);
       if (!parent || parent.metadata.deletionTimestamp || touched.some(t => t.metadata.uid === parent.metadata.uid)) throw new Error("Topic path unavailable");
       touched.push(parent); c = parent;

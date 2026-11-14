@@ -1,3 +1,4 @@
+import { receiveDomain } from "./address-fixture.ts";
 import { Background as TopicBackground } from "../plugins/personal/topic/background.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -38,7 +39,7 @@ test("A say request for information finishes processing; the answer is a new Inp
   let aide = new Aide(home, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const first = fixtureIncoming({ channelId: "web", id: "first", topicId: "me", text: "检查环境" });
-  await aide.receive(first); await aide.settled();
+  await receiveDomain(aide, first); await aide.settled();
   const before = aide.invocations().at(-1)!;
   assert.deepEqual(aide.personal.topics.get("me")!.pendingInputIds, []);
   assert.equal(aide.outputs().at(-1)!.text, "请提供目标环境。");
@@ -47,7 +48,7 @@ test("A say request for information finishes processing; the answer is a new Inp
   aide = new Aide(home, options, pino({ level: "silent" }));
   assert.doesNotMatch(new TopicBackground(aide.personal.store, aide.topics.resource("me"), "me").text(), /请提供目标环境。/, "A processing receipt is not automatically topic understanding");
   assert.equal(aide.outputs().at(-1)!.text, "请提供目标环境。", "The question remains in the durable Output");
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "answer", topicId: "me", text: "test 环境" })); await aide.settled();
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web", id: "answer", topicId: "me", text: "test 环境" })); await aide.settled();
   const after = aide.invocations().at(-1)!;
   assert.notEqual(after.invocationId, before.invocationId);
   assert.deepEqual(aide.personal.topics.get("me")!.pendingInputIds, []);
@@ -55,7 +56,7 @@ test("A say request for information finishes processing; the answer is a new Inp
   assert.equal(material.summary, undefined, "Current understanding is supplied by the context projection, not copied into each Input");
   assert.equal(material.inputs.length, 1, "Only the new Input is replayed; prior understanding is bounded context");
   assert.match(prompts.at(-1)!, /test 环境/);
-  await aide.receive(first); await aide.settled();
+  await receiveDomain(aide, first); await aide.settled();
   assert.equal(calls, 2);
   const names = chiefTools(emptyConnectors).map((tool) => tool.name);
   assert.ok(names.includes("say"));

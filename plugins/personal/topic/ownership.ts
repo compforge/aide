@@ -1,3 +1,4 @@
+import { isDomainRoot, isProcessingRoot } from "./boundary.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { Resource, ResourceReader, ResourceRef, ResourceValidationContext } from "@compforge/aide-plugin";
 import { assessmentFinished, type InputSpec, type InputStatus } from "../input/model.ts";
@@ -35,12 +36,12 @@ export function guardInputTopic(previous: Resource<InputSpec, InputStatus>, curr
  */
 export function requireOrganization(organization: Organization | undefined, context: ResourceValidationContext, topics: readonly TopicResource[]) {
   const actor = organization && context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, organization.actorUid);
-  if (!actor || actor.spec.gate || topics.some(t => t.spec.gate) || actor.metadata.deletionTimestamp || actor.spec.parentRef || !organization?.executionId
+  if (!actor || actor.spec.gate || topics.some(t => t.spec.gate) || actor.metadata.deletionTimestamp || !isDomainRoot(actor) || !organization?.executionId
     || actor.status.execution?.id !== organization.executionId) throw new Error("Organization requires the active root Chief");
   for (const topic of topics) {
     let current = topic;
     const seen = new Set<string>();
-    while (current.spec.parentRef) {
+    while (current.spec.parentRef && !isProcessingRoot(current)) {
       if (seen.has(current.metadata.uid)) throw new Error("Topic parent cycle");
       seen.add(current.metadata.uid);
       current = requireTopic(current.spec.parentRef, context);

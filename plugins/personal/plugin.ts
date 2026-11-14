@@ -16,12 +16,15 @@ import { registerRoutines } from "./routine/reconcile.ts";
 import { registerAddresses } from "./address/reconcile.ts";
 import { registerPersons } from "./person/reconcile.ts";
 
+import { registerHandoffs } from "./handoff/reconcile.ts";
+
 const plugin: PluginPackage = {
   pluginId: "aide.personal", version: "0.1.0",
   async activate(context) {
     context.logger.info("Personal Plugin worker activated", { attributes: { pid: process.pid } });
     registerWeave(context);
     registerRoute(context);
+    registerHandoffs(context);
     registerInputs(context);
     registerTopics(context);
     registerSources(context);

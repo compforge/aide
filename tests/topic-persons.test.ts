@@ -143,7 +143,7 @@ test("Route and Chief query people and recent activity only for the current page
   assert.ok(page.items.length < 20);
   assert.equal(people, page.items.length + 1); assert.equal(activities, page.items.length + 1);
   const root = await f.aide.topics.ensure("chief");
-  for (const child of f.store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE).filter(t => t.metadata.uid !== root.metadata.uid))
+  for (const child of f.store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE).filter(t => !t.spec.gate && t.metadata.uid !== root.metadata.uid))
     await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(root) }, child.status);
   people = 0;
   const tools = topicTools(f.store, () => root);

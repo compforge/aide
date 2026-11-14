@@ -1,3 +1,4 @@
+import { isGateParent } from "./boundary.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { PluginContext, ResourceClient, Watch } from "@compforge/aide-plugin";
 import { patchStatus } from "../status.ts";
@@ -36,7 +37,7 @@ export async function refreshSummaryConditions(resources: ResourceClient, topic:
 export function summaryWatch(): Watch {
   const requests = (current: TopicResource, previous?: TopicResource, includeSelf = false) => {
     const refs = [current.spec.parentRef, previous?.spec.parentRef, ...(includeSelf ? [current.metadata] : [])];
-    return [...new Map(refs.filter(ref => !!ref).map(ref => [ref!.uid, { name: ref!.name, namespace: ref!.namespace }])).values()];
+    return [...new Map(refs.filter(ref => !!ref && !("apiVersion" in ref && isGateParent(ref))).map(ref => [ref!.uid, { name: ref!.name, namespace: ref!.namespace }])).values()];
   };
   return { resourceType: TOPIC_TYPE, handler: {
     create: async ({ object }) => requests(object as TopicResource, undefined, true),

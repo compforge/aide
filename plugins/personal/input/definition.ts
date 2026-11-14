@@ -19,7 +19,9 @@ import { assessmentFinished, INPUT_TYPE, INPUT_ORIGINS, InputAttention, isIntern
 import { AddressRefSchema } from "../address/model.ts";
 import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { inputPrinter } from "./printer.ts";
+import { EvidenceRefSchema } from "../handoff/model.ts";
 export const InputSpecSchema = z.object({ ...InputClassificationFields, inputKey: z.string().min(1).max(2000).optional(), source: AddressRefSchema.optional(), replyToMessageId: z.string().optional(), topicKey: z.string().min(1).max(500).optional(), topicId: z.string().min(1).optional(), origin: z.enum(INPUT_ORIGINS),
+  handoff: z.object({ id: z.string().min(1), gate: ResourceRefSchema, sourceInput: EvidenceRefSchema, replyTo: AddressRefSchema }).strict().optional(),
   topicName: z.string().trim().min(1).max(80).optional(),
   originId: z.string().min(1), relation: z.enum(["sent", "received", "observed"]).optional(),
   sender: PersonRefSchema.optional(),

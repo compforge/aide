@@ -1,6 +1,6 @@
 # Personal：理解人，承接目标，持续推进
 
-统一对话入口见 [Gate](gate.md)：独立 Agent、跨 Topic 问答和分析委托。
+统一对话入口见 [Gate](gate.md)：Me 与 Aide 独享的全局信息域和行动范围；独立 Agent 接住双方单聊，跨 Topic 问答并交办领域 Chief。
 
 Personal 是 Aide 的内置个人助手插件。Input 带来内容、人物和地址；Aide 结合输入性质、已有委托与处理进展作判断，必要时向相关 Address 产生 Output。
 
