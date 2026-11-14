@@ -107,13 +107,13 @@ Topic 使用独立 ID / UID，名称和来源 key 不充当资源身份。字段
 | --- | --- |
 | spec.name | 便于理解的主题名称，可以变化 |
 | spec.topicKey | 可选的来源关联键；一个 key 同时只对应一个可接纳的 Topic |
-| spec.parentRef | 可选的父 Topic 引用，固定到 UID |
+| spec.parentRef | 固定到 UID 的父 Topic 引用；Gate 无父，领域 root 指向 Gate |
 | status.summaryRevision | 摘要 Note 的派生内容指纹；通过 Note.summaryOf 索引读取正文，recent 从普通 Note 的 subject 索引查询 |
 | status.lastInputAt | 本 Topic 及其子树已观察到的最后一次业务 Input 时间；子节点活动异步向上传播 |
 | spec.default | 系统兜底主题标记，与保留身份 `default` 一致，不可转移 |
 | status.agent / status.execution | root 的原生会话引用和执行状态；非 root 不继续运行 Chief |
 
-只持久化 parentRef，不再持久化 children 列表。按 parentRef 索引反向查询直接子节点，沿 parentRef 向上寻找 root；API / Web 可以返回由此生成的树投影。
+只持久化 parentRef，不再持久化 children 列表。按 parentRef 索引反向查询直接子节点，沿 parentRef 向上寻找领域 root（Gate 的直接子节点），执行和知识整理不越过这个边界；API / Web 可以返回由此生成的树投影。
 
 - 没有 parent 的 Topic 是 root。
 - 没有 children 的 Topic 是 leaf。

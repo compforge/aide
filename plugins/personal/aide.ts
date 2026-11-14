@@ -1,3 +1,6 @@
+import { isGateInput } from "./gate/input.ts";
+import { migrateGateTree } from "./gate/topic.ts";
+import { isDomainRoot, isProcessingRoot } from "./topic/boundary.ts";
 import { MailSender } from "./stream/sender.ts";
 import { Addresses } from "./address/service.ts";
 import { addressTools } from "./address/tools.ts";
@@ -54,6 +57,9 @@ import { TOPIC_TYPE, INPUT_TYPE, digest } from "./chief-model.ts";
 import { TopicDeletionBlocked, type TopicDeletion } from "./topic/model.ts";
 import { TopicStore } from "./topic/store.ts";
 import type { InputStore } from "./input/store.ts";
+import { domainHandoffTools } from "./handoff/tools.ts";
+import { Handoffs } from "./handoff/service.ts";
+import { BUSINESS_INPUT_ORIGINS } from "../../agents/chief/input-tools.ts";
 import { gateSession } from "./gate/agent.ts";
 import { chiefTools } from "../../agents/chief/chief-tools.ts";
 import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
@@ -138,7 +144,7 @@ export class Personal {
         inputOrigin: id => this.topics.inputStore.get(id)?.spec.origin,
         changed: (task, tools) => this.log.info({ topicId, executionId: task.executionId, inputOrigin: task.origin,
           inputIds: task.inputs.map(i => i.id), tools, toolCount: tools.length }, "Chief Input tools selected"),
-      }, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active, ref => this.store.topics.outputStore.deliveryCapability(ref)), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
+      }, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...domainHandoffTools(new Handoffs(this.store, this.log), active).map(t => ({ ...t, inputOrigins: BUSINESS_INPUT_ORIGINS })), ...addressTools(new Addresses(this.store.resources.storage.home), active, ref => this.store.topics.outputStore.deliveryCapability(ref)), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
         const c = active();
         const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId, topicPolicy(this.options.topic).maxChars);
         this.log.info({ topicId, targetTopicId: input.topicId, noteId: result.noteId, version: result.version, sensitivity: result.sensitivity, visibility: result.visibility }, "Topic Note updated");
@@ -190,7 +196,7 @@ export class Personal {
           const topics = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
           const destinations = [...new Set(args.topicUids)].map(uid => {
             const c = topics.find(c => c.metadata.uid === uid && !c.metadata.deletionTimestamp);
-            if (!c || c.spec.parentRef) throw new Error(`Root Topic no longer exists: ${uid}`);
+            if (!c || !isDomainRoot(c)) throw new Error(`Root Topic no longer exists: ${uid}`);
             return { name: c.metadata.name, uid };
           });
           if (!destinations.length) destinations.push(await defaultDestination(context));
@@ -279,7 +285,7 @@ export class Personal {
     const resources = this.plugins.resourceClient("personal");
     for (let n = 0; ; n++) {
       const topic = await resources.get<TopicSpec, TopicStatus>(ref);
-      if (!topic || topic.metadata.deletionTimestamp || topic.spec.parentRef || !topic.status.execution) return { accepted: false, reason: "not_running" };
+      if (!topic || topic.metadata.deletionTimestamp || !isProcessingRoot(topic) || !topic.status.execution) return { accepted: false, reason: "not_running" };
       const invocation = this.plugins.listHarnessInvocations().find(i => i.executionId === topic.status.execution!.id && i.phase === "running");
       if (!invocation) return { accepted: false, reason: "not_running" };
       const ids = [...new Set(args.inputIds ?? [args.inputId])];
@@ -372,6 +378,8 @@ export class Personal {
   }
 
   private async startOnce(): Promise<void> {
+    const migrated = await migrateGateTree(this.store.client);
+    if (migrated) this.log.info({ roots: migrated }, "Attached existing domain roots to Gate");
     this.mailSender.recover();
     await this.recoverInterrupted();
     await this.core.start();
@@ -468,9 +476,9 @@ export class Personal {
     const accepted = await this.acceptChannel(id, input);
     if (fact) this.log.info({ inputId: id, previousOrigin: fact.spec.origin, channelId: input.channelId }, "Channel reused existing platform message Input");
     // Resolve explicit admission before the next Channel Input; receipt dedup above precedes creation.
-    if (input.topicKey || input.topicId) await routeByRules({ resources: this.plugins.resourceClient("personal"),
+    if (isGateInput(accepted.spec) || input.topicKey || input.topicId) await routeByRules({ resources: this.plugins.resourceClient("personal"),
       logger: { info: (message, detail) => this.log.info({ detail }, message) } }, accepted);
-    this.log.info({ topicId: input.topicId, inputId: id, channelId: input.channelId, relation: accepted.spec.relation ?? "unknown" }, "Accepted Chief input");
+    this.log.info({ topicId: input.topicId, inputId: id, channelId: input.channelId, relation: accepted.spec.relation ?? "unknown" }, "Accepted Personal input");
     return { inputId: accepted.metadata.name, at: accepted.metadata.creationTimestamp };
   }
 

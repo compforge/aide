@@ -1,3 +1,4 @@
+import { isProcessingRoot } from "../topic/boundary.ts";
 import { inputExpired } from "./retention.ts";
 import type { ResourceReader } from "@compforge/aide-plugin";
 import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "./model.ts";
@@ -13,7 +14,7 @@ import { topicPolicy, type TopicPolicy } from "../topic/config.ts";
  */
 export async function readyBusinessInputs(resources: ResourceReader, owner: Readonly<TopicResource>, policy: TopicPolicy = topicPolicy(), now = Date.now()) {
   const inputs: Input[] = [];
-  if (owner.spec.parentRef) return { inputs };
+  if (!isProcessingRoot(owner)) return { inputs };
   const page = (attention: InputAttention, limit: number) => resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
     namespace: owner.metadata.namespace, matchIndex: { name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, attention]) }, limit,
   });

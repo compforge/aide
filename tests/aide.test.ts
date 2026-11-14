@@ -1,3 +1,4 @@
+import { receiveDomain } from "./address-fixture.ts";
 import { collectResources } from "./fixtures/resource-gc.ts";
 import { fixtureAddress } from "./address-fixture.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
@@ -270,7 +271,7 @@ test("Aide resumes the same Session and personal state when execution cwd change
   const first = new Aide(root, fakeOptions(agent, join(root, "code-a"), [], root), log);
   let restarted: Aide | undefined;
   t.after(async () => { await first.close(); await restarted?.close(); rmSync(root, { recursive: true, force: true }); });
-  await first.receive(fixtureIncoming({ channelId: "web", id: "hello",  topicId: "me", text: "你好" }));
+  await receiveDomain(first, fixtureIncoming({ channelId: "web", id: "hello",  topicId: "me", text: "你好" }));
   await first.settled();
   const routine = await first.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "manual" } });
   const messages = first.outputs();
@@ -290,7 +291,7 @@ test("Aide resumes the same Session and personal state when execution cwd change
   await restarted.start(); await restarted.settled();
   assert.equal(restarted.work("me").read(routine.id).title, routine.title);
   assert.deepEqual(restarted.outputs(), messages);
-  await restarted.receive(fixtureIncoming({ channelId: "web", id: "again",  topicId: "me", text: "继续聊" }));
+  await receiveDomain(restarted, fixtureIncoming({ channelId: "web", id: "again",  topicId: "me", text: "继续聊" }));
   await restarted.settled();
   assert.ok(executionCwds.length > 0);
   assert.ok(executionCwds.every((cwd) => cwd === join(root, "code-b")));
@@ -326,7 +327,7 @@ test(`Task, Routine and Chief remain dedicated agents with default Harness ${har
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   aide.personal;
 
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "hello",  topicId: "me", text: "hello" }));
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web", id: "hello",  topicId: "me", text: "hello" }));
   await aide.settled();
   // Mutating the caller's object cannot change future Sessions' startup target.
   defaultHarnessConfig.model = "changed-after-startup";

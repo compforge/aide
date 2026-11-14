@@ -1,3 +1,4 @@
+import { digest } from "../plugins/personal/chief-model.ts";
 import { collectResources } from "./fixtures/resource-gc.ts";
 import { composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { mailDraft } from "../plugins/personal/output.ts";
@@ -208,7 +209,7 @@ test("Weave grouping rejects Note-only changes between review and commit", async
     parent: { uid: parent.metadata.uid, version: understandingVersion(parent) },
   }, 4000), /understanding changed/);
   assert.equal(f.read().metadata.resourceVersion, root.metadata.resourceVersion, "Only the independent Note changed");
-  assert.equal(f.read().spec.parentRef, undefined);
+  assert.equal(f.read().spec.parentRef?.name, digest("gate"));
   assert.deepEqual(f.aide.topics.resource("parent"), parent, "The grouping transaction rolled back");
 });
 

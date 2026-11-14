@@ -17,6 +17,7 @@ export function mountComposer(topicId: string, onAccepted: () => Promise<void>, 
       }
       await request(endpoint, { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify(endpoint === "/gate/messages" ? { id: draft.id, text: draft.text } : draft) });
       if (signal.aborted) return;
+      if (endpoint !== "/gate/messages") { location.assign("/gate"); return; }
       draft = null; $<HTMLTextAreaElement>('input').value = ''; $('notice').textContent = '已接收，后续进展会显示在这里。';
       await onAccepted(); if (!signal.aborted) $('messages').scrollTop = $('messages').scrollHeight;
     } catch (error) { if (signal.aborted) return; $('notice').className = 'error'; $('notice').textContent = errorMessage(error) + ' 原消息编号会保留，避免重复交办。'; }

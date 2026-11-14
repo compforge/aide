@@ -19,6 +19,7 @@ export const OutputSpecSchema = z.object({
   target: AddressRefSchema,
   replyTo: z.object({ input: ref.extend({ uid: z.string().min(1) }), key: z.string().min(1), messageId: z.string().optional() }).strict().optional(),
   replyToMessageId: z.string().optional(),
+  conversation: ref.extend({ uid: z.string().min(1) }).optional(), handoffId: z.string().optional(),
   receivers: PersonRefsSchema(100).optional(),
   topic: ref.extend({ uid: z.string().min(1) }), topicId: z.string().min(1),
   inputUids: z.record(z.string(), z.string().min(1)).optional(), createdBy: AgentCallSchema.optional(),

@@ -4,7 +4,7 @@ import { OUTPUT_TYPE } from "../output/model.ts";
 import { NOTE_TYPE } from "../note/model.ts";
 import { digest } from "../chief-model.ts";
 import type { TopicStore } from "./store.ts";
-import { initialTopicName, TOPIC_TYPE } from "./model.ts";
+import { initialTopicName, GATE_TOPIC_ID, TOPIC_TYPE } from "./model.ts";
 import { topicReview, type TopicReview } from "./review.ts";
 import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
 
@@ -33,11 +33,12 @@ const replies = `SELECT source AS key, order_key AS created FROM (${reply("p.sou
 const facts = (predicate = "") => `, activity AS MATERIALIZED (SELECT c.*, max(created, coalesce(lastInputAt, ''),
     coalesce((${latest(INPUT_TYPE, "topicActivity", "c.uid")}), ''), coalesce((${reply("p.order_key")}), ''),
     coalesce((${forwarded("p.order_key")}), '')) AS updatedAt FROM candidates c ${predicate})`;
-const selection = `t.key, t.uid, t.created, ${field("t", "spec.id")} AS id, ${field("t", "spec.parentRef.uid")} AS parentUid,
+const visibleParent = `CASE WHEN ${field("t", "spec.parentRef.name")} = '${digest(GATE_TOPIC_ID)}' THEN NULL ELSE ${field("t", "spec.parentRef.uid")} END`;
+const selection = `t.key, t.uid, t.created, ${field("t", "spec.id")} AS id, ${visibleParent} AS parentUid,
   coalesce(${field("t", "spec.default")}, 0) AS isDefault, ${field("t", "status.lastInputAt")} AS lastInputAt`;
 const columns = `t.key, t.uid, t.created, ${field("t", "spec.id")} AS id, ${field("t", "metadata.resourceVersion")} AS revision,
   ${field("t", "spec.name")} AS name, ${field("t", "spec.topicKey")} AS topicKey,
-  ${field("t", "spec.parentRef.uid")} AS parentUid, coalesce(${field("t", "spec.default")}, 0) AS isDefault,
+  ${visibleParent} AS parentUid, coalesce(${field("t", "spec.default")}, 0) AS isDefault,
   ${field("t", "spec.review")} AS review, ${field("t", "status.lastInputAt")} AS lastInputAt`;
 const order = "updatedAt DESC, id ASC, uid ASC";
 

@@ -1,3 +1,5 @@
+import { HANDOFF_TYPE } from "../handoff/model.ts";
+import { isDomainRoot, isProcessingRoot } from "./boundary.ts";
 import { NotePressureSchema } from "../note/pressure.ts";
 import { PersonRefsSchema } from "../person/model.ts";
 import { validateSummary } from "../note/summary.ts";
@@ -41,7 +43,7 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
   if (systemDefault !== (resource.spec.id === DEFAULT_TOPIC_ID) || systemDefault !== (resource.metadata.name === digest(DEFAULT_TOPIC_ID)))
     throw new Error("Default Topic identity is reserved for the system");
   if (systemDefault && (resource.spec.address || resource.spec.topicKey)) throw new Error("Default Topic cannot have a source address or key");
-  if (resource.spec.default && resource.spec.parentRef) throw new Error("Default Topic must remain a root");
+  if (resource.spec.default && !isDomainRoot(resource)) throw new Error("Default Topic must remain a root");
   if (resource.spec.topicKey && !resource.metadata.deletionTimestamp && context.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { matchIndex: { name: "topicKey", value: resource.spec.topicKey } }).some(c => c.metadata.uid !== resource.metadata.uid && !c.metadata.deletionTimestamp && c.spec.topicKey === resource.spec.topicKey))
     throw new Error("Topic key already exists");
   const visited = new Set([resource.metadata.uid]);
@@ -50,7 +52,6 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
     if (visited.has(parent.uid)) throw new Error("Topic parent cycle");
     visited.add(parent.uid);
     const value = requireTopic(parent, context);
-    if (value.spec.gate) throw new Error("Gate Topic cannot have children");
     parent = value.spec.parentRef;
   }
   // Default identity cannot change after creation; status writes need no uniqueness lookup.
@@ -61,7 +62,7 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
   }
 }
 export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
-  type: TOPIC_TYPE, indexVersion: 4,
+  type: TOPIC_TYPE, indexVersion: 5,
   schema: { spec: z.object({ gate: z.boolean().optional(), maxNotes: z.number().int().min(1).max(999).optional(), id: z.string(), address: AddressRefSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     people: PersonRefsSchema(1000).optional(), review: TopicReviewSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
     status: z.object({ conditions: ConditionsSchema, summaryDependencies: z.record(z.string(), z.string()).optional(), organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
@@ -100,7 +101,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       }
     }
     if (previous.spec.id !== current.spec.id || previous.spec.topicKey !== current.spec.topicKey) throw new Error("Topic identity is immutable");
-    if (current.spec.parentRef && current.status.execution && current.status.execution.id !== previous.status.execution?.id)
+    if (!isProcessingRoot(current) && current.status.execution && current.status.execution.id !== previous.status.execution?.id)
       throw new Error("Only a root Topic can start Chief");
     validateDefault(current, context, previous);
     guardTopicOrganization(current, context, previous);
@@ -110,12 +111,13 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     // @link docs/personal/topic.md#静默回收
     if (resource.spec.gate) throw new TopicDeletionBlocked("gate", "Gate Topic cannot be deleted");
     if (resource.spec.default) throw new TopicDeletionBlocked("default", "Default Topic cannot be deleted");
+    if (context.page(HANDOFF_TYPE, { limit: 1, matchIndex: { name: "activeTopic", value: resource.metadata.uid } }).items.length) throw new TopicDeletionBlocked("busy", "Topic has active handoffs");
     if (resource.status.execution) throw new TopicDeletionBlocked("busy", "Topic is busy");
     if (context.page(TOPIC_TYPE, { limit: 1, matchIndex: { name: "parent", value: resource.metadata.uid } }).items.length) throw new TopicDeletionBlocked("children", "Topic still has children");
     const pending = context.page(INPUT_TYPE, { limit: 1, matchIndex: { name: "assessPending", value: resource.metadata.uid } }).items.length;
     if (pending) throw new TopicDeletionBlocked("busy", "Topic has pending Input");
     if (WORK_TYPES.some(type => context.page(type, { limit: 1, matchIndex: { name: "topic", value: resource.metadata.uid } }).items.length)) throw new TopicDeletionBlocked("work", "Topic still owns Work");
-    if (resource.spec.parentRef) {
+    if (resource.spec.parentRef && !isDomainRoot(resource)) {
       const parent = context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, resource.spec.parentRef.uid);
       if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource, notes(context, resource.metadata.uid, "subject"))) throw new TopicDeletionBlocked("unabsorbed", "Parent must absorb Topic understanding before deletion");
     }
@@ -123,13 +125,13 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   indexes: { address: r => !r.metadata.deletionTimestamp && r.spec.address ? [r.spec.address.uid] : [], uid: r => [r.metadata.uid], default: r => r.spec.default && !r.metadata.deletionTimestamp ? ["default"] : [],
     topicKey: r => r.metadata.deletionTimestamp || !r.spec.topicKey ? [] : [r.spec.topicKey],
     liveParent: r => !r.metadata.deletionTimestamp && r.spec.parentRef ? [r.spec.parentRef.uid] : [],
-    parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], weaveRoot: r => !r.metadata.deletionTimestamp && !r.spec.gate && !r.spec.parentRef && !r.spec.default ? ["root"] : [], root: r => !r.metadata.deletionTimestamp && !r.spec.gate && !r.spec.parentRef ? ["root"] : [] },
+    parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], weaveRoot: r => !r.metadata.deletionTimestamp && isDomainRoot(r) && !r.spec.default ? ["root"] : [], root: r => !r.metadata.deletionTimestamp && isDomainRoot(r) ? ["root"] : [] },
   orderedIndexes: {
     notePressure: r => !r.metadata.deletionTimestamp && r.status.notePressure && r.status.notePressure.version !== r.status.notePressure.reviewedVersion
       ? [{ value: r.status.notePressure.rootUid, order: r.status.notePressure.nextAt }] : [],
-    weavePending: r => !r.metadata.deletionTimestamp && !r.spec.gate && !r.spec.parentRef && !r.spec.default && r.status.weaveReview?.version !== candidateVersion(r)
+    weavePending: r => !r.metadata.deletionTimestamp && isDomainRoot(r) && !r.spec.default && r.status.weaveReview?.version !== candidateVersion(r)
       ? [{ value: "root", order: r.status.weaveReview?.at ?? "" }] : [],
-    weaveReviewed: r => !r.metadata.deletionTimestamp && !r.spec.gate && !r.spec.parentRef && !r.spec.default && r.status.weaveReview?.version === candidateVersion(r)
+    weaveReviewed: r => !r.metadata.deletionTimestamp && isDomainRoot(r) && !r.spec.default && r.status.weaveReview?.version === candidateVersion(r)
       ? [{ value: "root", order: r.status.weaveReview.at }] : [],
   },
   retention: { releasedAt: r => !r.spec.gate && !r.spec.default && !r.status.execution && !r.status.agent?.sessionId

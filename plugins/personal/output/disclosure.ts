@@ -1,3 +1,4 @@
+import { isProcessingRoot } from "../topic/boundary.ts";
 import { DeliveryError, deliveryFailure } from "@compforge/aide-connector";
 import { deliveryEndpoint } from "../address/locator.ts";
 import type { AddressSpec, AddressStatus, AddressRef } from "../address/model.ts";
@@ -99,7 +100,7 @@ export class OutputDisclosure {
         let topic = topicFor(note.spec.subject);
         item.topicPeople = topic ? [...topic.spec.people ?? []].map(p => p.uid) : undefined;
         const visited = new Set<string>();
-        while (item.visibility === "root" && topic?.spec.parentRef) {
+        while (item.visibility === "root" && topic?.spec.parentRef && !isProcessingRoot(topic)) {
           if (visited.has(topic.metadata.uid)) { topic = undefined; break; }
           visited.add(topic.metadata.uid);
           topic = get<TopicSpec, TopicStatus>(topic.spec.parentRef);

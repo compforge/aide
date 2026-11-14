@@ -1,3 +1,5 @@
+import { ensureGateTopic } from "../gate/topic.ts";
+import { isDomainRoot } from "./boundary.ts";
 import { writeSummary } from "../note/summary.ts";
 import { WriterResourceSchema } from "../note/model.ts";
 import { commitStatus } from "../status.ts";
@@ -21,7 +23,7 @@ const reasonSchema = z.string().trim().min(1).max(2000);
 async function scope(resources: ResourceClient, actor: TopicResource) {
   const topics = await readTopicSubtree(resources, resourceRef(actor));
   const root = topics[0];
-  if (!root || root.spec.parentRef || !root.status.execution || root.status.execution.id !== actor.status.execution?.id)
+  if (!root || !isDomainRoot(root) || !root.status.execution || root.status.execution.id !== actor.status.execution?.id)
     throw new Error("Organization requires the active root Chief");
   return { root, topics };
 }
@@ -80,7 +82,7 @@ export async function moveTopic(resources: ResourceClient, actor: TopicResource,
   const organization = OrganizationSchema.parse({ at: new Date().toISOString(), reason: reasonSchema.parse(args.reason), actorUid: root.metadata.uid, executionId: root.status.execution!.id,
     fromUid: topic.spec.parentRef?.uid, ...(parent ? { toUid: parent.metadata.uid } : {}) });
   await commitStatus(resources, [
-    { operation: "replace", resource: topic, spec: { ...spec, ...(parent ? { parentRef: resourceRef(parent) } : {}) },
+    { operation: "replace", resource: topic, spec: { ...spec, parentRef: resourceRef(parent ?? await ensureGateTopic(resources)) },
       status: { ...topic.status, organization, reviewCheckedAt: null, idleReviewCount: 0, idleReviewReset: null, idleSince: organization.at,
         weaveRevision: (topic.status.weaveRevision ?? 0) + 1 } },
     // Notify the old root of changed responsibility and reject admissions prepared against its previous tree.

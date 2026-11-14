@@ -105,7 +105,7 @@ export function topicView(aide: ChannelService, topicId: string, before?: string
     const definition = item.origin && aide.inputDefinition({ origin: item.origin, originId: item.originId ?? "" });
     roots.push({ id: item.id, type: item.type, at: item.at, content: item.preview,
       role: item.type === "message" ? "aide" : item.origin === "channel" ? "user" : undefined,
-      status: item.status, group_id: item.executionId, origin: item.origin, originId: definition ? definition.id : undefined,
+      status: item.status, group_id: item.executionId ?? (item.type === "input" ? item.id.slice(6) : null), origin: item.origin, originId: definition ? definition.id : undefined,
       ...(definition ? { label: definition.label, icon: definition.icon } : {}),
       ...(item.type === "input" ? { inputId: item.id.slice(6) } : {}),
       lazy: { topicUid: resource.metadata.uid, uid: item.uid, version: item.version } });

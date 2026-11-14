@@ -21,7 +21,7 @@ import { deliver } from "../plugins/personal/route/delivery.ts";
 
 const log = pino({ level: "silent" });
 
-test("Gate is persistent, outside topic navigation, routing candidates, organization and collection", async t => {
+test("Gate is persistent, global root with isolated domain Chiefs, outside navigation and collection", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-gate-"));
   const options = fakeOptions({ async execute() { throw new Error("Unexpected Work"); } }, home);
   let aide = new Aide(home, options, log);
@@ -40,7 +40,9 @@ test("Gate is persistent, outside topic navigation, routing candidates, organiza
   await assert.rejects(resources.replace(domain, { ...domain.spec, gate: true }, domain.status), /reserved/);
   await assert.rejects(resources.replace(gate, { ...gate.spec, gate: false }, gate.status), /reserved/);
   await assert.rejects(resources.replace(gate, { ...gate.spec, parentRef: resourceRef(domain) }, gate.status), /cannot join/);
-  await assert.rejects(resources.replace(domain, { ...domain.spec, parentRef: resourceRef(gate) }, domain.status), /cannot have children/);
+  assert.equal(domain.spec.parentRef?.uid, gate.metadata.uid);
+  assert.deepEqual(aide.topics.scope(gate.metadata.uid).map(t => t.metadata.uid), [gate.metadata.uid]);
+  assert.deepEqual(aide.topics.scope(domain.metadata.uid).map(t => t.metadata.uid), [domain.metadata.uid]);
   await assert.rejects(resources.replace(gate, { ...gate.spec, review: { enabled: true } }, gate.status), /maintenance/);
   await assert.rejects(resources.delete(TOPIC_TYPE, gate.metadata.name), /cannot be deleted/);
   assert.equal(canReclaimTopic(gate, {} as never), false);
@@ -80,12 +82,12 @@ test("Gate Web requests bypass semantic Route, stream replies, deduplicate and r
   assert.deepEqual(aide.outputs().map(o => o.target), [{ kind: "channel", channelId: "web", endpoint: "gate" }]);
   assert.equal((await send(message)).status, 200); await aide.settled(); assert.equal(gateCalls, 1);
   await aide.receive(fixtureIncoming({ channelId: "web", topicId: "domain", id: "domain", text: "领域问题" }));
-  await aide.settled(); assert.equal(chiefCalls, 1); assert.equal(gateCalls, 1);
+  await aide.settled(); assert.equal(chiefCalls, 0); assert.equal(gateCalls, 2);
   assert.ok(!aide.topics.inputStore.list().some(i => i.status.topic?.uid === gate.metadata.uid && i.spec.origin.startsWith("aide:")));
   await aide.close(); aide = new Aide(home, options, log);
   await aide.receive(fixtureIncoming({ channelId: "web", topicId: "gate", id: "followup", text: "继续追问" }));
   await aide.settled();
-  assert.equal(gateCalls, 2); assert.deepEqual(aide.topics.resource("gate")!.status.agent, gate.status.agent);
+  assert.equal(gateCalls, 3); assert.deepEqual(aide.topics.resource("gate")!.status.agent, gate.status.agent);
 });
 
 test("Gate read tools discover multiple roots and enforce the active owner on every call", async t => {
@@ -105,6 +107,7 @@ test("Gate read tools discover multiple roots and enforce the active owner on ev
   const work = await aide.work("first").create({ kind: "routine", title: "Existing domain work", instruction: "Domain responsibility", trigger: { cron: null, timezone: "UTC", event: "check" } });
   assert.equal((await call("read_work", { id: work.id })).id, work.id);
   assert.equal((await call("list_work", { kind: "routine", q: "domain" })).items[0].id, work.id);
+  await assert.rejects(aide.work("gate").create({ kind: "routine", title: "Forbidden Gate work", instruction: "Must delegate", trigger: { cron: null, timezone: "UTC", event: "check" } }), /cannot own new Work/);
   await assert.rejects(aide.work("gate").requestInput(work.id, { text: "change domain" }), /Unknown work/);
   assert.ok(!tools.some(t => /^(move|upsert|prune|retire|summarize|delete|create)_/.test(t.name)));
   active = false; await assert.rejects(call("read_topic", { uid: first.metadata.uid }), /Inactive owner/);

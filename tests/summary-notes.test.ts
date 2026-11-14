@@ -90,7 +90,7 @@ test("capacity evicts a Topic with cleared understanding, then its unreferenced 
   assert.equal(note.spec.text, "");
   await f.client.patchStatus(cleared, { lastInputAt: "2000-01-01T00:00:00.000Z" });
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, highWatermark: 0.99,
-    kinds: { "aide.dev/Topic": { maxCount: f.aide.topics.list().length } } }));
+    kinds: { "aide.dev/Topic": { maxCount: f.aide.topics.list().length + 1 } } }));
   await collectResources(f.aide.topics.resources.storage);
   const arrival = await f.aide.topics.ensure("new-arrival");
   assert.equal(f.aide.topics.resource("summary"), undefined);

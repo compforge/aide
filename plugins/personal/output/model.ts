@@ -10,6 +10,8 @@ export interface OutputSpec {
   target: import("../address/model.ts").AddressRef;
   replyTo?: { input: ResourceRef & { uid: string }; key: string; messageId?: string };
   replyToMessageId?: string;
+  conversation?: ResourceRef & { uid: string };
+  handoffId?: string;
   /** @spec Intended Person references may dangle after deletion; independent of the delivery address and contributing Inputs. */
   receivers?: import("../person/model.ts").PersonRefs;
   topic: ResourceRef & { uid: string };
@@ -54,6 +56,7 @@ export interface SayInput {
   readonly idempotencyKey?: string;
   /** Only a Channel Input establishes a direct reply path; observations require a separately chosen notification target. */
   readonly respondToInputId?: string;
+  readonly respondToHandoffId?: string;
   readonly target?: import("../address/model.ts").AddressRef;
   /** Aide is always the speaker; this selects the recipient, never an impersonation identity. */
   readonly to?: { me: true };

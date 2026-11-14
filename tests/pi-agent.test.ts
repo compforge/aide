@@ -1,3 +1,5 @@
+import { receiveDomain } from "./address-fixture.ts";
+import { isDomainRoot } from "../plugins/personal/topic/boundary.ts";
 import { summaryText, prepareSummary } from "../plugins/personal/note/summary.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { committedStatus } from "./fixtures/resource-write.ts";
@@ -49,26 +51,35 @@ type Reply = { text: string; stop?: string; thought?: string; pause?: Promise<vo
 
 /** @case Gate uses its independent native session, reads domain evidence and delegates a Task whose cited result returns to Gate. */
 test("Gate native loop reads across roots, delegates analysis and resumes after restart", { timeout: 45_000 }, async t => {
-  let aide: Aide, phase = 0, gateStep = 0, taskStep = 0;
+  let aide: Aide, phase = 0, gateStep = 0, taskStep = 0, chiefStep = 0;
   let firstUid = "", secondUid = "";
   let evidence: { id: string; uid: string; version: string };
   const currentInput = () => aide.topics.inputStore.query("topic", aide.topics.resource("gate")!.metadata.uid)
     .find(i => !i.status.assess?.completedAt)!.metadata.name;
   const fixture = await setup(t, request => {
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
-    for (const name of ["list_topics", "read_topic", "list_notes", "read_note", "list_work", "read_work", "read_input"]) assert.ok(names.includes(name), name);
-    assert.ok(!names.includes("move_topic"));
     if (names.includes("report_task")) {
-      const work = aide.work("gate").list()[0]!;
+      const work = aide.work("first").list()[0]!;
       const ids = aide.topics.inputStore.query("handlePending", work.uid!).map(i => i.metadata.name);
       switch (taskStep++) {
-        case 0: return { tool: "read_topic", args: { uid: secondUid } };
-        case 1: return { tool: "read_note", args: { noteId: evidence.id } };
-        case 2: return { tool: "say", args: { text: "跨领域分析结论", notes: [{ uid: evidence.uid, version: evidence.version }] } };
-        case 3: return { tool: "report_task", args: { inputIds: ids, report: "Compared domain evidence", action: "done" } };
+        case 0: return { tool: "read_topic", args: {} };
+        case 1: return { tool: "read_handoff", args: { id: aide.topics.inputStore.get(ids[0]!)!.spec.handoff!.id } };
+        case 2: return { tool: "say", args: { text: "跨领域分析结论", respondToHandoffId: aide.topics.inputStore.get(ids[0]!)!.spec.handoff!.id, notes: [{ uid: evidence.uid, version: evidence.version }] } };
+        case 3: return { tool: "report_handoff", args: { id: aide.topics.inputStore.get(ids[0]!)!.spec.handoff!.id, inputId: ids[0], phase: "completed", report: "Compared domain evidence" } };
+        case 4: return { tool: "report_task", args: { inputIds: ids, report: "Compared domain evidence", action: "done" } };
         default: return { text: "Analysis reported" };
       }
     }
+    if (names.includes("create_work")) {
+      const input = aide.topics.inputStore.list().find(i => i.spec.handoff)!;
+      switch (chiefStep++) {
+        case 0: return { tool: "report_handoff", args: { id: input.spec.handoff!.id, inputId: input.metadata.name, phase: "working", report: "Domain accepted analysis" } };
+        case 1: return { tool: "create_work", args: { kind: "task", title: "Domain analysis", instruction: "Analyze domain evidence and reply to the handoff", trigger: null, inputId: input.metadata.name } };
+        case 2: return { tool: "assess_input", args: { inputId: input.metadata.name, summary: "Assigned analysis to domain Task" } };
+        default: return { text: "Domain task assigned" };
+      }
+    }
+    for (const name of ["list_topics", "read_topic", "list_notes", "read_note", "list_work", "read_work", "read_input", "delegate_request"]) assert.ok(names.includes(name), name);
     assert.ok(names.includes("assess_input"));
     for (const name of ["bash", "write", "edit", "upsert_note", "summarize_topic", "retire_note"]) assert.ok(!names.includes(name), name);
     if (phase === 0) switch (gateStep++) {
@@ -82,7 +93,7 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
     }
     if (phase === 1) switch (gateStep++) {
       case 0: return { tool: "list_work", args: { kind: "task" } };
-      case 1: return { tool: "create_work", args: { kind: "task", title: "Cross-topic analysis", instruction: "Compare both domains and report in Gate", trigger: null, inputId: currentInput() } };
+      case 1: return { tool: "delegate_request", args: { topicUid: firstUid, title: "Domain analysis", request: "Analyze current domain evidence", inputId: currentInput() } };
       case 2: return { tool: "assess_input", args: { inputId: currentInput(), summary: "Delegated analysis" } };
       default: return { text: "已创建分析事项，结果会回到 Gate。" };
     }
@@ -95,6 +106,7 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
     defaultHarnessConfig: { id: "default", harness: "pi" }, createAdapter: (target, ports) => createHarnessAdapter(target, {
       ...ports, targetConfig: { harness: target.harness },
       ...(target.harness === "gate" ? { gateSession: aide.gateSession(ports.scope, fixture.config.config) } : {}),
+      ...(target.harness === "chief" ? { chiefSession: aide.chiefSession(ports.scope, fixture.config.config) } : {}),
       ...(target.harness === "task" ? { taskSession: aide.taskSession(ports.scope, fixture.config.config) } : {}),
     }) }, pino({ level: "silent" }));
   aide = open();
@@ -115,12 +127,14 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
     phase = 1; gateStep = 0;
     await aide.receive(fixtureIncoming({ channelId: "web", topicId: "gate", id: "analysis", text: "委托一个深入分析任务" }));
     await aide.settled();
-    const task = aide.work("gate").list()[0]!;
+    const task = aide.work("first").list()[0]!;
     assert.equal(task.status, "done", JSON.stringify(task));
     const output = aide.outputs().find(o => o.text === "跨领域分析结论");
     assert.ok(output); assert.deepEqual(output.target, { kind: "channel", channelId: "web", endpoint: "gate" });
     assert.equal(summaryText(aide.topics.resources, aide.topics.resource("first")!), "Domain A verified facts");
-    assert.equal(aide.topics.resource("first")!.status.agent, undefined);
+    assert.equal(aide.topics.resource("first")!.status.agent?.harness, "chief");
+    assert.equal(aide.work("gate").list().length, 0);
+    assert.equal((await new (await import("../plugins/personal/handoff/service.ts")).Handoffs(aide.personal.store, pino({ level: "silent" })).list(gate.metadata.uid)).items[0]!.status.phase, "completed");
     const session = aide.topics.resource("gate")!.status.agent;
     await aide.close(); aide = open(); phase = 2; gateStep = 0;
     await aide.receive(fixtureIncoming({ channelId: "web", topicId: "gate", id: "followup", text: "接着刚才说" }));
@@ -286,7 +300,7 @@ test("Replay SDK groups roots and routes subsequent source input to the new root
   }, { directory, weave: true, batchSize: 1, timeoutMs: 15_000, revision: "fixture", datasetHash: "fixture", model: fixture.config.config });
   const result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
   assert.equal(result.topics.length, 3);
-  const root = result.topics.find((topic: { parentRef?: unknown }) => !topic.parentRef);
+  const root = result.topics.find((topic: import("../plugins/personal/topic/model.ts").TopicSpec) => isDomainRoot({ spec: topic }));
   const later = result.inputs.find((input: any) => input.input.spec.observation?.message?.id === "later").input;
   assert.notEqual(later.status.route.result.topics[0].uid, root.uid);
   assert.ok(later.status.assess);
@@ -508,7 +522,7 @@ test("Aide isolates continuous native contexts across topics, restart and recrea
     createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
       chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }) }, log);
   const send = async (sessionId: string, topicId: string, id: string) => {
-    await aide.receive(fixtureIncoming({ channelId: "web",  topicId, id, text: `question-${id}` })); await aide.settled();
+    await receiveDomain(aide, fixtureIncoming({ channelId: "web",  topicId, id, text: `question-${id}` })); await aide.settled();
     assert.equal(aide.personal.topics.inputs().at(-1)!.consumption.phase, "done");
   };
   const binding = (_sessionId: string, topicId: string) => aide.personal.topics.resource(topicId)!.status.agent!.sessionId!;
@@ -819,7 +833,7 @@ test("Weave uses a dedicated native session and commits grouping through its res
     selected.push({ uid: topic.metadata.uid, version: understandingVersion(topic) });
   }
   await aide.start(); await aide.settled();
-  assert.equal(aide.topics.list().filter(t => t.parentRef).length, 2);
+  assert.equal(aide.topics.list().filter(t => !isDomainRoot({ spec: t })).length, 2);
   const weave = (await aide.runtime.plugins.resourceClient("personal").list<Record<string, never>, import("../plugins/personal/weave/model.ts").WeaveStatus>(WEAVE_TYPE))[0]!;
   assert.equal(weave.status.agent?.harness, "weave");
   assert.ok(weave.status.agent?.sessionId);

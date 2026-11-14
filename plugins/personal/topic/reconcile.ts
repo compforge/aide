@@ -1,3 +1,4 @@
+import { isProcessingRoot, isGateParent } from "./boundary.ts";
 import { reconcileGate } from "../gate/reconcile.ts";
 import { dueNotePressure, recordNotePressure } from "../note/pressure.ts";
 import { readyBusinessInputs } from "../input/scheduling.ts";
@@ -34,7 +35,7 @@ function boundedPrompt(prompt: string, limit: number): string {
 
 function watch(context: PluginContext): Watch {
   const rootRequests = async (topic: TopicResource, previous?: TopicResource) => {
-    const refs = [topic.spec.parentRef ?? resourceRef(topic), ...(previous?.spec.parentRef ? [previous.spec.parentRef] : [])];
+    const refs = [!isProcessingRoot(topic) && topic.spec.parentRef ? topic.spec.parentRef : resourceRef(topic), ...(previous?.spec.parentRef && !isGateParent(previous.spec.parentRef) ? [previous.spec.parentRef] : [])];
     const roots = await Promise.all(refs.map(ref => readTopicRoot(context.resources, ref)));
     return [...new Map([topic, ...(await Promise.all(refs.map(ref => context.resources.get<TopicResource["spec"], TopicResource["status"]>(ref)))), ...roots].filter((r): r is TopicResource => !!r).map(r => [r.metadata.uid, { name: r.metadata.name, namespace: r.metadata.namespace }])).values()];
   };
@@ -78,7 +79,7 @@ export async function reconcileTopic(context: PluginContext, execution: Reconcil
   if (c.metadata.deletionTimestamp) { await releaseTopicAgent(context, execution, c); return; }
   if (await reconcileAssignments(context, c)) return { requeueAfterMs: 1 };
   c = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(c)))!;
-  if (!c.spec.parentRef) {
+  if (isProcessingRoot(c)) {
     const retry = await submitPending(context, execution, c);
     if (retry) return retry;
   }
@@ -106,7 +107,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     await finalizeExecution(context, initial, initial.status.execution.id);
     return { requeueAfterMs: 1 };
   }
-  if (initial.spec.parentRef) { await releaseTopicAgent(context, execution, initial); return; }
+  if (!isProcessingRoot(initial)) { await releaseTopicAgent(context, execution, initial); return; }
   let c = initial;
   const review = topicReview(c.spec.review);
   const intervalMs = policy.trigger.intervalSeconds * 1000;
@@ -252,7 +253,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   if (reviewing) {
     const all = await readTopicSubtree(context.resources, resourceRef(c));
     const root = all[0];
-    if (root && !root.spec.parentRef && !root.status.execution) {
+    if (root && isProcessingRoot(root) && !root.status.execution) {
       const latestVersions = new Map(await Promise.all(all.map(async t => [t.metadata.uid,
         understandingVersion(t, await readNotes(context.resources, t.metadata.uid, "subject"))] as const)));
       const remaining = pendingAbsorption(all, root, true, latestVersions);

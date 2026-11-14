@@ -16,6 +16,7 @@ export const inputPrinter: ResourcePrinter<InputSpec, InputStatus> = {
     ];
     if (status.topic) lines.push(`Material Topic: ${status.topic.uid}`);
     if (status.assess?.topic) lines.push(`Processing Topic: ${status.assess.topic.uid}`);
+    if (spec.handoff) lines.push(`Handoff: ${JSON.stringify(spec.handoff)}\nDomain owns this request. Reply with say(respondToHandoffId=handoff.id); report_handoff records progress independently. Preserve original user evidence and authorization.`);
     if (spec.source) lines.push(`Source address: ${JSON.stringify(spec.source)}`);
     if (spec.topicName !== undefined) lines.push(`Suggested Topic name: ${spec.topicName}`);
     if (spec.topicKey !== undefined) lines.push(`Topic key: ${spec.topicKey}`);

@@ -1,3 +1,4 @@
+import { receiveDomain } from "./address-fixture.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
@@ -68,7 +69,7 @@ test("Chief serializes inputs within a topic while another topic can proceed", a
   assert.deepEqual(calls.filter((call) => call.topicId.endsWith("group-a")).map((call) => call.text), ["a-first", "a-second"]);
   assert.equal(aide.topicIds().length, 2);
   assert.throws(() => aide.personal.store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "ChiefInput" }), /Unknown resource definition/);
-  assert.equal(aide.personal.store.resources.list({ apiVersion: "aide.dev/v1alpha5", kind: "Topic" }).length, 2);
+  assert.equal(aide.personal.store.resources.list({ apiVersion: "aide.dev/v1alpha5", kind: "Topic" }).length, 3);
 });
 
 test("Startup resumes queued inputs but fails interrupted input without replaying its actions", async (t) => {
@@ -115,7 +116,7 @@ test("Source watches restore once globally, independently of Channel topics", as
   await aide.start(); await aide.settled();
   assert.ok(polls >= 2);
   const initialPolls = polls;
-  await aide.receive(fixtureIncoming({ channelId: "web",  topicId: "web-conv", id: "hello", text: "hello" })); await aide.settled();
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web",  topicId: "web-conv", id: "hello", text: "hello" })); await aide.settled();
   assert.equal(polls, initialPolls);
   assert.equal(aide.personal.store.resources.list(SOURCE_TYPE).length, 2);
   for (const id of ["source:one", "source:two"]) assert.equal(aide.personal.store.resources.list(SOURCE_TYPE).length, 2);
@@ -139,8 +140,8 @@ test("Topic names come from the first attached Input and survive restart for Cha
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const topicId = "lark:app:group";
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "first", topicId, text: "  关注 executor\n部署情况  " }));
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "second", topicId, text: "换个话题" }));
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web", id: "first", topicId, text: "  关注 executor\n部署情况  " }));
+  await receiveDomain(aide, fixtureIncoming({ channelId: "web", id: "second", topicId, text: "换个话题" }));
   await aide.settled();
   assert.equal(aide.personal.topics.resource(topicId)!.spec.name, "关注 executor 部署情况");
   const source = aide.personal; await source.start();

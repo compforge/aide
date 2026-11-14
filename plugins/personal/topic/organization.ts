@@ -1,3 +1,4 @@
+import { isProcessingRoot, isGateParent } from "./boundary.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ResourceValidationContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
@@ -16,12 +17,12 @@ export function guardTopicOrganization(current: TopicResource, context: Resource
   const organization = current.status.organization;
   if (organization?.executionId && (!previous || !isDeepStrictEqual(previous.status.organization, organization))) {
     const topics = previous ? [previous] : [];
-    if (current.spec.parentRef) topics.push(requireTopic(current.spec.parentRef, context));
+    if (current.spec.parentRef && !isGateParent(current.spec.parentRef)) topics.push(requireTopic(current.spec.parentRef, context));
     const actor = requireOrganization(organization, context, topics);
     if (previous?.metadata.uid === actor.metadata.uid) throw new Error("Only a descendant may move or become independent");
   }
   // Weave can attach an active root; its existing Chief drains naturally. Descendant handoff must be idle.
-  if (!previous?.spec.parentRef) return;
+  if (!previous || isProcessingRoot(previous)) return;
   const subtree = [previous], seen = new Set([previous.metadata.uid]);
   for (const topic of subtree) {
     if (topic.status.execution) throw new Error("Subtree still has active processing; retry after completion");

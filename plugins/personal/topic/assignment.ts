@@ -1,3 +1,4 @@
+import { isProcessingRoot } from "./boundary.ts";
 import { createHash } from "node:crypto";
 import type { PluginContext } from "@compforge/aide-plugin";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
@@ -14,7 +15,7 @@ async function ancestryVersion(context: PluginContext, topic: TopicResource) {
   while (true) {
     if (current.metadata.deletionTimestamp || seen.has(current.metadata.uid)) throw new Error("Topic assignment path unavailable");
     seen.add(current.metadata.uid); path.push([current.metadata.uid, current.metadata.generation]);
-    if (!current.spec.parentRef) break;
+    if (!current.spec.parentRef || isProcessingRoot(current)) break;
     const parent = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(current.spec.parentRef);
     if (!parent) throw new Error("Topic assignment parent unavailable");
     current = parent;

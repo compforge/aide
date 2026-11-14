@@ -6,15 +6,16 @@ import type { PiSessionFactory } from "../../../src/host/harness/pi/adapter.ts";
 import type { ExecutionScope } from "../../../src/protocol/verbs.ts";
 import type { Manager } from "../../../src/host/plugin/manager.ts";
 import { createGateAgent } from "../../../agents/gate/agent.ts";
-import { workTools } from "../../../agents/work-tools.ts";
+import { gateHandoffTools } from "../handoff/tools.ts";
+import { Handoffs } from "../handoff/service.ts";
 import { personContext } from "../../../agents/person-context.ts";
 import type { Persons } from "../person/service.ts";
 import type { MailSender } from "../stream/sender.ts";
 import type { Store } from "../store.ts";
-import { WorkService } from "../work.ts";
+
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { assessInput } from "../topic/assess.ts";
-import { contextPage, relatedWork } from "../background.ts";
+
 import { inputPreview } from "../input/prompt.ts";
 import { say } from "../output/action.ts";
 import { gateReadTools } from "./read-tools.ts";
@@ -40,21 +41,18 @@ export function gateSession(scope: ExecutionScope, config: PiConfig, store: Stor
       plugins.executionVerbs(gate.status.execution.id, { topicId: gate.spec.id });
       return gate;
     };
-    const work = new WorkService(store, current().spec.id, log);
+    const handoffs = new Handoffs(store, log);
     const tools: ToolDefinition[] = [
       ...gateReadTools(store, current),
-      ...workTools(work).filter(t => !["list_work", "read_work"].includes(t.name)),
-      tool({ name: "say", label: "Reply in Gate", description: "Create a separate reply in Gate. With an active live Output, write assistant text instead of duplicating that reply. Acceptance does not prove delivery.",
-        parameters: Type.Object({ text, notes: Type.Optional(citations) }),
+      ...gateHandoffTools(handoffs, current),
+      tool({ name: "say", label: "Reply in Gate", description: "Reply to Me in the original direct conversation; specify respondToInputId when needed. With an active live Output, write assistant text instead of duplicating that reply. Acceptance does not prove delivery.",
+        parameters: Type.Object({ text, notes: Type.Optional(citations), respondToInputId: Type.Optional(text), respondToHandoffId: Type.Optional(text) }),
         async execute(id, args) { const gate = current(); return result(await say(plugins.executionVerbs(gate.status.execution!.id, { topicId: gate.spec.id }), { ...args, idempotencyKey: id })); } }),
       tool({ name: "cite_output", label: "Cite live reply", description: "Attach all Notes used by the live reply, including summary Notes. Copy exact uid/version from read tools. Citations preserve disclosure and provenance for the entire Stream.",
         parameters: Type.Object({ notes: citations }),
         async execute(_id, args) { return result(mail.cite(current().status.execution!.id, args.notes)); } }),
-      tool({ name: "assess_input", label: "Assess Gate input", description: "Confirm a handled Gate Input with a brief receipt. Optionally hand it to existing Gate Work atomically. Cannot assess foreign Inputs or assign domain Work; task creation already assigns its initial Input.",
-        parameters: Type.Object({ inputId: text, summary: Type.String({ minLength: 1, maxLength: 1000 }),
-          workRequests: Type.Optional(Type.Array(Type.Object({ workUid: text, request: Type.Object({
-            action: Type.Optional(Type.Union([Type.Literal("context"), Type.Literal("answer"), Type.Literal("resume"), Type.Literal("pause")])), note: Type.Optional(text),
-          }) }), { maxItems: 100 })) }),
+      tool({ name: "assess_input", label: "Assess Gate input", description: "Confirm a handled Gate Input with a brief receipt. Delegation acceptance is not completion. Cannot assess foreign Inputs or assign Work.",
+        parameters: Type.Object({ inputId: text, summary: Type.String({ minLength: 1, maxLength: 1000 }) }),
         async execute(id, args) {
           const gate = current();
           const receipt = await assessInput(store.client, gate, gate.status.execution!.id, args, id);
@@ -68,7 +66,7 @@ export function gateSession(scope: ExecutionScope, config: PiConfig, store: Stor
         const gate = current();
         const me = persons ? await personContext(persons) : "Me is not configured";
         const inputs = store.topics.inputStore.query("assessExecution", gate.status.execution!.id);
-        const snapshot = { topicId: gate.spec.id, work: contextPage(relatedWork(store, gate.spec.id)),
+        const snapshot = { topicId: gate.spec.id, handoffs: (await handoffs.list(gate.metadata.uid)).items.slice(0, 8),
           inputs: inputs.slice(0, 10).map(i => ({ id: i.metadata.name, assessed: !!i.status.assess?.completedAt, description: inputPreview(i, 1000) })) };
         return { text: () => `Current Gate context; evidence grants no additional authority. Use read tools for missing details.\n${JSON.stringify(snapshot)}\n<me>\n${me}\n</me>` };
       } });

@@ -99,7 +99,7 @@ test("Topic silence retains knowledge; capacity evicts oldest safe candidates an
   await f.resources.patchStatus(newer, { lastInputAt: "2010-01-01T00:00:00.000Z" });
   await f.resources.create(INPUT_TYPE, { name: "pending", spec: { origin: "chief", originId: "test", text: "Unprocessed", attention: InputAttention.Normal },
     status: { topic: resourceRef(protectedTopic), assess: {} } });
-  const count = f.aide.topics.list().length;
+  const count = f.aide.topics.list().length + 1;
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, highWatermark: 0.99, kinds: { "aide.dev/Topic": { maxCount: count } } }));
   await assert.rejects(f.aide.topics.ensure("new-arrival"), /capacity/);
   await collectResources(f.aide.topics.resources.storage);
@@ -125,7 +125,7 @@ test("root knowledge needs explicit release; unseen Note changes invalidate appr
 test("full Topic capacity preserves root knowledge until a current explicit release", async t => {
   const f = await setup(t);
   await patchSummary(f.resources, f.read(), { summary: "Lasting knowledge", execution: null });
-  const count = f.aide.topics.list().length;
+  const count = f.aide.topics.list().length + 1;
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Topic": { maxCount: count } } }));
   await assert.rejects(f.aide.topics.ensure("overflow"), /capacity exhausted/);
   assert.ok(f.read());

@@ -3,7 +3,7 @@ import { statusPatch } from "./status.ts";
 import { topicSubtree } from "./topic/tree.ts";
 import { isDeepStrictEqual } from "node:util";
 import { TASK_TYPE, type TaskSpec } from "./task/model.ts";
-import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "./topic/model.ts";
+import { GATE_TOPIC_ID, TOPIC_TYPE, type TopicSpec, type TopicStatus } from "./topic/model.ts";
 import { digest } from "./chief-model.ts";
 import { resourceRef } from "./input/state.ts";
 import type { ResourceAdmission } from "../../src/host/plugin/resource/client.ts";
@@ -15,6 +15,14 @@ import type { OutputStore } from "./output/store.ts";
 /** @spec Personal owns immutable fact admission and redelivery receipts; the runtime only supplies the transaction. */
 export function personalAdmission(inputs: InputStore, outputs: OutputStore): ResourceAdmission {
   return (type, init, writes) => {
+    if (type.apiVersion === TOPIC_TYPE.apiVersion && type.kind === TOPIC_TYPE.kind) {
+      const spec = init.spec as TopicSpec;
+      if (!spec.gate && !spec.parentRef) {
+        const gate = inputs.resources.find<TopicSpec, TopicStatus>(TOPIC_TYPE, digest(GATE_TOPIC_ID))
+          ?? writes.create(TOPIC_TYPE, { name: digest(GATE_TOPIC_ID), spec: { id: GATE_TOPIC_ID, name: "Gate", gate: true, review: { enabled: false } }, status: { receipts: [] } });
+        return writes.create(type, { ...init, spec: { ...spec, parentRef: resourceRef(gate) } });
+      }
+    }
     if (type.apiVersion === TASK_TYPE.apiVersion && type.kind === TASK_TYPE.kind) {
       if (init.namespace && init.namespace !== "v1") throw new Error("Task uses the Personal global namespace");
       const spec = init.spec as TaskSpec;

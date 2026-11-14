@@ -1,3 +1,4 @@
+import { isProcessingRoot } from "./topic/boundary.ts";
 import { inputExpired } from "./input/retention.ts";
 import { readyBusinessInputs } from "./input/scheduling.ts";
 import { topicPolicy } from "./topic/config.ts";
@@ -22,7 +23,7 @@ export const canActivate = (input: InputSpec, owner: Pick<LoopResource, "kind">)
   owner.kind !== "Topic" || inputAttention(input) !== InputAttention.Deferred;
 export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
   if (input.metadata.deletionTimestamp || inputExpired(input)) return false;
-  if (owner.kind === "Topic") return !(owner.spec as { parentRef?: unknown }).parentRef
+  if (owner.kind === "Topic") return isProcessingRoot(owner as import("./topic/model.ts").TopicResource)
     && input.status.assess?.topic?.uid === owner.metadata.uid && !!input.status.assess && !assessmentFinished(input.status.assess) && !input.status.assess.executionId;
   const receipt = attemptOf(input, resourceRef(owner));
   if (receipt?.completedAt) return false;
@@ -96,7 +97,7 @@ export async function submitPending(context: PluginContext, execution: Reconcile
 export async function runInput(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>, target: string, prompt: string, inputId?: string, batchIds: readonly string[] = []) {
   const current = await context.resources.get<unknown, LoopStatus>(resourceRef(owner));
   if (!current || current.metadata.deletionTimestamp || current.status.execution) return;
-  if (current.kind === "Topic" && (current.spec as { parentRef?: unknown }).parentRef) return;
+  if (current.kind === "Topic" && !isProcessingRoot(current as import("./topic/model.ts").TopicResource)) return;
   const inputIds = [...new Set([...(inputId ? [inputId] : []), ...batchIds])];
   if (inputIds.length > 20) throw new Error("Agent admission batch exceeds 20 Inputs");
   const inputs = await Promise.all(inputIds.map(id => context.resources.get<InputSpec, import("./input/model.ts").InputStatus>(inputRef(id))));

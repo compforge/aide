@@ -1,3 +1,5 @@
+import { isGateInput } from "../gate/input.ts";
+import { isDomainRoot } from "../topic/boundary.ts";
 import { ensureGateTopic } from "../gate/topic.ts";
 import { ensureDefaultTopic } from "../topic/default.ts";
 import { digest } from "../chief-model.ts";
@@ -17,12 +19,12 @@ import { ensureSourceTopic } from "../topic/tree.ts";
 export async function routeByRules(context: RoutingContext, original: RoutingInput): Promise<boolean> {
   const input = (await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, ...original.metadata }))!;
   if (routed(input)) return true;
-  if (input.spec.topicId === GATE_TOPIC_ID) {
-    if (input.spec.origin !== "channel" || input.spec.originId !== "web") throw new Error("Gate accepts explicit Web input only");
+  if (isGateInput(input.spec)) {
     const gate = await ensureGateTopic(context.resources);
-    await deliver(context, input, [gate.metadata], "Explicit Gate input");
+    await deliver(context, input, [gate.metadata], "Me and Aide direct conversation");
     return true;
   }
+  if (input.spec.topicId === GATE_TOPIC_ID) throw new Error("Gate accepts only Me and Aide direct conversations");
   if (input.spec.topicKey) {
     const topic = await ensureSourceTopic(context.resources, input.spec.topicKey, input.spec.text, input.spec.topicName);
     await deliver(context, input, [topic.metadata], "Source topic key");
@@ -52,7 +54,7 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
     for (const c of topics) if (preceding?.status.topic?.uid === c.metadata.uid) { destinations.set(c.metadata.uid, c.metadata); break; }
   }
   if (!destinations.size) {
-    if (topics.some(c => !c.spec.default && !c.spec.parentRef)) return false;
+    if (topics.some(c => !c.spec.default && isDomainRoot(c))) return false;
     await deliver(context, input, [await defaultDestination(context)], "No non-Default Topic candidates");
     return true;
   }

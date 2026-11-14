@@ -1,3 +1,4 @@
+import { isDomainRoot } from "./boundary.ts";
 import { noteFields } from "../../../agents/context-tools.ts";
 import { summaryText, summaryReference } from "../note/summary.ts";
 import { reclamationVersion } from "./retention.ts";
@@ -29,7 +30,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
       parameters: Type.Object({ uid: Type.Optional(Type.String()), version: Type.String(), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
       async execute(_id, args) {
         const actor = active(), topic = await readTopicInScope(store.client, actor, args.uid);
-        if (!topic || !actor.status.execution || topic.spec.parentRef) throw new Error("Release requires an active Chief and a root Topic");
+        if (!topic || !actor.status.execution || !isDomainRoot(topic)) throw new Error("Release requires an active Chief and a root Topic");
         if (reclamationVersion(topic, store.resources) !== args.version) throw new Error("Topic understanding changed; read_topic again");
         const updated = await store.client.patchStatus(topic, { reclamation: { version: args.version, reason: args.reason,
           writer: { resource: WriterResourceSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id } } });

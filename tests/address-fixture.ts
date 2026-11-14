@@ -31,3 +31,22 @@ export async function fixtureMe(aide: import("../src/app.ts").Aide) {
   aide.addresses.observe(webAddress("me"), [personRef(me)], { type: "web", muted: false });
   return personRef(me);
 }
+
+/** Inject an already assigned domain Channel fact below Me/Gate ingress, for Chief execution tests. */
+export async function receiveDomain(aide: import("../src/app.ts").Aide, input: import("../src/channel/message.ts").Incoming) {
+  const { digest } = await import("../plugins/personal/chief-model.ts");
+  const { InputAttention } = await import("../plugins/personal/input/model.ts");
+  const { initialTopicName } = await import("../plugins/personal/topic/model.ts");
+  const { resourceRef } = await import("../plugins/personal/input/state.ts");
+  await aide.start();
+  const id = digest([input.channelId, input.topicKey ?? input.topicId ?? "", input.id]);
+  const prior = aide.topics.inputStore.get(id), receipt = aide.topics.inputStore.receipt(id);
+  if (prior || receipt) return { inputId: id, at: prior?.metadata.creationTimestamp ?? receipt!.at };
+  const sender = await fixtureMe(aide);
+  aide.addresses.observe(input.source, [sender], { type: "web", muted: false });
+  const topic = await aide.topics.ensure(input.topicId!, input.source, initialTopicName(input.topicName ?? input.text));
+  const { id: _id, channelId, ...spec } = input;
+  const fact = aide.topics.inputStore.submit(input.topicId!, id, { ...spec, sender, origin: "channel", originId: channelId, attention: InputAttention.Immediate },
+    { topic: resourceRef(topic), assess: {}, route: { completedAt: new Date().toISOString(), result: { topics: [resourceRef(topic)], reason: "Domain execution fixture" } } });
+  return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
+}

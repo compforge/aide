@@ -72,10 +72,10 @@ test("Restart retries rules without replaying completed topic work", async (t) =
 });
 
 
-test("A committed Channel Input remains visible without a user Message and creates the Personal Topic in the hinted Session", async (t) => {
+test("A committed Channel Input remains visible without a user Message and recovers through Gate despite the original Topic hint", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-channel-recovery-"));
   let calls = 0;
-  const options = fakeOptions({ async chief(prompt) { assert.doesNotMatch(prompt, /Candidates:/); calls++; return "recovered"; }, async execute() { throw new Error("No Work"); } }, root);
+  const options = fakeOptions({ async gate(prompt) { assert.doesNotMatch(prompt, /Candidates:/); calls++; return "recovered"; }, async execute() { throw new Error("No Work"); } }, root);
   let aide = new Aide(root, options, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   aide.personal;
@@ -84,7 +84,7 @@ test("A committed Channel Input remains visible without a user Message and creat
   aide = new Aide(root, options, log); await aide.start(); await aide.settled();
   assert.equal(calls, 1);
   assert.equal(aide.personal.topics.inputs().filter((input) => input.spec.text === "question persisted before attachment").length, 1);
-  assert.equal(aide.personal.topics.input("accepted", "target")!.consumption.phase, "done");
+  assert.equal(aide.personal.topics.input("accepted", "gate")!.consumption.phase, "done");
   await aide.close(); aide = new Aide(root, options, log); await aide.start(); await aide.settled();
   assert.equal(calls, 1); assert.equal(aide.outputs().length, 1);
 });

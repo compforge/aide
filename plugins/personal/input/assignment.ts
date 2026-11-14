@@ -1,3 +1,4 @@
+import { isProcessingRoot } from "../topic/boundary.ts";
 import { reconcileInputRetention } from "./retention.ts";
 import { retryOnConflict, type PluginContext, type ResourceValidationContext, type Watch } from "@compforge/aide-plugin";
 import { INPUT_TYPE } from "./model.ts";
@@ -37,7 +38,7 @@ export function guardAssessment(previous: Input, current: Input, context: Resour
   }
   let root = requireTopic(current.status.topic, context);
   const seen = new Set<string>();
-  while (root.spec.parentRef) {
+  while (root.spec.parentRef && !isProcessingRoot(root)) {
     if (seen.has(root.metadata.uid)) throw new Error("Topic parent cycle");
     seen.add(root.metadata.uid);
     root = requireTopic(root.spec.parentRef, context);
