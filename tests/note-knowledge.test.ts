@@ -15,10 +15,10 @@ import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/persona
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
 import { readNote } from "../plugins/personal/note/service.ts";
-import { moveNote, reviewNotes } from "../plugins/personal/note/operations.ts";
+import { moveNote } from "../plugins/personal/note/operations.ts";
 import { listNotes, notes } from "../plugins/personal/note/query.ts";
 import { NOTE_TYPE, noteVersion, type NoteSpec, type NoteStatus } from "../plugins/personal/note/model.ts";
-import { pendingNoteReviews, reconcileNote, registerNotes } from "../plugins/personal/note/reconcile.ts";
+import { reconcileNote } from "../plugins/personal/note/reconcile.ts";
 import { collectTopic } from "../plugins/personal/topic/lifecycle.ts";
 import { ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
 import { topicTools } from "../plugins/personal/topic/tools.ts";
@@ -26,7 +26,6 @@ import { reclamationVersion } from "../plugins/personal/topic/retention.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
 import { INPUT_TYPE, InputAttention } from "../plugins/personal/input/model.ts";
 import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
-import { assessInput } from "../plugins/personal/topic/assess.ts";
 const log = pino({ level: "silent" });
 async function setup(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-knowledge-"));
@@ -90,51 +89,6 @@ test("move_note rechecks ancestor changes in the write transaction and supports 
   assert.equal((await f.get(initial.noteId)).spec.subject.uid, routine.metadata.uid);
 });
 
-test("Note review confirms the revised classification rather than the inspected old version", async t => {
-  const f = await setup(t);
-  const initial = await f.note({ text: "Finding is now public" }, "classification-review");
-  await reviewNotes(f.resources, f.read(), { notes: [{ noteId: initial.noteId, version: initial.version }] });
-  const revised = await f.note({ noteId: initial.noteId, version: initial.version, sensitivity: "L1", visibility: "any" }, "publish");
-  const beforeReview = await f.get(revised.noteId);
-  assert.equal(beforeReview.spec.text, "Finding is now public");
-  assert.equal(beforeReview.spec.sensitivity, "L1"); assert.equal(beforeReview.spec.visibility, "any");
-  await assert.rejects(reviewNotes(f.resources, f.read(), { notes: [{ noteId: initial.noteId, version: initial.version }] }), /changed before review/);
-  await reviewNotes(f.resources, f.read(), { notes: [{ noteId: revised.noteId, version: revised.version }] });
-  const reviewed = await f.get(revised.noteId);
-  assert.equal(reviewed.status.reviewed!.version, revised.version);
-  assert.equal(noteVersion(reviewed), revised.version);
-  assert.equal(reviewed.status.updatedAt, beforeReview.status.updatedAt);
-});
-test("Note review is versioned, bounded and follows current roots without refreshing content age", async t => {
-  const f = await setup(t);
-  for (let i = 0; i < 21; i++) {
-    const n = await f.note({ text: `Matter ${i}` }, String(i));
-    await reconcileNote(f.context, await f.get(n.noteId));
-  }
-  assert.equal(f.read().status.noteReviewQueue!.length, 20);
-  const pending = await pendingNoteReviews(f.context, f.read()), ref = pending[0]!, before = await f.get(ref.noteId);
-  await reviewNotes(f.resources, f.read(), { notes: [ref] });
-  const reviewed = await f.get(ref.noteId);
-  assert.equal(noteVersion(reviewed), ref.version); assert.equal(reviewed.status.updatedAt, before.status.updatedAt);
-  assert.equal((await pendingNoteReviews(f.context, f.read())).length, 19);
-  const updated = await f.note({ ...ref, text: "New verified evidence" }, "change");
-  await assert.rejects(reviewNotes(f.resources, f.read(), { notes: [ref] }), /changed before review/);
-  await reconcileNote(f.context, await f.get(ref.noteId));
-  assert.ok((await pendingNoteReviews(f.context, f.read())).some(n => n.version === updated.version));
-  const newRoot = await f.aide.topics.ensure("new-root");
-  await f.resources.replace(f.read(), { ...f.read().spec, parentRef: resourceRef(newRoot) }, f.read().status);
-  await reconcileNote(f.context, await f.get(ref.noteId));
-  assert.ok(f.aide.topics.resource("new-root")!.status.noteReviewQueue?.some(n => n.noteId === ref.noteId));
-});
-
-test("Work Notes are routed to the responsible root's review queue", async t => {
-  const f = await setup(t);
-  const work = await createWithSummary(f.resources, ROUTINE_TYPE, { name: "work", spec: { title: "Watch", instruction: "Watch", trigger: { cron: null, event: "tick", timezone: "UTC" } }, status: { topic: resourceRef(f.root), summary: "" } });
-  const n = await f.note({ text: "Verification finding", subject: resourceRef(work) }, "work-note");
-  await reconcileNote(f.context, await f.get(n.noteId));
-  assert.equal(f.read().status.noteReviewQueue![0]!.noteId, n.noteId);
-});
-
 test("Topic silence retains knowledge; capacity evicts oldest safe candidates and protects new dependencies", async t => {
   const f = await setup(t), old = "2000-01-01T00:00:00.000Z";
   await f.resources.patchStatus(f.read(), { execution: null, lastInputAt: old });
@@ -168,29 +122,6 @@ test("root knowledge needs explicit release; unseen Note changes invalidate appr
   await assert.rejects(call(prior), /understanding changed/);
 });
 
-test("root-local Notes trigger an internal review even with idle review off, and confirmed versions do not repeat", async t => {
-  const f = await setup(t);
-  const n = await f.note({ text: "A concrete incident is now resolved; assess lasting lessons" }, "matter");
-  await reconcileNote(f.context, await f.get(n.noteId));
-  await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, { ...f.read().status, execution: null });
-  let prompts = 0;
-  const execution: any = { executionId: "note-review", withContext() { return this; }, verbs: { async harness(args: any) {
-    if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
-    prompts++;
-    assert.match(args.prompt, /Matter Notes await review/);
-    const current = f.read();
-    await reviewNotes(f.resources, current, { notes: [{ noteId: n.noteId, version: n.version }] });
-    const inputs = f.aide.topics.inputStore.list().filter(i => i.status.assess?.executionId === "note-review");
-    assert.equal(inputs.length, 1); assert.equal(inputs[0]!.spec.origin, "aide:review");
-    await assessInput(f.resources, current, "note-review", { inputId: inputs[0]!.metadata.name, summary: "Reviewed; no lasting conclusion needed" });
-    return { state: "success", value: { result: { stopReason: "end_turn" } } };
-  } } };
-  await reconcileChief(f.context, execution, f.read());
-  assert.equal(prompts, 1);
-  await reconcileChief(f.context, execution, f.read());
-  assert.equal(prompts, 1); assert.equal(f.read().status.noteReviewQueue!.length, 0);
-});
-
 test("full Topic capacity preserves root knowledge until a current explicit release", async t => {
   const f = await setup(t);
   await patchSummary(f.resources, f.read(), { summary: "Lasting knowledge", execution: null });
@@ -205,17 +136,6 @@ test("full Topic capacity preserves root knowledge until a current explicit rele
   await collectResources(f.aide.topics.resources.storage);
   await f.aide.topics.ensure("overflow");
   assert.equal(f.read(), undefined);
-});
-
-test("a review batch rolls back if a Note changes before the transaction", async t => {
-  const f = await setup(t), a = await f.note({ text: "First matter" }, "a"), b = await f.note({ text: "Second matter" }, "b");
-  const client: ResourceClient = { ...f.resources, async commit(writes) {
-    await f.note({ ...b, text: "New evidence for second matter" }, "change");
-    return f.resources.commit(writes);
-  } };
-  await assert.rejects(reviewNotes(client, f.read(), { notes: [a, b] }), /changed before review/);
-  assert.equal((await f.get(a.noteId)).status.reviewed, undefined);
-  assert.equal((await f.get(b.noteId)).status.reviewed, undefined);
 });
 
 test("idle Chief release belongs to the serial agent controller; intake cannot close it", async t => {
@@ -233,68 +153,27 @@ test("idle Chief release belongs to the serial agent controller; intake cannot c
   assert.equal(closes, 1); assert.equal(f.read().status.agent, undefined); assert.ok(f.read());
 });
 
-
-test("review_notes confirms a set idempotently, including racing first receipts", async t => {
-  const f = await setup(t), n = await f.note({ text: "Matter" }, "one");
-  await assert.rejects(reviewNotes(f.resources, f.read(), { notes: [n, { ...n, version: "different" }] }), /Conflicting review versions/);
-  assert.equal((await f.get(n.noteId)).status.reviewed, undefined);
-  const results = await Promise.all([reviewNotes(f.resources, f.read(), { notes: [n, n] }), reviewNotes(f.resources, f.read(), { notes: [n] })]);
-  assert.deepEqual(results, [{ reviewed: 1 }, { reviewed: 1 }]);
-  const first = await f.get(n.noteId);
-  await reviewNotes(f.resources, f.read(), { notes: [n] });
-  assert.deepEqual(await f.get(n.noteId), first, "repeat changes neither receipt time nor resource version");
-  const staleActor = f.read();
-  await f.resources.patchStatus(staleActor, { execution: null });
-  await assert.rejects(reviewNotes(f.resources, staleActor, { notes: [n] }), /no longer active/);
-});
-
-test("review_notes re-reads unrelated writes but never substitutes newly edited content", async t => {
-  const f = await setup(t), n = await f.note({ text: "Matter" }, "one");
-  let injected = false;
-  const client: ResourceClient = { ...f.resources, async commit(writes) {
-    if (!injected) { injected = true; await f.resources.patchMetadata(await f.get(n.noteId), { labels: { observed: "yes" } }); }
-    return f.resources.commit(writes);
-  } };
-  await reviewNotes(client, f.read(), { notes: [n] });
-  assert.equal((await f.get(n.noteId)).metadata.labels?.observed, "yes");
-  assert.equal((await f.get(n.noteId)).status.reviewed!.version, n.version);
-});
-
-test("review_notes checks current ancestry even when its receipt is already present", async t => {
+test("pressure review request tolerates unrelated Topic writes and commits its check atomically", async t => {
   const f = await setup(t);
-  const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
-  const n = await f.note({ text: "Child matter", subject: resourceRef(child) }, "child");
-  await reviewNotes(f.resources, f.read(), { notes: [n] });
-  const client: ResourceClient = { ...f.resources, async commit(writes) {
-    await f.resources.replace(child, { id: "child" }, child.status);
-    return f.resources.commit(writes);
-  } };
-  await assert.rejects(reviewNotes(client, f.read(), { notes: [n] }), /outside/);
-});
-
-test("Note review request tolerates unrelated Topic writes and commits cooldown atomically", async t => {
-  const f = await setup(t), n = await f.note({ text: "Matter" }, "one");
   await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, { ...f.read().status, execution: null });
   const agenda = await maintenanceAgenda(f.resources, []);
   let injected = false;
   const resources: ResourceClient = { ...f.resources, async commit(writes) {
     if (!injected) {
       injected = true;
-      await f.resources.patchStatus(f.read(), { noteReviewQueue: [n], lastError: "preserved" });
+      await f.resources.patchStatus(f.read(), { lastError: "preserved" });
     }
     return f.resources.commit(writes);
   } };
-  const input = await createReviewInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review", [n]);
+  const input = await createReviewInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review", "note_pressure");
   assert.equal(input.status.assess!.topic!.uid, f.root.metadata.uid);
-  assert.deepEqual(f.read().status.noteReviewQueue, [n]);
   assert.equal(f.read().status.lastError, "preserved");
-  assert.equal(f.read().status.absorbAttempts, 1);
-  assert.ok(Date.parse(f.read().status.nextAbsorbAt!) > Date.now());
+  assert.ok(f.read().status.reviewCheckedAt);
 });
 
 for (const race of ["parent", "execution", "disabled", "schedule-failure"] as const)
 test(`review request rolls back on ${race} at commit`, async t => {
-  const f = await setup(t), note = await f.note({ text: "Matter" }, "rollback");
+  const f = await setup(t);
   await f.resources.patchStatus(f.read(), { execution: null });
   const parent = await f.aide.topics.ensure("new-root");
   const agenda = await maintenanceAgenda(f.resources, []);
@@ -304,7 +183,7 @@ test(`review request rolls back on ${race} at commit`, async t => {
     if (race === "disabled") await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
     return f.resources.commit(race === "schedule-failure" ? [...writes, { operation: "patchStatus", resource: f.read(), patch: { unknown: true } }] : writes);
   } };
-  await assert.rejects(createReviewInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review", race === "schedule-failure" ? [note] : []), race === "schedule-failure" ? /unknown|Unrecognized/ : /idle enabled root/);
+  await assert.rejects(createReviewInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review"), race === "schedule-failure" ? /unknown|Unrecognized/ : /idle enabled root/);
   assert.equal(f.aide.topics.inputStore.list().length, 0);
   assert.equal(f.read().status.reviewCheckedAt ?? null, null);
   assert.equal(f.read().status.nextAbsorbAt, undefined);
@@ -312,16 +191,16 @@ test(`review request rolls back on ${race} at commit`, async t => {
 
 for (const sameDue of [true, false])
 test(`racing review requests reuse one pending Input (same due: ${sameDue})`, async t => {
-  const f = await setup(t), n = await f.note({ text: "Matter" }, "one");
+  const f = await setup(t);
   await f.resources.patchStatus(f.read(), { execution: null });
   const agenda = await maintenanceAgenda(f.resources, []), due = new Date().toISOString();
   const [a, b] = await Promise.all([
-    createReviewInput(f.context, f.read(), due, agenda, "aide:review", [n]),
-    createReviewInput(f.context, f.read(), sameDue ? due : "2000-01-01T00:00:00.000Z", agenda, "aide:review", [n]),
+    createReviewInput(f.context, f.read(), due, agenda, "aide:review", "note_pressure"),
+    createReviewInput(f.context, f.read(), sameDue ? due : "2000-01-01T00:00:00.000Z", agenda, "aide:review", "note_pressure"),
   ]);
   assert.equal(a.metadata.uid, b.metadata.uid);
   assert.equal(f.aide.topics.inputStore.list().length, 1);
-  assert.equal(f.read().status.absorbAttempts, 1);
+  assert.ok(f.read().status.reviewCheckedAt);
 });
 
 /** @case Recent projection never decodes retained history outside its index page. */
@@ -337,31 +216,122 @@ test("recent Note projection reads at most 40 objects and no full list", async t
   } finally { storage.read = read; }
 });
 
-/** @case Queue slots wake waiting Notes; a missed ancestor event is repaired without an active content writer. */
-test("Note dependency watches refill capacity and ancestry repair survives a finished writer", async t => {
+test("Note nature and maxChars are optional metadata; budgets are soft for ordinary and summary Notes", async t => {
   const f = await setup(t);
-  const entries: import("../plugins/personal/note/model.ts").NoteResource[] = [];
-  for (let i = 0; i < 21; i++) {
-    const created = await f.note({ text: `matter ${i}` }, String(i));
-    const note = await f.get(created.noteId); entries.push(note);
-    assert.deepEqual(await reconcileNote(f.context, note), { requeueAfterMs: 15 * 60_000 });
-  }
-  let watches: readonly import("@compforge/aide-plugin").Watch[] = [];
-  registerNotes({ ...f.context, controllers: { register(definition: any) { watches = definition.watches; } } } as PluginContext);
-  const before = f.read();
-  await reviewNotes(f.resources, before, { notes: before.status.noteReviewQueue!.slice(0, 1) });
-  const after = await f.resources.patchStatus(f.read(), { noteReviewQueue: await pendingNoteReviews(f.context, f.read()) });
-  const watch = watches.find(w => w.resourceType.kind === "Topic")!;
-  const requests = await watch.handler.update({ oldObject: before, newObject: after });
-  assert.ok(requests.some(r => r.name === entries[20]!.metadata.name)); assert.ok(requests.length <= 40);
-  for (const request of requests) await reconcileNote(f.context, await f.get(request.name));
-  assert.equal(f.read().status.noteReviewQueue!.length, 20);
-  assert.ok(f.read().status.noteReviewQueue!.some(r => r.noteId === entries[20]!.metadata.name));
-  const newRoot = await f.aide.topics.ensure("repair-root");
-  await f.resources.patchStatus(f.read(), { execution: null });
-  await f.resources.replace(f.read(), { ...f.read().spec, parentRef: resourceRef(newRoot) }, f.read().status);
-  const pending = await f.get(entries[20]!.metadata.name), version = noteVersion(pending);
-  await reconcileNote(f.context, pending);
-  assert.equal((await f.get(pending.metadata.name)).status.reviewTopic?.uid, newRoot.metadata.uid);
-  assert.equal(noteVersion(await f.get(pending.metadata.name)), version);
+  const { upsertNote } = await import("../plugins/personal/note/service.ts");
+  const { summarizeTopic } = await import("../plugins/personal/topic/state.ts");
+  const { contentVersion } = await import("../plugins/personal/context-write.ts");
+  const created = await f.note({ text: "知".repeat(600), nature: "procedural", maxChars: 256 }, "budget");
+  const note = await readNote(f.resources, created.noteId);
+  assert.equal(note.text.length, 600); assert.equal(note.nature, "procedural"); assert.equal(note.maxChars, 256);
+  const updated = await upsertNote(f.resources, f.read(), { ...created, nature: "semantic" }, "classify");
+  assert.equal(updated.overBudget, true); assert.equal(updated.chars, 600);
+  const latest = await readNote(f.resources, created.noteId);
+  assert.equal(latest.text, note.text); assert.equal(latest.maxChars, 256);
+  await summarizeTopic(f.resources, f.read(), "live", { summary: "长".repeat(600), nature: "semantic", maxChars: 256, version: contentVersion(f.read()) }, 256);
+  const summary = (await listNotes(f.resources, { subject: f.root.metadata.uid })).items.find(n => n.summaryOf)!;
+  assert.equal(summary.maxChars, 256); assert.equal(summary.nature, "semantic");
+  assert.equal((await readNote(f.resources, summary.id)).text.length, 600);
+  await assert.rejects(upsertNote(f.resources, f.read(), { noteId: created.noteId, version: latest.version, nature: "static" }, "bad"));
+});
+
+test("prune and retire enforce versions, active ownership and summary lifetime while preserving citations", async t => {
+  const f = await setup(t);
+  const { pruneNote, retireNote } = await import("../plugins/personal/note/service.ts");
+  const { noteTextVersion } = await import("../plugins/personal/note/model.ts");
+  const { writeSummary } = await import("../plugins/personal/note/summary.ts");
+  const source = await f.note({ text: "Verified long-term fact. Temporary duplicate details.", nature: "semantic" }, "source");
+  const destination = await f.note({ text: "Verified long-term fact." }, "destination");
+  await assert.rejects(pruneNote(f.resources, f.read(), { ...source, text: "", reason: "empty" }, "empty"));
+  await assert.rejects(pruneNote(f.resources, f.read(), { ...source, text: "x".repeat(100), reason: "grow" }, "grow"), /shorter/);
+  const pruned = await pruneNote(f.resources, f.read(), { ...source, text: "Temporary duplicate details.", reason: `Fact retained in ${destination.noteId}` }, "prune");
+  await assert.rejects(retireNote(f.resources, f.read(), { ...source, reason: "stale" }), /version conflict/);
+  const before = await f.get(source.noteId);
+  await reconcileNote(f.context, before);
+  const retired = await retireNote(f.resources, f.read(), { noteId: source.noteId, version: pruned.version, reason: "No independent value" });
+  const after = await f.get(source.noteId);
+  assert.equal(after.spec.text, before.spec.text); assert.equal(after.status.updatedAt, before.status.updatedAt);
+  assert.equal(noteVersion(after), noteVersion(before)); assert.equal(noteTextVersion(after), noteTextVersion(before));
+  assert.equal(retired.retired?.reason, "No independent value");
+  assert.equal((await readNote(f.resources, source.noteId)).retired?.writer.executionId, "live");
+  assert.ok(!(await listNotes(f.resources, { subject: f.root.metadata.uid })).items.some(n => n.id === source.noteId));
+  assert.ok(!notes(f.aide.topics.resources, f.root.metadata.uid).some(n => n.id === source.noteId));
+  await assert.rejects(f.note({ noteId: source.noteId, version: retired.version, text: "revive" }, "revive"), /retired/);
+  const summary = await writeSummary(f.resources, f.read(), { text: "Stable summary with repeated detail", maxChars: 256 }, { resource: resourceRef(f.read()) as typeof before.spec.subject & { kind: "Topic" }, executionId: "live" });
+  const summaryRef = { noteId: summary.summaryNote!.id, version: summary.summaryNote!.version };
+  await assert.rejects(retireNote(f.resources, f.read(), { ...summaryRef, reason: "discard" }), /subject still exists/);
+  const summaryPruned = await pruneNote(f.resources, f.read(), { ...summaryRef, text: "Stable summary", reason: "Remove duplication" }, "prune-summary");
+  assert.equal(f.read().status.summaryRevision, summaryPruned.version);
+  const outsider = await f.aide.topics.ensure("outside-retire");
+  const other = await f.resources.patchStatus(outsider, { execution: { id: "outside", startedAt: new Date().toISOString() } });
+  await assert.rejects(retireNote(f.resources, other, { ...destination, reason: "outside" }), /outside/);
+});
+
+test("Note pressure counts direct active Notes and includes oversized summaries", async t => {
+  const f = await setup(t);
+  const { refreshNotePressure, dueNotePressure, recordNotePressure } = await import("../plugins/personal/note/pressure.ts");
+  const { retireNote } = await import("../plugins/personal/note/service.ts");
+  const { writeSummary } = await import("../plugins/personal/note/summary.ts");
+  await f.resources.replace(f.read(), { ...f.read().spec, maxNotes: 1 }, f.read().status);
+  await f.note({ text: "first" }, "one");
+  const second = await f.note({ text: "second" }, "two");
+  const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "pressure-child", spec: { id: "pressure-child", parentRef: resourceRef(f.root) }, status: {} });
+  await f.note({ subject: resourceRef(child), text: "child" }, "child-note");
+  await refreshNotePressure(f.context, f.read());
+  let agenda = await dueNotePressure(f.resources, f.read());
+  assert.equal(agenda.length, 1); assert.equal(agenda[0]!.pressure.count, 2);
+  await recordNotePressure(f.resources, agenda, 60, "live");
+  assert.equal((await dueNotePressure(f.resources, f.read())).length, 0, "unchanged no-progress work must not loop");
+  await retireNote(f.resources, f.read(), { ...second, reason: "redundant" });
+  await refreshNotePressure(f.context, f.read());
+  assert.equal(f.read().status.notePressure, undefined);
+  await writeSummary(f.resources, f.read(), { text: "s".repeat(300), maxChars: 256 });
+  await refreshNotePressure(f.context, f.read());
+  agenda = await dueNotePressure(f.resources, f.read());
+  assert.equal(agenda[0]!.pressure.count, 1); assert.equal(agenda[0]!.pressure.oversized.length, 1);
+  await recordNotePressure(f.resources, agenda, 60);
+  assert.equal((await dueNotePressure(f.resources, f.read())).length, 0, "failed or interrupted rounds respect retry delay");
+  assert.equal((await dueNotePressure(f.resources, f.read(), Date.now() + 61_000)).length, 1);
+});
+
+test("reducing an older Note outside the count sample continues consolidation without scanning history", async t => {
+  const f = await setup(t);
+  const { refreshNotePressure, dueNotePressure, recordNotePressure } = await import("../plugins/personal/note/pressure.ts");
+  const { retireNote } = await import("../plugins/personal/note/service.ts");
+  await f.resources.replace(f.read(), { ...f.read().spec, maxNotes: 1 }, f.read().status);
+  const older = await f.note({ text: "older redundant matter" }, "older");
+  const oldResource = await f.get(older.noteId);
+  await f.resources.patchStatus(oldResource, { updatedAt: "2000-01-01T00:00:00.000Z" });
+  const oldVersion = noteVersion(await f.get(older.noteId));
+  for (let i = 0; i < 3; i++) await f.note({ text: `recent ${i}` }, `recent-${i}`);
+  await refreshNotePressure(f.context, f.read());
+  const agenda = await dueNotePressure(f.resources, f.read());
+  assert.equal(agenda[0]!.pressure.count, 2); assert.equal(agenda[0]!.pressure.truncated, true);
+  assert.ok(!agenda[0]!.pressure.notes.some(n => n.noteId === older.noteId));
+  await retireNote(f.resources, f.read(), { noteId: older.noteId, version: oldVersion, reason: "no independent value" });
+  await refreshNotePressure(f.context, f.read());
+  assert.equal(f.read().status.notePressure!.version, agenda[0]!.pressure.version, "threshold sample stayed unchanged");
+  await recordNotePressure(f.resources, agenda, 60, "live");
+  assert.equal((await dueNotePressure(f.resources, f.read(), Date.now() + 61_000)).length, 1, "real reduction schedules another bounded pass");
+  await recordNotePressure(f.resources, agenda, 60, "no-reduction-execution");
+  assert.equal((await dueNotePressure(f.resources, f.read(), Date.now() + 61_000)).length, 0, "no reduction stops unchanged work");
+});
+
+
+test("stored per-Note review metadata is discarded without changing content or age", async t => {
+  const f = await setup(t), n = await f.note({ text: "Existing knowledge" }, "legacy");
+  const { NoteStatusSchema } = await import("../plugins/personal/note/model.ts");
+  const { TopicDefinition } = await import("../plugins/personal/topic/definition.ts");
+  const { noteTools } = await import("../plugins/personal/note/tools.ts");
+  const before = await f.get(n.noteId);
+  const status = NoteStatusSchema.parse({ ...before.status, reviewTopic: resourceRef(f.root), reviewed: { version: n.version, at: before.status.updatedAt } });
+  assert.deepEqual(status, before.status);
+  assert.equal(noteVersion({ ...before, status }), n.version);
+  const topicStatus = TopicDefinition.schema.status.parse({ ...f.read().status, noteReviewQueue: [n] });
+  assert.deepEqual(topicStatus, f.read().status);
+  const names = noteTools(f.resources, f.read).map(t => t.name);
+  assert.ok(!names.includes("review_notes"));
+  assert.ok(names.includes("prune_note")); assert.ok(names.includes("retire_note"));
+  assert.equal(await reconcileNote(f.context, before), undefined);
+  assert.deepEqual(await f.get(n.noteId), before);
 });

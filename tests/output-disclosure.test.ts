@@ -537,3 +537,22 @@ test("L1 any work Note reaches an unrelated L1 recipient while a separate privat
   assert.equal(f.store.get("private-detail")!.status.disclosure!.decision, "denied");
   assert.deepEqual(f.store.get("private-detail")!.status.delivery!.receivers.toJSON(), [personRef(f.me)]);
 });
+
+test("retirement preserves queued Output disclosure and retained Streams pin their Note evidence", async t => {
+  const f = await setup(t);
+  const { retireNote } = await import("../plugins/personal/note/service.ts");
+  const { StreamDefinition } = await import("../src/host/stream/definition.ts");
+  const { TOPIC_TYPE } = await import("../plugins/personal/topic/model.ts");
+  const note = await f.note(), output = f.output("retired-evidence", note);
+  const actor = await f.client.patchStatus(await f.client.get<import("../plugins/personal/topic/model.ts").TopicSpec, import("../plugins/personal/topic/model.ts").TopicStatus>({ ...TOPIC_TYPE, ...f.topic.metadata }).then(r => r!), { execution: { id: "curate", startedAt: new Date().toISOString() } });
+  await retireNote(f.client, actor, { noteId: note.metadata.name, version: noteVersion(note), reason: "Retained in a durable summary" });
+  const stream = f.store.streams.get(output.spec.stream)!;
+  assert.ok(StreamDefinition.retention!.references(stream).includes(note.metadata.uid));
+  const { ResourceStorageConfigSchema } = await import("../src/host/resource/storage.ts");
+  const { collectResources } = await import("./fixtures/resource-gc.ts");
+  f.store.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, highWatermark: 0.99, kinds: { "aide.dev/Note": { maxCount: 1 } } }));
+  await collectResources(f.store.storage);
+  assert.ok(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: note.metadata.name }), "queued Output pins retired Note under capacity pressure");
+  await f.checker.reconcile(output.metadata.name);
+  assert.equal(f.store.get(output.metadata.name)!.status.disclosure?.decision, "allowed");
+});

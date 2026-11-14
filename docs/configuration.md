@@ -307,14 +307,15 @@ plugins:
     topic:
       idleMs: 604800000       # 无新 Input 时释放 Chief 会话；Topic 由资源容量配额回收
       contextChars: 48000
-      summaryChars: 4000
+      maxNotes: 10
+      maxChars: 4000
 ```
 
 - Channel 默认 immediate，Source 默认 normal；EnvironmentSource 明确使用 deferred，定时回顾使用 normal；紧迫性不代表授权或必须外发。
 - 普通输入在当前调用结束后 followup，复用原生历史；immediate 通过 steer 进入当前调用。明确不支持或拒绝时留队等待 followup，不中断现有动作。
 - root Topic 的 `review.enabled` 默认开启；定时协调根据数据决定是否发起回顾，无事时退避且不调用模型。运行中的 Chief 不因定时检查追加执行，一次调用最多两天。
 - `contextChars` 限制 Chief 自动激活提示的总字符数，全文通过 `read_input` 分页读取；原生历史和压缩由 SDK 管理。
-- `summaryChars` 限制 Topic 累计认识的长度，模型需合并后替换；近期处理记录使用 recent，统一限制条数和总字符数。长期认识使用共享记忆，委托进展保存在 Work。
+- `maxNotes` 是每个 Topic 直属活跃普通 Note 的数量软预算，可由 Topic.spec.maxNotes 覆盖。`maxChars` 是新建 Topic Note 的默认篇幅软预算，普通 Note 与 summary 统一使用 Note.spec.maxChars，可按篇覆盖。超额触发整理，不拒绝保存或自动截断。旧配置键 `summaryChars` 在读取时归一为 `maxChars`，同时指定时新键优先；已有 Note 的预算不因配置变更自动重写。具体触发、退避与工具见 [Note 整理](personal/note.md#数量与篇幅驱动的整理)。
 - `assess_input` 提交业务消费回执并原子建立 Work 办理记录。没有回执的已尝试输入保留失败证据，不自动重放。
 
 

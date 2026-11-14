@@ -13,7 +13,7 @@ export function browseTopicNotes(store: TopicStore, topicId: string, query: Page
   return storage.transaction(() => {
     const topic = store.resource(topicId);
     if (!topic) return { ...pageBounds(0, size, query.page), items: [] };
-    // recentSubject excludes summary Notes and resources pending deletion at index-write time.
+    // recentSubject excludes summary Notes, retired Notes and resources pending deletion at index-write time.
     const candidates = `FROM resource_ordered_indexes WHERE scope = 'personal' AND api_version = ? AND kind = 'Note'
       AND namespace = 'v1' AND index_name = 'recentSubject' AND index_value = ?`;
     const args = [NOTE_TYPE.apiVersion, topic.metadata.uid];

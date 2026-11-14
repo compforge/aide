@@ -380,8 +380,6 @@ test("Runner keeps periodic checks while empty reviews back off and event Inputs
   } finally { await running.close(); }
 });
 
-
-
 test("Business Inputs precede capacity maintenance even when idle review is disabled", async t => {
   const f = await fixture(t);
   await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
@@ -463,7 +461,6 @@ test("Chief activation keeps its character and admission budgets with large pend
   assert.ok(f.calls[0]!.prompt.length <= 4096);
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.completedAt).length, 10);
 });
-
 
 async function unabsorbedChild(f: Awaited<ReturnType<typeof fixture>>) {
   const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "quiet-child",
@@ -561,28 +558,24 @@ test("Restart retains reviewed material identity while new Normal input still ac
   } finally { await restarted.close(); }
 });
 
-
-test("Acknowledged review without Note changes does not repeatedly review the same queued Note", async t => {
+for (const enabled of [true, false])
+test(`ordinary Note creation and edits do not request review (idle review enabled: ${enabled})`, async t => {
   const f = await fixture(t);
-  await f.resources.create(NOTE_TYPE, { name: "matter", spec: { subject: resourceRef(f.read()), text: "A current matter" },
-    status: { updatedAt: new Date().toISOString() } });
-  const ref = { ...NOTE_TYPE, namespace: "v1", name: "matter" } as const;
-  let note = (await f.resources.get<NoteSpec, NoteStatus>(ref))!;
-  await reconcileNote(f.context, note);
+  const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
+  await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled } }, f.read().status);
+  await f.resources.patchStatus(f.read(), { execution: { id: "write", startedAt: new Date().toISOString() } });
+  const note = await upsertTopicNote(f.resources, f.read(), "write", { text: "A recent matter" }, "one");
+  await f.resources.patchStatus(f.read(), { execution: null });
+  await reconcileNote(f.context, (await f.resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: note.noteId }))!);
   await f.run();
-  assert.equal(f.calls.length, 1);
-  assert.equal(f.read().status.idleReviewCount, 1);
-  assert.equal((await f.resources.get<NoteSpec, NoteStatus>(ref))!.status.reviewed, undefined);
-  await f.resources.patchStatus(f.read(), { nextAbsorbAt: past() });
-  assert.equal((await f.run())!.requeueAfterMs, 60000);
-  assert.equal(f.calls.length, 1);
-  note = (await f.resources.get<NoteSpec, NoteStatus>(ref))!;
-  note = await f.resources.replace(note, { ...note.spec, text: "New evidence for the matter" }, note.status);
-  await reconcileNote(f.context, note);
+  assert.equal(f.calls.length, 0);
+  await f.resources.patchStatus(f.read(), { execution: { id: "edit", startedAt: new Date().toISOString() } });
+  await upsertTopicNote(f.resources, f.read(), "edit", { noteId: note.noteId, version: note.version, text: "Updated recent matter" }, "edit");
+  await f.resources.patchStatus(f.read(), { execution: null });
   await f.run();
-  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.aide.topics.inputStore.list().length, 0);
 });
-
 
 test("Internal review completion preserves accumulated backoff", async t => {
   const f = await fixture(t);
@@ -591,4 +584,101 @@ test("Internal review completion preserves accumulated backoff", async t => {
   await f.due(); await f.run();
   assert.equal(f.read().status.idleReviewCount, 3);
   assert.equal(Date.parse(idleReviewSchedule(f.read(), backoff).dueAt) - Date.parse(f.read().status.idleSince!), 7200_000);
+});
+
+test("note pressure runs with idle review disabled, aggregates pending requests and stops on unchanged material", async t => {
+  const f = await fixture(t);
+  const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
+  const { refreshNotePressure } = await import("../plugins/personal/note/pressure.ts");
+  await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false }, maxNotes: 1 }, f.read().status);
+  const children = [];
+  for (const id of ["a", "b"]) children.push(await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, {
+    name: `curation-${id}`, spec: { id, parentRef: resourceRef(f.read()), maxNotes: 1 }, status: { receipts: [] },
+  }));
+  await f.resources.patchStatus(f.read(), { execution: { id: "write", startedAt: new Date().toISOString() } });
+  for (const [index, child] of children.entries()) {
+    for (let n = 0; n < 2; n++) await upsertTopicNote(f.resources, f.read(), "write", { subject: resourceRef(child), text: `matter-${index}-${n}` }, `${index}-${n}`);
+    await refreshNotePressure(f.context, child);
+  }
+  await f.resources.patchStatus(f.read(), { execution: null });
+  // An existing review request must not hide pressure that another child subsequently reports.
+  await createReviewInput(f.context, f.read(), new Date().toISOString(), await maintenanceAgenda(f.resources, []), "aide:review", "note_pressure");
+  await f.run();
+  assert.equal(f.calls.length, 1);
+  assert.match(f.calls[0]!.prompt, /note_pressure/);
+  for (const child of children) assert.ok(f.calls[0]!.prompt.includes(child.metadata.uid));
+  await f.run();
+  assert.equal(f.calls.length, 1, "acknowledged unchanged pressure does not cause repeated inference");
+  const child = (await f.resources.get<TopicSpec, TopicStatus>(resourceRef(children[0]!)))!;
+  await f.resources.patchStatus(f.read(), { execution: { id: "write-again", startedAt: new Date().toISOString() } });
+  await upsertTopicNote(f.resources, f.read(), "write-again", { subject: resourceRef(child), text: "new evidence" }, "new");
+  await refreshNotePressure(f.context, child);
+  const refreshed = (await f.resources.get<TopicSpec, TopicStatus>(resourceRef(child)))!;
+  await f.resources.patchStatus(refreshed, { notePressure: { ...refreshed.status.notePressure!, nextAt: new Date(0).toISOString() } });
+  await f.resources.patchStatus(f.read(), { execution: null });
+  await f.run();
+  assert.equal(f.calls.length, 2, "new material reopens consolidation");
+});
+
+test("business inputs run ahead of Note pressure and resolved pressure requests terminate without inference", async t => {
+  const f = await fixture(t);
+  const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
+  const { retireNote } = await import("../plugins/personal/note/service.ts");
+  await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false }, maxNotes: 1 }, f.read().status);
+  await f.resources.patchStatus(f.read(), { execution: { id: "write", startedAt: new Date().toISOString() } });
+  const references = [];
+  for (let i = 0; i < 2; i++) references.push(await upsertTopicNote(f.resources, f.read(), "write", { text: `n-${i}` }, String(i)));
+  await f.resources.patchStatus(f.read(), { execution: null });
+  await f.input("business", InputAttention.Immediate);
+  await f.run();
+  assert.equal(f.calls.length, 1); assert.ok(!f.calls[0]!.prompt.includes("Note consolidation"));
+  const pending = await createReviewInput(f.context, f.read(), new Date().toISOString(), await maintenanceAgenda(f.resources, []), "aide:review", "note_pressure");
+  await f.resources.patchStatus(f.read(), { execution: { id: "reduce", startedAt: new Date().toISOString() } });
+  await retireNote(f.resources, f.read(), { noteId: references[0]!.noteId, version: references[0]!.version, reason: "duplicate" });
+  await f.resources.patchStatus(f.read(), { execution: null });
+  await f.run();
+  assert.equal(f.calls.length, 1);
+  assert.ok(f.aide.topics.inputStore.get(pending.metadata.name)!.status.assess?.completedAt);
+});
+
+for (const oldNotes of [[], [{ noteId: "old", version: "old" }]])
+test(`legacy review requests finish without inference and do not hide Note pressure (queued Notes: ${oldNotes.length})`, async t => {
+  const f = await fixture(t);
+  const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
+  await f.resources.replace(f.read(), { ...f.read().spec, maxNotes: 1 }, f.read().status);
+  // Persist the shape emitted before per-Note requests were removed, including an empty list.
+  const root = resourceRef(f.read());
+  const legacy = await f.resources.create<InputSpec, InputStatus>(INPUT_TYPE, { name: "legacy-review",
+    spec: { origin: "aide:review", originId: "personal.topic", originRef: root, attention: InputAttention.Normal,
+      text: "Read the requested Notes, then call review_notes", observation: { notes: oldNotes } },
+    status: { topic: root, assess: { topic: root } },
+  });
+  await f.resources.patchStatus(f.read(), { execution: { id: "write", startedAt: new Date().toISOString() } });
+  for (let i = 0; i < 2; i++) await upsertTopicNote(f.resources, f.read(), "write", { text: `matter-${i}` }, String(i));
+  await f.resources.patchStatus(f.read(), { execution: null });
+  await f.run();
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.aide.topics.inputStore.get(legacy.metadata.name)!.status.assess?.result?.disposition, "cancelled");
+  await f.run();
+  assert.equal(f.calls.length, 1);
+  assert.match(f.calls[0]!.prompt, /note_pressure/);
+});
+
+/** @case Updating a Note during scheduled review cannot schedule another immediate review. */
+test("periodic review can revise child Notes without feedback while summary changes still wake Chief", async t => {
+  const f = await fixture(t), child = await unabsorbedChild(f);
+  const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
+  f.hooks.beforeAssess = async () => {
+    await upsertTopicNote(f.resources, f.read(), f.read().status.execution!.id,
+      { subject: resourceRef(child), text: "Recent matter refined during review" }, "review-note");
+  };
+  await f.due(); await f.run();
+  assert.equal(f.calls.length, 1);
+  f.hooks.beforeAssess = undefined;
+  await f.resources.patchStatus(f.read(), { nextAbsorbAt: past() });
+  await f.run();
+  assert.equal(f.calls.length, 1, "ordinary Note changes do not create a feedback loop even after absorption cooldown");
+  await patchSummary(f.resources, child, { summary: "New lasting understanding" });
+  await f.run();
+  assert.equal(f.calls.length, 2, "changed child summary still initiates understanding maintenance");
 });

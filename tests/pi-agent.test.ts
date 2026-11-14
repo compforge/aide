@@ -980,7 +980,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
     assert.equal(get().status.lastReport!.text, "Verified 1");
     const inputs = aide.topics.inputStore.list();
     assert.ok(inputs.filter(i => i.status.handle?.[work.uid!]).every(i => i.status.handle![work.uid!]!.completedAt));
-    assert.ok(inputs.some(i => i.spec.origin === "aide:review"), "matter Notes create an independent Chief review request");
+    assert.ok(!inputs.some(i => i.spec.origin === "aide:review"), "Work Note edits do not create independent Chief review requests");
   } finally { await aide.close(); }
 });
 
@@ -1270,16 +1270,16 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
     const names = (request.tools as { function: { name: string } }[]).map(tool => tool.function.name);
     assert.ok(!names.includes("write"), "task switches must retain caller tool restrictions");
     if (index < 2) {
-      assert.ok(names.includes("review_notes")); assert.ok(names.includes("memory_add"));
+      assert.ok(names.includes("maintenance_action")); assert.ok(names.includes("memory_add"));
       assert.ok(!names.includes("say")); assert.ok(!names.includes("bash"));
     } else {
       assert.ok(names.includes("say")); assert.ok(names.includes("bash"));
-      assert.ok(!names.includes("review_notes")); assert.ok(!names.includes("memory_add"));
+      assert.ok(!names.includes("maintenance_action")); assert.ok(!names.includes("memory_add"));
       assert.match(JSON.stringify(request.messages), /Current Input origin: channel/);
     }
     if (index === 0) return { tool: "assess_input", args: { inputId: "business", summary: "wrong task" } };
-    if (index === 1) return { tool: "review_notes", args: {} };
-    if (index === 2) return { tool: "review_notes", args: {} };
+    if (index === 1) return { tool: "maintenance_action", args: {} };
+    if (index === 2) return { tool: "maintenance_action", args: {} };
     if (index === 3) return { tool: "say", args: {} };
     return { text: "Answered the immediate input" };
   }, "chief");
@@ -1291,7 +1291,7 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
   }, tools: [
     { name: "assess_input", label: "Assess", inputOrigins: INPUT_ORIGINS, description: "Assess current input",
       parameters: Type.Object({ inputId: Type.String(), summary: Type.String() }), async execute() { assessed++; return result(); } },
-    { name: "review_notes", label: "Review", inputOrigins: ["aide:review"], description: "Review notes",
+    { name: "maintenance_action", label: "Review", inputOrigins: ["aide:review"], description: "Review notes",
       parameters: Type.Object({}), async execute() {
         reviewed++;
         task = { ...task, inputs: [...task.inputs, { id: "business", origin: "channel", immediate: true, text: "Answer now" }] };
@@ -1350,7 +1350,7 @@ test(`Chief changes tools only when Pi delivers ${origin} followUp after ${initi
   const action = origin === "source" ? "say" : "move_topic";
   let reviewed = 0, said = 0;
   const fixture = await setup(t, (_request, index) => {
-    if (index === 0) return { tool: "review_notes", args: {} };
+    if (index === 0) return { tool: "maintenance_action", args: {} };
     if (index === 1) return { text: "Maintenance turn complete" };
     if (index === 2) return { tool: action, args: {} };
     return { text: "Business turn complete" };
@@ -1358,7 +1358,7 @@ test(`Chief changes tools only when Pi delivers ${origin} followUp after ${initi
   const session = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding: {
     read: () => task, inputOrigin: () => task.origin, changed() {},
   }, tools: [
-    { name: "review_notes", label: "Initial action", description: "Handle initial task", inputOrigins: [initialOrigin], parameters: Type.Object({}),
+    { name: "maintenance_action", label: "Initial action", description: "Handle initial task", inputOrigins: [initialOrigin], parameters: Type.Object({}),
       async execute() {
         reviewed++;
         task = { ...task, inputs: [...task.inputs, { id: "normal", initial: false, origin, immediate: false, text: "Normal business fact" }] };
@@ -1372,8 +1372,8 @@ test(`Chief changes tools only when Pi delivers ${origin} followUp after ${initi
     await session.prompt("Review input");
     assert.equal(fixture.requests.length, 4); assert.equal(reviewed, 1); assert.equal(said, 1);
     const names = (index: number) => (fixture.requests[index]!.tools as { function: { name: string } }[]).map(t => t.function.name);
-    for (const index of [0, 1]) { assert.ok(names(index).includes("review_notes")); assert.ok(!names(index).includes(action)); }
-    for (const index of [2, 3]) { assert.ok(names(index).includes(action)); assert.ok(!names(index).includes("review_notes")); }
+    for (const index of [0, 1]) { assert.ok(names(index).includes("maintenance_action")); assert.ok(!names(index).includes(action)); }
+    for (const index of [2, 3]) { assert.ok(names(index).includes(action)); assert.ok(!names(index).includes("maintenance_action")); }
     assert.doesNotMatch(JSON.stringify(fixture.requests[1]!.messages), /Normal business fact/);
     assert.ok(JSON.stringify(fixture.requests[2]!.messages).includes(`Current Input origin: ${origin}`));
   } finally { session.dispose(); }

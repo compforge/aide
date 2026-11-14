@@ -3,12 +3,12 @@ import { personRefs, type PersonRef } from "../person/model.ts";
 import { type MaterialDisclosure } from "../disclosure.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import type { Resource, ResourceClient, ResourceCommit, ResourceValidationContext } from "@compforge/aide-plugin";
-import { NOTE_TYPE, SubjectSchema, NoteSpecSchema, noteReference, noteVersion, type NoteResource, type NoteSpec, type NoteStatus } from "./model.ts";
+import { NOTE_TYPE, noteMaxChars, SubjectSchema, NoteSpecSchema, noteReference, noteVersion, type NoteResource, type NoteSpec, type NoteStatus } from "./model.ts";
 import { resourceRef } from "../input/state.ts";
 import { contentVersion } from "../context-write.ts";
 import type { ResourceContext } from "../context.ts";
 
-export interface SummaryUpdate extends MaterialDisclosure { text?: string; people?: Iterable<PersonRef>; addresses?: Iterable<AddressRef> }
+export interface SummaryUpdate extends MaterialDisclosure { pruned?: NoteStatus["pruned"]; nature?: NoteSpec["nature"]; maxChars?: number; text?: string; people?: Iterable<PersonRef>; addresses?: Iterable<AddressRef> }
 export type SummaryResource = Resource<unknown, ResourceContext>;
 const summaryName = (resource: SummaryResource) => `summary-${resource.metadata.uid}`;
 type Reader = Pick<ResourceValidationContext, "page">;
@@ -45,7 +45,7 @@ export async function prepareSummary(resources: ResourceClient, owner: SummaryRe
   const incomingPeople = update.people === undefined ? undefined : personRefs(update.people);
   const text = update.text ?? note?.spec.text ?? "";
   if (text.length > 16000) throw new Error("Summary exceeds 16000 characters");
-  if (!note && !text && !incomingPeople?.size && update.sensitivity === undefined && update.visibility === undefined) return { note: undefined, writes: [] as ResourceCommit[], status: { summaryRevision: "" } };
+  if (!note && !text && !incomingPeople?.size && update.sensitivity === undefined && update.visibility === undefined && update.nature === undefined && update.maxChars === undefined) return { note: undefined, writes: [] as ResourceCommit[], status: { summaryRevision: "" } };
   if (!note) {
     // An empty reserved Note is safe across retries; only the commit below publishes content and its reference.
     const name = summaryName(owner);
@@ -64,11 +64,14 @@ export async function prepareSummary(resources: ResourceClient, owner: SummaryRe
   if (note.metadata.deletionTimestamp || note.spec.subject.uid !== owner.metadata.uid) throw new Error("Summary Note owner changed");
   const people = incomingPeople ?? note.spec.people;
   const visibility = update.visibility ?? note.spec.visibility ?? "people";
-  const spec = NoteSpecSchema.parse({ ...note.spec, summaryOf: resourceRef(owner), text, people, addresses: update.addresses === undefined ? note.spec.addresses : addressRefs(update.addresses),
+  const spec = NoteSpecSchema.parse({ ...note.spec, summaryOf: resourceRef(owner), text, people,
+    ...(update.nature !== undefined ? { nature: update.nature } : {}),
+    ...(update.maxChars !== undefined ? { maxChars: update.maxChars } : !note.spec.summaryOf && note.spec.maxChars === undefined ? { maxChars: noteMaxChars({}) } : {}), addresses: update.addresses === undefined ? note.spec.addresses : addressRefs(update.addresses),
     sensitivity: update.sensitivity ?? note.spec.sensitivity ?? "L3", visibility });
   const changed = !equalResourceValue(note.spec, spec);
   const { writer: _previousWriter, ...noteStatus } = note.status;
   const updated: NoteResource = { ...note, spec, status: { ...noteStatus,
+    ...(update.pruned ? { pruned: update.pruned } : {}),
     ...(changed ? { updatedAt: new Date().toISOString() } : {}), ...(writer ? { writer } : {}) } };
   const writes: ResourceCommit[] = [{ operation: "patch", resource: note, patch: { type: "json", value: [
     { op: "test", path: "/spec", value: note.spec },

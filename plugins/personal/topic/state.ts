@@ -3,7 +3,7 @@ import { SensitivitySchema, VisibilitySchema } from "../disclosure.ts";
 import { PersonRefSchema } from "../person/model.ts";
 import { prepareSummary } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
-import { WriterResourceSchema, SubjectSchema } from "../note/model.ts";
+import { WriterResourceSchema, SubjectSchema, NoteNatureSchema, MaxCharsSchema } from "../note/model.ts";
 import { readNotes } from "../note/query.ts";
 import { patchStatus } from "../status.ts";
 import { resourceRef } from "../input/state.ts";
@@ -26,10 +26,10 @@ export async function updateTopic(resources: ResourceClient, ref: Readonly<Topic
   });
 }
 
-export const TopicContextSchema = z.object({ topicUid: z.string().optional(),
+export const TopicContextSchema = z.object({ nature: NoteNatureSchema.optional(), maxChars: MaxCharsSchema.optional(), topicUid: z.string().optional(),
   absorbed: z.array(z.object({ uid: z.string(), version: z.string() }).strict()).max(20).optional(),
   sensitivity: SensitivitySchema.optional(), visibility: VisibilitySchema.optional(), version: z.string(), people: z.array(PersonRefSchema).optional(), summary: z.string().max(SUMMARY_CHARS).optional(),
-}).strict().refine(args => args.summary !== undefined || args.people !== undefined || args.sensitivity !== undefined || args.visibility !== undefined || !!args.absorbed?.length, "Supply summary, classification or reviewed child versions");
+}).strict().refine(args => args.maxChars !== undefined || args.nature !== undefined || args.summary !== undefined || args.people !== undefined || args.sensitivity !== undefined || args.visibility !== undefined || !!args.absorbed?.length, "Supply summary, classification or reviewed child versions");
 export type TopicContextUpdate = z.infer<typeof TopicContextSchema>;
 export const TopicNoteSchema = NoteUpdateSchema.safeExtend({ topicId: z.string().min(1).optional() });
 export type TopicNoteUpdate = z.infer<typeof TopicNoteSchema>;
@@ -49,9 +49,8 @@ async function targetTopic(resources: ResourceClient, owner: Readonly<TopicResou
  * @case tests/notes.test.ts
  * @link docs/personal/topic.md#研判与上下文
  */
-export async function summarizeTopic(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, summaryChars: number) {
+export async function summarizeTopic(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, maxChars: number) {
   const args = TopicContextSchema.parse(raw);
-  if (args.summary !== undefined && args.summary.length > summaryChars) throw new Error(`Topic summary exceeds ${summaryChars} characters; select more durable understanding`);
   const { current, target } = await targetTopic(resources, owner, executionId, args.topicUid);
   if (contentVersion(target) !== args.version) throw new Error("Topic context changed; read_topic and merge again");
   const absorbed = { ...target.status.absorbed }, absorbedSummaries = { ...target.status.absorbedSummaries };
@@ -63,7 +62,7 @@ export async function summarizeTopic(resources: ResourceClient, owner: Readonly<
     return child;
   }));
   const writer = { resource: WriterResourceSchema.parse(resourceRef(current)), executionId };
-  const prepared = [args.summary, args.people, args.sensitivity, args.visibility].every(v => v === undefined) ? { writes: [], status: {} } : await prepareSummary(resources, target, { text: args.summary, people: args.people, sensitivity: args.sensitivity, visibility: args.visibility }, writer, args.version);
+  const prepared = [args.summary, args.people, args.sensitivity, args.visibility, args.nature, args.maxChars].every(v => v === undefined) ? { writes: [], status: {} } : await prepareSummary(resources, target, { nature: args.nature, maxChars: args.maxChars ?? (!target.status.summaryRevision ? maxChars : undefined), text: args.summary, people: args.people, sensitivity: args.sensitivity, visibility: args.visibility }, writer, args.version);
   const committed = await resources.commit([...prepared.writes, { operation: "patch", resource: target, patch: { type: "json", value: [
     ...(target.status.summaryRevision === undefined ? [] : [{ op: "test" as const, path: "/status/summaryRevision", value: target.status.summaryRevision }]),
     ...Object.entries(prepared.status).map(([key, value]) => ({ op: "add" as const, path: `/status/${key}`, value })),
@@ -82,7 +81,7 @@ export async function summarizeTopic(resources: ResourceClient, owner: Readonly<
  * @spec A new Note defaults to the active Chief root; topicId may select a Topic in that tree.
  * @link docs/personal/note.md
  */
-export async function upsertTopicNote(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, callId: string) {
+export async function upsertTopicNote(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, callId: string, maxChars = 4000) {
   const { current } = await targetTopic(resources, owner, executionId);
   const { topicId, ...args } = TopicNoteSchema.parse(raw);
   if (topicId && args.noteId) throw new Error("topicId applies only to new Notes; use move_note to change an existing Note subject");
@@ -92,5 +91,5 @@ export async function upsertTopicNote(resources: ResourceClient, owner: Readonly
     if (!target || !await readTopicInScope(resources, current, target.metadata.uid)) throw new Error("Topic is outside this root");
     args.subject = resourceRef(target) as typeof args.subject;
   }
-  return upsertNote(resources, current, args, callId);
+  return upsertNote(resources, current, { ...args, ...(!args.noteId && args.maxChars === undefined ? { maxChars } : {}) }, callId);
 }

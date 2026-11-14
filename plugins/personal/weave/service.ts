@@ -16,9 +16,8 @@ import { GroupSchema, type WeaveResource } from "./model.ts";
  * @link docs/personal/topic.md
  * @case tests/weave.test.ts
  */
-export async function groupTopics(resources: ResourceClient, weave: WeaveResource, raw: unknown, summaryChars: number) {
+export async function groupTopics(resources: ResourceClient, weave: WeaveResource, raw: unknown, maxChars: number) {
   const group = GroupSchema.parse(raw);
-  if ((group.summary?.length ?? 0) > summaryChars) throw new Error("Condense the proposed summary");
   const refs = [...group.topics, ...(group.parent ? [group.parent] : [])];
   if (new Set(refs.map(t => t.uid)).size !== refs.length) throw new Error("Distinct roots required");
   const pages = await Promise.all(refs.map(ref => resources.page<TopicSpec, TopicStatus>(TOPIC_TYPE, { limit: 1, matchIndex: { name: "uid", value: ref.uid } })));
@@ -43,7 +42,7 @@ export async function groupTopics(resources: ResourceClient, weave: WeaveResourc
       status: { receipts: [] } });
   }
   try {
-    const prepared = group.parent ? { writes: [], status: {} } : await prepareSummary(resources, parent, { text: group.summary!, people: group.people });
+    const prepared = group.parent ? { writes: [], status: {} } : await prepareSummary(resources, parent, { maxChars, text: group.summary!, people: group.people });
     await commitStatus(resources, [
       ...prepared.writes,
       ...children.map(resource => ({ operation: "replace" as const, resource, spec: { ...resource.spec, parentRef: resourceRef(parent) },

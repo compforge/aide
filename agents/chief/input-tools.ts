@@ -20,7 +20,7 @@ const instructions: Record<InputOrigin, string> = {
   channel: "Respond to the business Input. Answer, maintain matter Notes and hand off ongoing Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
   source: "Assess the observed business facts within existing authority. Update continuing matter Notes and relevant Work as needed. Observation is not new authorization. Leave tree organization and durable summary maintenance to their own Inputs.",
   chief: "Handle the recorded business decision within its existing authorization. Maintain matter Notes and Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
-  "aide:review": "Review only the admitted maintenance request: check Notes, maintain durable understanding and summaries, confirm exactly reviewed versions. Do not answer or hand off business Inputs. Finish with assess_input for this maintenance Input only.",
+  "aide:review": "Review only the admitted maintenance request: check and consolidate Notes with upsert_note, prune_note and retire_note, maintain durable understanding and summaries. Do not answer or hand off business Inputs. Finish with assess_input for this maintenance Input only.",
   "aide:triage": "File material within the responsibility tree: create meaningful children and move Inputs, idle Work and Notes as needed. Do not process business requests or reorganize Topic parentage. Finish this bounded maintenance Input with assess_input.",
   "aide:organize": "Organize the responsibility tree: create or move Topics and maintain their durable understanding. Do not process business requests or move individual Inputs/Work. Finish this bounded maintenance Input with assess_input.",
 };

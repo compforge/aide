@@ -1,3 +1,4 @@
+import { NotePressureSchema } from "../note/pressure.ts";
 import { PersonRefsSchema } from "../person/model.ts";
 import { validateSummary } from "../note/summary.ts";
 import { candidateVersion } from "../weave/candidates.ts";
@@ -53,22 +54,24 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
   }
 }
 export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
-  type: TOPIC_TYPE,
-  schema: { spec: z.object({ id: z.string(), address: AddressRefSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
+  type: TOPIC_TYPE, indexVersion: 3,
+  schema: { spec: z.object({ maxNotes: z.number().int().min(1).max(999).optional(), id: z.string(), address: AddressRefSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     people: PersonRefsSchema(1000).optional(), review: TopicReviewSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
     status: z.object({ conditions: ConditionsSchema, summaryDependencies: z.record(z.string(), z.string()).optional(), organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
       weaveReview: z.object({ version: z.string(), at: z.string().datetime() }).strict().optional(),
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
       capacityRequests: z.partialRecord(z.enum(["aide:triage", "aide:organize"]), z.object({ checkedAt: z.string().datetime(), inputId: z.string() }).strict()).optional(),
-      noteReviewQueue: z.array(z.object({ noteId: z.string(), version: z.string() }).strict()).max(20).optional(),
+      notePressure: NotePressureSchema.optional(),
+      // Discard the retired queue when decoding older Topic resources.
+      noteReviewQueue: z.unknown().optional(),
       reclamation: z.object({ version: z.string(), reason: z.string().trim().min(1), writer: NoteWriterSchema }).strict().optional(),
       assignmentRefresh: z.object({ version: z.string(), cursor: z.string(), complete: z.boolean() }).strict().optional(),
       yieldToInput: z.boolean().optional(),
       reviewedMaterialVersion: z.string().optional(),
       idleReviewReset: z.object({ at: z.string().datetime(), previousCount: z.number().int().nonnegative() }).strict().nullable().optional(),
       lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).default({}), absorbedSummaries: z.record(z.string(), z.string()).default({}),
-      nextAbsorbAt: z.string().datetime().optional(), absorbAttempts: z.number().int().min(0).max(5).optional(), reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
+      nextAbsorbAt: z.string().datetime().optional(), absorbAttempts: z.number().int().min(0).max(5).optional(), reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict().transform(({ noteReviewQueue: _queue, ...status }) => status) },
   validator: { create: (resource, context) => { validateSummary(resource, context); validateDefault(resource, context); guardTopicOrganization(resource, context); }, update: (previous, current, context) => {
     guardContext(previous, current, context);
     if (current.status.reclamation && !isDeepStrictEqual(previous.status.reclamation, current.status.reclamation)) {
@@ -114,6 +117,8 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     liveParent: r => !r.metadata.deletionTimestamp && r.spec.parentRef ? [r.spec.parentRef.uid] : [],
     parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], weaveRoot: r => !r.metadata.deletionTimestamp && !r.spec.parentRef && !r.spec.default ? ["root"] : [], root: r => !r.metadata.deletionTimestamp && !r.spec.parentRef ? ["root"] : [] },
   orderedIndexes: {
+    notePressure: r => !r.metadata.deletionTimestamp && r.status.notePressure && r.status.notePressure.version !== r.status.notePressure.reviewedVersion
+      ? [{ value: r.status.notePressure.rootUid, order: r.status.notePressure.nextAt }] : [],
     weavePending: r => !r.metadata.deletionTimestamp && !r.spec.parentRef && !r.spec.default && r.status.weaveReview?.version !== candidateVersion(r)
       ? [{ value: "root", order: r.status.weaveReview?.at ?? "" }] : [],
     weaveReviewed: r => !r.metadata.deletionTimestamp && !r.spec.parentRef && !r.spec.default && r.status.weaveReview?.version === candidateVersion(r)

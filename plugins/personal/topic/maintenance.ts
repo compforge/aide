@@ -1,3 +1,4 @@
+import { refreshNotePressure } from "../note/pressure.ts";
 import { tryCreateReviewInput } from "./review.ts";
 import { resourceRef, inputRef } from "../input/state.ts";
 import type { InputSpec, InputStatus } from "../input/model.ts";
@@ -55,6 +56,7 @@ export async function maintenanceAgenda(resources: ResourceReader, topics: reado
 /** Every Topic checks only direct capacity; the assigned root performs the requested work. */
 export async function ensureCapacityInputs(context: import("@compforge/aide-plugin").PluginContext, topic: TopicResource) {
   const policy = topicPolicy(context.instance.config.topic);
+  await refreshNotePressure(context, topic);
   const agenda = await maintenanceAgenda(context.resources, [topic], policy);
   const facts = agenda.topics[0];
   if (!facts) return;

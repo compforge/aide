@@ -27,7 +27,6 @@ export function canReclaimTopic(topic: TopicResource, context: ResourceValidatio
     || WORK_TYPES.some(t => context.page(t, { limit: 1, matchIndex: { name: "topic", value: uid } }).items.length)) return false;
   const recent = notes(context, uid, "subject"), version = understandingVersion(topic, recent);
   if (topic.spec.parentRef) {
-    if (context.page(NOTE_TYPE, { limit: 1, matchIndex: { name: "unreviewed", value: uid } }).items.length) return false;
     const parent = context.get<TopicResource["spec"], TopicResource["status"]>(topic.spec.parentRef, topic.spec.parentRef.uid);
     return !!parent && !parent.metadata.deletionTimestamp && parent.status.absorbed?.[uid] === version;
   }

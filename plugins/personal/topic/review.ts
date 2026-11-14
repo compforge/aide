@@ -21,12 +21,11 @@ export const topicReview = (review?: TopicReview): TopicReview => TopicReviewSch
  * @why Completing a synthetic Input does not create new evidence for another model call.
  * @link docs/personal/topic.md#topic-定时回顾
  */
-export function reviewMaterialVersion(topics: readonly TopicResource[], versions: ReadonlyMap<string, string>, notes: readonly { noteId: string; version: string }[]) {
+export function reviewMaterialVersion(topics: readonly TopicResource[], versions: ReadonlyMap<string, string>) {
   const entries = (values: Record<string, string> = {}) => Object.entries(values).sort(([a], [b]) => a.localeCompare(b));
   return digest([
     [...topics].sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid)).map(t => [t.metadata.uid, t.spec.name ?? "", t.spec.parentRef?.uid ?? "",
       versions.get(t.metadata.uid), entries(t.status.absorbed), entries(t.status.absorbedSummaries)]),
-    [...notes].sort((a, b) => a.noteId.localeCompare(b.noteId)),
   ]);
 }
 
@@ -66,7 +65,7 @@ export function idleReviewSchedule(topic: Readonly<TopicResource>, config: Topic
  * @link docs/personal/topic.md#树内整理与维护优先级
  */
 export async function createReviewInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: "aide:review" | "aide:triage" | "aide:organize" = "aide:review", notes: Array<{ noteId: string; version: string }> = [], trigger: "idle" | "understanding" = "idle") {
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: "aide:review" | "aide:triage" | "aide:organize" = "aide:review", trigger: "idle" | "understanding" | "note_pressure" = "idle") {
   const target = resourceRef(topic);
   const input = await retryOnConflict(async () => {
     const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(target);
@@ -78,17 +77,15 @@ export async function createReviewInput(context: Pick<PluginContext, "resources"
     const at = new Date().toISOString();
     const spec: InputSpec = {
       origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
-      text: `${origin === "aide:triage" ? "Triage this Topic's direct unfiled Inputs and Work. Inspect business Inputs as evidence only; file completed materials into coherent children, creating a child when needed. Never replay admitted or completed assessments." : origin === "aide:organize" ? "Organize this Topic's direct children. Establish meaningful intermediate groups or detach independent subtrees; do not split merely to satisfy a count." : "Review current understanding, unresolved questions and relevant Work; update summaries only when useful."} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; do not communicate or hand off business Work. Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.${origin === "aide:review" ? `\nMatter Notes to review: ${JSON.stringify(notes)}. Read full Notes and review content accuracy and classification; adjust with upsert_note when needed. Consider durable summaries, then call review_notes with the resulting or unchanged inspected versions.` : ""}\nFacts: ${JSON.stringify(agenda)}`,
-      observation: { dueAt, triggeredAt: at, facts: agenda, notes, trigger },
+      text: `${origin === "aide:triage" ? "Triage this Topic's direct unfiled Inputs and Work. Inspect business Inputs as evidence only; file completed materials into coherent children, creating a child when needed. Never replay admitted or completed assessments." : origin === "aide:organize" ? "Organize this Topic's direct children. Establish meaningful intermediate groups or detach independent subtrees; do not split merely to satisfy a count." : "Review current understanding, unresolved questions and relevant Work; update summaries only when useful."} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; do not communicate or hand off business Work. Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nFacts: ${JSON.stringify(agenda)}`,
+      observation: { dueAt, triggeredAt: at, facts: agenda, trigger },
     };
     const status: InputStatus = { topic: target,
       route: { completedAt: at, result: { topics: [target], reason: `Built-in ${origin} request for this Topic` } }, assess: {} };
     try { await context.resources.commit([
       { operation: "create", type: INPUT_TYPE, name: inputId, spec, status: inputStatus(status) },
       { operation: "patchStatus", resource: current, patch: origin === "aide:review"
-        ? { reviewCheckedAt: at, idleReviewReset: null,
-            ...(notes.length ? { nextAbsorbAt: new Date(Date.parse(at) + Math.min(900_000, 60_000 * 2 ** (current.status.absorbAttempts ?? 0))).toISOString(),
-              absorbAttempts: Math.min(5, (current.status.absorbAttempts ?? 0) + 1) } : {}) }
+        ? { reviewCheckedAt: at, idleReviewReset: null }
         : { capacityRequests: { [origin]: { checkedAt: at, inputId } } } },
     ]); } catch (error) {
       if (typeof error !== "object" || error === null || !("name" in error) || error.name !== "ResourceAlreadyExists") throw error;
@@ -109,8 +106,7 @@ export async function createReviewInput(context: Pick<PluginContext, "resources"
 export function validateReviewRequest(input: { spec: InputSpec; status: InputStatus }, context: ResourceValidationContext) {
   const topic = requireTopic(input.status.topic, context);
   if (input.spec.originRef?.uid !== topic.metadata.uid) throw new Error("Internal Input target changed");
-  const notes = z.array(z.object({ noteId: z.string(), version: z.string() }).strict()).max(20).parse(input.spec.observation?.notes ?? []);
-  if (input.spec.origin === "aide:review" && (topic.spec.parentRef || topic.status.execution || (!topicReview(topic.spec.review).enabled && !notes.length && input.spec.observation?.trigger !== "understanding")))
+  if (input.spec.origin === "aide:review" && (topic.spec.parentRef || topic.status.execution || (!topicReview(topic.spec.review).enabled && !["understanding", "note_pressure"].includes(String(input.spec.observation?.trigger)))))
     throw new Error("Review requires an idle enabled root Topic");
 }
 

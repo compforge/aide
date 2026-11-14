@@ -1,6 +1,6 @@
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { requireOrganization, requireTopic } from "../topic/ownership.ts";
-import { noteVersion } from "./model.ts";
+import { noteVersion, noteMaxChars } from "./model.ts";
 import { requireContentWriter } from "../context-write.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { NOTE_TYPE, NoteSpecSchema, NoteStatusSchema, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
@@ -30,8 +30,21 @@ function validate(note: NoteResource, context: ResourceValidationContext) {
   if (writer) requireContentWriter(subject, writer, context);
 }
 export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
-  type: NOTE_TYPE, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
-  validator: { create: (note, context) => { validateAddresses(note, context); validate(note, context); }, update: (before, after, context) => {
+  type: NOTE_TYPE, indexVersion: 3, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
+  validator: { create: (note, context) => { if (note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts"); validateAddresses(note, context); validate(note, context); }, update: (before, after, context) => {
+    if (!equalResourceValue(before.status.retired, after.status.retired)) {
+      if (!after.status.retired || !equalResourceValue(before.spec, after.spec) || before.status.updatedAt !== after.status.updatedAt)
+        throw new Error("Retirement must preserve Note content and age");
+      if (after.spec.summaryOf && context.get(after.spec.summaryOf, after.spec.summaryOf.uid)) throw new Error("Summary subject still exists");
+      const subject = context.get(after.spec.subject, after.spec.subject.uid);
+      if (!subject) throw new Error("Note subject no longer exists");
+      requireContentWriter(subject, after.status.retired.writer, context);
+    }
+    if (!equalResourceValue(before.status.pruned, after.status.pruned)) {
+      if (!after.status.pruned || !equalResourceValue(after.status.pruned.writer, after.status.writer) || !after.spec.text.trim() || after.spec.text.length >= before.spec.text.length)
+        throw new Error("Pruning requires a shorter nonempty body; use retire_note to discard a Note");
+      if (!equalResourceValue({ ...before.spec, text: undefined }, { ...after.spec, text: undefined })) throw new Error("Prune content separately from metadata edits");
+    }
     if (!equalResourceValue(before.spec.addresses, after.spec.addresses)) validateAddresses(after, context);
     if (!equalResourceValue(before.spec.addresses, after.spec.addresses)
       && equalResourceValue({ ...before.spec, addresses: undefined }, { ...after.spec, addresses: undefined })
@@ -47,14 +60,12 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
         })) return;
       }
     }
+    // Address identity repair above also applies to retired evidence; content tools cannot edit it.
+    if (before.status.retired && (!equalResourceValue(before.spec, after.spec) || !equalResourceValue(before.status, after.status)))
+      throw new Error("Retired Note is immutable");
     if (!equalResourceValue(before.spec.subject, after.spec.subject) && (before.spec.sensitivity !== after.spec.sensitivity || before.spec.visibility !== after.spec.visibility)) throw new Error("Move Note separately from classification edits");
     if (before.spec.summaryOf && (!equalResourceValue(before.spec.summaryOf, after.spec.summaryOf)
       || !equalResourceValue(before.spec.subject, after.spec.subject))) throw new Error("Summary Note target is immutable");
-    const { reviewTopic: _oldCache, ...oldStatus } = before.status;
-    const { reviewTopic: _newCache, ...newStatus } = after.status;
-    // Scheduling repairs are independent of the historical content writer's execution.
-    if (!equalResourceValue(before.status.reviewTopic, after.status.reviewTopic)
-      && equalResourceValue(before.spec, after.spec) && equalResourceValue(oldStatus, newStatus)) return;
     if (!equalResourceValue(before.spec.subject, after.spec.subject)) {
       const writer = after.status.writer;
       if (!writer) throw new Error("Note move requires an execution writer");
@@ -73,20 +84,25 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
       if (before.spec.text !== after.spec.text || !equalResourceValue(before.spec.people, after.spec.people) || before.status.updatedAt !== after.status.updatedAt)
         throw new Error("Move Note separately from content edits");
     }
-    if (!equalResourceValue(before.status.reviewed, after.status.reviewed)
-      && after.status.reviewed?.version !== noteVersion(after)) throw new Error("Note changed before review");
     validate(after, context);
   }, delete: (note, context) => {
     if (note.spec.summaryOf && context.get(note.spec.summaryOf, note.spec.summaryOf.uid))
       throw new Error("Summary subject still exists");
   } },
-  indexes: { summaryOf: r => r.spec.summaryOf ? [r.spec.summaryOf.uid] : [],
-    knownSummary: r => r.spec.summaryOf && !r.metadata.deletionTimestamp && r.spec.text.trim() ? [r.spec.summaryOf.uid] : [],
-    uid: r => [r.metadata.uid], reviewRoot: r => !r.spec.summaryOf && !r.metadata.deletionTimestamp && r.status.reviewTopic && r.status.reviewed?.version !== noteVersion(r) ? [r.status.reviewTopic.uid] : [], unreviewed: r => !r.spec.summaryOf && !r.metadata.deletionTimestamp && r.status.reviewed?.version !== noteVersion(r) ? [r.spec.subject.uid] : [], subject: r => [r.spec.subject.uid], addresses: r => [...r.spec.addresses].map(a => a.uid), people: r => [...new Set([...r.spec.people].map(p => p.uid))] },
+  indexes: {
+    // @why A bounded count sample may not change when older Notes are reduced. Receipts still prove progress.
+    reducedSubject: r => [...(r.status.pruned ? [JSON.stringify([r.spec.subject.uid, r.status.pruned.writer.executionId])] : []),
+      ...(r.status.retired ? [JSON.stringify([r.spec.subject.uid, r.status.retired.writer.executionId])] : []),
+      ...(r.status.organization?.writer ? [JSON.stringify([r.status.organization.from.uid, r.status.organization.writer.executionId])] : [])],
+    summaryOf: r => r.spec.summaryOf ? [r.spec.summaryOf.uid] : [],
+    knownSummary: r => r.spec.summaryOf && !r.metadata.deletionTimestamp && !r.status.retired && r.spec.text.trim() ? [r.spec.summaryOf.uid] : [],
+    uid: r => [r.metadata.uid], subject: r => [r.spec.subject.uid], addresses: r => [...r.spec.addresses].map(a => a.uid), people: r => [...new Set([...r.spec.people].map(p => p.uid))] },
   orderedIndexes: {
-    recentSubject: r => r.spec.summaryOf || r.metadata.deletionTimestamp ? [] : [{ value: r.spec.subject.uid, order: r.status.updatedAt }],
-    recentAddresses: r => r.metadata.deletionTimestamp ? [] : [...r.spec.addresses].filter(a => a.uid !== r.spec.summaryOf?.uid).map(a => ({ value: a.uid, order: r.status.updatedAt })),
-    recentPeople: r => r.spec.summaryOf || r.metadata.deletionTimestamp ? [] : [...new Set([...r.spec.people].map(p => p.uid))].map(value => ({ value, order: r.status.updatedAt })),
+    oversizedSubject: r => !r.metadata.deletionTimestamp && !r.status.retired && r.spec.text.length > noteMaxChars(r.spec)
+      ? [{ value: r.spec.subject.uid, order: r.status.updatedAt }] : [],
+    recentSubject: r => r.spec.summaryOf || r.metadata.deletionTimestamp || r.status.retired ? [] : [{ value: r.spec.subject.uid, order: r.status.updatedAt }],
+    recentAddresses: r => r.metadata.deletionTimestamp || r.status.retired ? [] : [...r.spec.addresses].filter(a => a.uid !== r.spec.summaryOf?.uid).map(a => ({ value: a.uid, order: r.status.updatedAt })),
+    recentPeople: r => r.spec.summaryOf || r.metadata.deletionTimestamp || r.status.retired ? [] : [...new Set([...r.spec.people].map(p => p.uid))].map(value => ({ value, order: r.status.updatedAt })),
   },
   retention: { releasedAt: r => r.status.updatedAt, canEvict: (r, context) => !r.spec.summaryOf || (!context.get(r.spec.summaryOf, r.spec.summaryOf.uid) && ![...r.spec.addresses].some(ref => context.get(ref, ref.uid))), references: () => [] },
   printer: { describe: r => r.spec.text, summarize: r => r.spec.text.slice(0, 200) },
