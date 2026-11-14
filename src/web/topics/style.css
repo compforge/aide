@@ -145,14 +145,21 @@ details { font-size: 12px; color: #68776c; margin-top: 8px; }
 .topic-expand { flex: none; border: 0; background: transparent; cursor: pointer; color: inherit; padding: .35rem; }
 
 #topic-tree, #topic-tree ul { list-style: none; padding-left: 22px; margin: 0; }
-#topic-tree { padding: 12px 0; }
+#topic-tree { padding: 12px 0; font-size: 14px; line-height: 1.5; }
+/* Tree branches share leaf typography; global details styling is for auxiliary information. */
+#topic-tree details { margin: 0; font-size: inherit; color: inherit; }
 #topic-tree li { position: relative; padding: 5px 0 5px 18px; }
 #topic-tree ul > li { border-left: 1px solid #bbcbbb; }
 #topic-tree ul > li::before { content: ''; position: absolute; top: 18px; left: 0; width: 12px; border-top: 1px solid #bbcbbb; }
 #topic-tree ul > li:last-child { border-left-color: transparent; }
 #topic-tree ul > li:last-child::after { content: ''; position: absolute; top: 0; left: -1px; height: 18px; border-left: 1px solid #bbcbbb; }
-#topic-tree summary, .tree-name { padding: 3px 6px; border-radius: 5px; overflow-wrap: anywhere; }
-#topic-tree summary { cursor: pointer; }
+#topic-tree summary, #topic-tree li > .tree-name { display: flex; align-items: baseline; gap: 6px; padding: 3px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+#topic-tree summary { cursor: pointer; list-style: none; }
+#topic-tree summary::-webkit-details-marker { display: none; }
+#topic-tree summary::before, #topic-tree li > .tree-name::before { content: ''; flex: 0 0 12px; }
+#topic-tree summary::before { content: '▸'; }
+#topic-tree details[open] > summary::before { content: '▾'; }
+#topic-tree summary > .tree-name { min-width: 0; }
 #topic-tree .tree-current > .tree-name, #topic-tree .tree-current > details > summary { color: #294f3a; background: #dfeadd; font-weight: 600; }
 #topic-tree p:empty, .tree-pages:empty { display: none; }
 .tree-pages { display: flex; gap: 8px; align-items: center; margin: 8px 0 8px 22px; }
