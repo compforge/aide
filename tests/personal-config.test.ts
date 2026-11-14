@@ -113,7 +113,11 @@ test("Only configured sources poll; removing policies stops restored observers w
 
 test("Topic configuration budgets context and rejects obsolete batching controls", () => {
   for (const key of ["maxPending", "batchSize", "maxWaitSeconds"]) assert.throws(() => parsePersonalConfig({ topic: { [key]: 5 } }), /Invalid Personal config/);
-  assert.equal(parsePersonalConfig({ topic: { contextChars: 4096, summaryChars: 1000 } }).topic!.contextChars, 4096);
+  const legacy = parsePersonalConfig({ topic: { contextChars: 4096, summaryChars: 1000 } }).topic!;
+  assert.equal(legacy.contextChars, 4096); assert.equal(legacy.maxChars, 1000); assert.equal(legacy.maxNotes, 10);
+  assert.ok(!("summaryChars" in legacy));
+  assert.equal(parsePersonalConfig({ topic: { summaryChars: 1000, maxChars: 2000 } }).topic!.maxChars, 2000);
+  assert.throws(() => parsePersonalConfig({ topic: { maxNotes: 0 } }));
 });
 
 

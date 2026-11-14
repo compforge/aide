@@ -117,7 +117,7 @@ export class Personal {
       }, assess, async input => {
         const c = active();
         const result = await summarizeTopic(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input,
-          topicPolicy(this.options.topic).summaryChars);
+          topicPolicy(this.options.topic).maxChars);
         this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
         return result;
       }, notes => this.mailSender.cite(active().status.execution!.id, notes));
@@ -135,7 +135,7 @@ export class Personal {
           inputIds: task.inputs.map(i => i.id), tools, toolCount: tools.length }, "Chief Input tools selected"),
       }, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active, ref => this.store.topics.outputStore.deliveryCapability(ref)), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
         const c = active();
-        const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
+        const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId, topicPolicy(this.options.topic).maxChars);
         this.log.info({ topicId, targetTopicId: input.topicId, noteId: result.noteId, version: result.version, sensitivity: result.sensitivity, visibility: result.visibility }, "Topic Note updated");
         return result;
       }, contextWriter: () => { const c = active(); return { resource: WriterResourceSchema.parse(resourceRef(c)), executionId: c.status.execution!.id }; }, beforeWorkMutation: () => { active(); } });
@@ -143,7 +143,7 @@ export class Personal {
   }
 
   weaveSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
-    return weaveSession(scope, config, this.store, this.plugins, topicPolicy(this.options.topic).summaryChars, weavePolicy(this.options.weave).batchSize, this.options.persons);
+    return weaveSession(scope, config, this.store, this.plugins, topicPolicy(this.options.topic).maxChars, weavePolicy(this.options.weave).batchSize, this.options.persons);
   }
 
   routineSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
@@ -202,7 +202,7 @@ export class Personal {
     const members = c ? new Set(this.topics.scope(c.metadata.uid).map(t => t.metadata.uid)) : undefined;
     const status = (i: Readonly<Resource<InputSpec, InputStatus>>) => c ? i.status.assess : attemptOf(i, owner);
     if (!id) return { ...(c ? { context: { version: contentVersion(c), summary: summaryText(this.store.resources, c), summaryUid: summaryReference(this.store.resources, c)?.uid, summaryNote: summaryReference(this.store.resources, c), recent: notes(this.store.resources, c.metadata.uid, "subject"),
-      summaryChars: topicPolicy(this.options.topic).summaryChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, attention: inputAttention(i.spec), status: status(i) })),
+      maxChars: topicPolicy(this.options.topic).maxChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, attention: inputAttention(i.spec), status: status(i) })),
       nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
     const input = this.topics.inputStore.get(id);
     if (!input || (!inputs.some(i => i.metadata.name === id) && !(history && c &&

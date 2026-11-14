@@ -119,7 +119,7 @@ test("Topic Notes are bounded independently of long-lived summary and reject sta
   assert.ok(notes(aide.topics.resources, current.metadata.uid, "subject").reduce((sum, entry) => sum + entry.text.length, 0) <= 16000);
   assert.equal(contentVersion(stale), contentVersion(current), "Independent notes do not change summary version");
   await assert.rejects(summarizeTopic(resources, current, "wrong-execution", { version: contentVersion(current), summary: "stale" }, 4000), /no longer active/);
-  await assert.rejects(summarizeTopic(resources, current, "review", { version: contentVersion(current), summary: "x".repeat(4001) }, 4000), /exceeds/);
+  await assert.rejects(summarizeTopic(resources, current, "review", { version: contentVersion(current), summary: "x".repeat(16001) }, 4000));
   assert.deepEqual(aide.topics.resource("me")!.status, current.status);
 });
 

@@ -137,7 +137,7 @@ id 保存业务标识；name、topicKey、parentRef、default 表达展示、来
 | nextAbsorbAt / absorbAttempts | 认识吸收的重试时间与退避进度 |
 | reviewCheckedAt / idleSince | Reconcile 上次到期检查时间 / Chief 最近执行完成时间 |
 | idleReviewCount | 连续无事可做的到期检查或无进展回顾次数，缺省为 0；用于指数退避 |
-| reviewedMaterialVersion | 最近成功完成的维护轮次所依据的材料指纹；用于跳过未变化材料，不代替 absorbed / review_notes 回执 |
+| reviewedMaterialVersion | 最近成功完成的维护轮次所依据的材料指纹；用于跳过未变化材料，不代替 absorbed 回执 |
 | idleReviewReset | 本轮空闲期首次观察到业务输入的时间与重置前次数；执行完成或责任边界重置时清除 |
 | organization | Chief 或 Weave 最近一次组织调整的原因和前后关系 |
 | lastError / receipts | 执行异常与幂等请求回执 |
@@ -242,7 +242,7 @@ Reconcile 先处理业务 Input、结构通知和子 summary 吸收。后台回�
 
 维护请求沿现有 Input 链路处理：`origin: aide:review`、`attention: normal`，创建即绑定当前 root 并建立研判目标，无需 Route 模型。检查记录与 Input 原子提交，由 Topic 版本保护并发到达和归组；已有同 origin 维护 Input 直接复用，业务 Input 独立调度。Chief 复用原生 session，通过 `assess_input` 留下研判回执。系统 Input 不刷新 `lastInputAt`、不新增授权；运行中不追加定时维护或积攒补跑。
 
-成功完成且所有本批 Input 有研判回执的维护轮次保存本轮开始时的材料指纹：Topic UID、名称、父子关系、认识版本、吸收回执及待回顾 Note 版本。纯调度、执行状态和内置 Input 回执不改变指纹。同一材料未变化时，定时回顾与认识吸收直接跳过模型；不伪造 Note 或子 Topic 的吸收回执。新 deferred 待办仍能在到期时触发回顾，Immediate / Normal 优先于内部维护。
+成功完成且所有本批 Input 有研判回执的维护轮次保存本轮开始时的材料指纹：Topic UID、名称、父子关系、认识版本、吸收回执。纯调度、执行状态和内置 Input 回执不改变指纹。同一材料未变化时，定时回顾与认识吸收直接跳过模型；不伪造子 Topic 的吸收回执。新 deferred 待办仍能在到期时触发回顾，Immediate / Normal 优先于内部维护。
 
 只完成内置 `assess_input` 不算业务进展，增加退避次数；处理业务 Input、更新认识、组织或确认吸收才重置。持久化本轮开始时的版本，避免把推理期间到达的新版本误记为已回顾。失败、缺少回执或中断不记录材料已回顾；重启保留已记录的指纹和次数。
 
@@ -296,7 +296,7 @@ resources:
 
 容量压力下，按最后一次 Input 时间从早到晚检查候选；没有 Input 时使用创建时间。父节点包含子树的业务活跃度，整理、摘要、回顾与读取不刷新这个时间。底座 released 排序复用该业务时间，低水位与容量错误遵循 [Resource 容量](../plugin/resource.md#resource-容量与释放)。
 
-Topic 在实际淘汰事务内核验资格：Default、执行中或尚持有会话、有异常、有子节点、待处理 Input 或 Work 的对象受到保护。子 Topic 的 Note 必须已回顾，当前上下文版本须由父 Topic 吸收。普通 root 无认识与 Note 时可作为候选；有认识时，由 Chief 读取当前 reclamationVersion，通过 release_topic 明确记录知识可舍弃或已安全保留的理由。该版本覆盖完整 Note 集合，内容和归属变化使原判断失效。
+Topic 在实际淘汰事务内核验资格：Default、执行中或尚持有会话、有异常、有子节点、待处理 Input 或 Work 的对象受到保护。子 Topic 的当前上下文版本须由父 Topic 吸收。普通 root 无认识与 Note 时可作为候选；有认识时，由 Chief 读取当前 reclamationVersion，通过 release_topic 明确记录知识可舍弃或已安全保留的理由。该版本覆盖完整 Note 集合，内容和归属变化使原判断失效。
 
 没有安全候选时，底座拒绝超出容量的写入。容量淘汰直接删除记录和索引，并在事务提交后发布删除事件；候选必须先释放会话。显式删除仍使用标准删除生命周期与原有依赖校验。
 
@@ -320,7 +320,7 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 沿用当前 [认识与回执分离](#研判与上下文) 的约定：assess 记录单次处理事实，summary 只在长期认识变化时修订；recent 按同一事项持续维护 Note，二者独立。静默完成一条 Input 不要求维护认识。
 
-父 Topic 按需综合子 Topic 的长期认识和近期事项，不机械拼接全文。摘要变化可以唤醒综合；Note 变化通过独立 Reconcile 汇入当前 root 的有界回顾队列，Chief 在知识回顾中决定提炼或确认无需提炼，见 [Note](note.md#事项归位与提炼回顾)。review 可以只确认已查看的子认识版本，不要求重传或改写父 summary。记录完整上下文和摘要两种已查看版本；Weave 的候选扫描不因 Note 单独变化重新启动；新建父 Topic 保留子 Note 的原始 subject，按需综合时创建自己的 Note；完整上下文版本仍保护交接和子 Topic 回收，未查看的 Note 不被静默丢弃。
+父 Topic 按需综合子 Topic 的长期认识和近期事项，不机械拼接全文。摘要变化可以唤醒综合；普通 Note 变化只检查数量与篇幅压力，超额整理和定时回顾由 Chief 决定是否提炼，见 [Note](note.md#事项归位与提炼回顾)。review 可以只确认已查看的子认识版本，不要求重传或改写父 summary。记录完整上下文和摘要两种已查看版本；Weave 的候选扫描不因 Note 单独变化重新启动；新建父 Topic 保留子 Note 的原始 subject，按需综合时创建自己的 Note；完整上下文版本仍保护交接和子 Topic 回收，未查看的 Note 不被静默丢弃。
 
 每次模型请求的 Background 只加载有界材料：
 
@@ -330,7 +330,7 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 原生会话通过 Harness 支持的方式初始化、持久化与恢复。新父 Topic 的 Chief 读取子主题认识，不拼接、改写子 Chief 的原生会话文件，不重放已完成的输入。模型请求前的业务背景继续使用 [Background](../harness/pi.md#当前业务背景) 通道。
 
-子主题 summary 变化唤醒当前 root；Note 变化进入有界回顾队列。认识吸收通过 aide:review Input 调度，由同一 Chief 自底向上检查。吸收尝试间隔至少 60 秒，无进展时逐步退避至 15 分钟；维护 Input 不刷新业务活跃时间。业务批次最多 10 条，按 Immediate、Normal、Deferred 排序并保留独立回执；维护 Input 独立执行，不与业务批次混合。Deferred 按 [Input 调度规则](input.md#内容身份与调度) 达到 10 条或等待 10 分钟后进入普通业务批次，运行中用 followUp，不影响 Immediate 的 steer。
+子主题 summary 变化唤醒当前 root；普通 Note 变化不单独触发 review，仅在超出预算时进入整理。认识吸收通过 aide:review Input 调度，由同一 Chief 自底向上检查。吸收尝试间隔至少 60 秒，无进展时逐步退避至 15 分钟；维护 Input 不刷新业务活跃时间。业务批次最多 10 条，按 Immediate、Normal、Deferred 排序并保留独立回执；维护 Input 独立执行，不与业务批次混合。Deferred 按 [Input 调度规则](input.md#内容身份与调度) 达到 10 条或等待 10 分钟后进入普通业务批次，运行中用 followUp，不影响 Immediate 的 steer。
 
 树结构本身不保证模型负担下降。root 数量、背景字符数、按需读取量与模型调用频率都需要预算；突发的普通输入可合批处理，不把每次资源变化都变成一次模型调用。
 
@@ -344,7 +344,7 @@ Route、Chief、Weave 的列表在确定范围、排序和 offset 后，逐条�
 
 `catalogFingerprint` 根据已加载的 Topic UID、名称、组织调整依据、认识版本和最近 Input 时间计算，覆盖目录顺序、名称、组织调整依据及已记录的认识；`fingerprint` 根据本页实际返回内容计算。目录指纹不为未展示项查询活动、人物名称，也不承诺这些派生数据仍然有效，依赖详情前重新读取相关页面。
 
-共同人物仅是语义关联的参考，结合名称、summary、近期活动与组织调整原因判断；不按人物交集阈值自动归组，也不以缺少交集否定关联。Me 的广泛出现尤其不能充当归组理由。人物关联变化沿用 Note 的有界提炼回顾流程。验证见 `tests/topic-persons.test.ts`。
+共同人物仅是语义关联的参考，结合名称、summary、近期活动与组织调整原因判断；不按人物交集阈值自动归组，也不以缺少交集否定关联。Me 的广泛出现尤其不能充当归组理由。人物关联变化保留在 Note 内容版本中，后续整理或定时回顾时按需纳入判断。验证见 `tests/topic-persons.test.ts`。
 
 ### 研判与上下文
 
@@ -352,7 +352,7 @@ assess_input 保存单次研判回执并原子交接 Work。summarize_topic 使�
 
 list_topics 提供用于定位的预览：摘要和 Note 文本被截断时标记 `… [truncated]`，`noteTotal` 包含未展示的 Note。依赖不完整内容做判断或确认 absorbed 版本前，使用 read_topic 补读；`nextOffset` 非空时继续读取，为空表示全文结束。
 
-summaryChars 默认 4000、最高 16000；contextChars 默认 48000。近期依据仍受统一数量和字符预算约束。详情见[配置](../configuration.md#topic-消费策略)。
+maxChars 默认 4000，是普通 Note 与 summary Note 共用的篇幅软预算；单篇存储上限仍为 16000。maxNotes 默认 10，超过直属活跃普通 Note 数量或单篇篇幅预算时，按 [Note 整理](note.md#数量与篇幅驱动的整理) 安排 Chief。contextChars 默认 48000。近期依据仍受统一数量和字符预算约束。详情见[配置](../configuration.md#topic-消费策略)。
 
 ### Weave：主题整理
 

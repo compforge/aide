@@ -37,7 +37,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
         return result({ uid: updated.metadata.uid, eligibleWhenSafe: true });
       } }),
     tool({ name: "create_topic", inputOrigins: ["aide:triage", "aide:organize"], label: "Create child Topic", description: "Create a meaningful child inside this root tree. Supply a stable scope and reason; do not split just to meet a count.",
-      parameters: Type.Object({ parentUid: Type.Optional(Type.String()), name: Type.String({ minLength: 1, maxLength: 200 }), summary: Type.String({ maxLength: 4000 }), people: noteFields.people, reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
+      parameters: Type.Object({ parentUid: Type.Optional(Type.String()), name: Type.String({ minLength: 1, maxLength: 200 }), summary: Type.String({ maxLength: 16000, description: "Soft budget: 4000 characters. Preserve essential knowledge." }), people: noteFields.people, reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
       async execute(id, args) { return report(await createChildTopic(store.client, active(), args, id)); } }),
     tool({ name: "move_input", inputOrigins: ["aide:triage"], label: "Move Input", description: "Move an Input's current ownership within this tree. Finish any admitted assessment first. Facts, routing history and processing receipts remain intact.",
       parameters: Type.Object({ inputId: Type.String(), topicUid: Type.String(), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),

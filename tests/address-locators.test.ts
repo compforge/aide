@@ -10,7 +10,7 @@ import { ResourceStorage } from "../src/host/resource/storage.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
 import { AddressCoordinator } from "../plugins/personal/address/coordinator.ts";
 import { ADDRESS_TYPE, AddressSpecSchema, addressRef, addressRefs, locators, type AddressRef } from "../plugins/personal/address/model.ts";
-import { PERSON_TYPE, personRef } from "../plugins/personal/person/model.ts";
+import { PERSON_TYPE, personRef, personRefs } from "../plugins/personal/person/model.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import { assertChannelDelivery, larkAddress, larkPersonAddress, larkThreadAddress } from "../src/channel/address.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
@@ -156,4 +156,24 @@ test("Real Channel admission succeeds when open_id and chat_id Addresses already
   const direct = aide.addresses.find(larkAddress(app, "oc_new"))!;
   assert.equal(direct.spec.muted, false);
   assert.equal(aide.addresses.find(larkPersonAddress(app, "ou_new"))!.metadata.uid, direct.metadata.uid);
+});
+
+test("Address merge repairs associations on retired Notes without reviving or rewriting their evidence", async t => {
+  const f = await setup(t), topics = new TopicStore({ home: f.home, dir: f.home, id: "retired" });
+  const { retireNote } = await import("../plugins/personal/note/service.ts");
+  const { noteVersion, noteTextVersion } = await import("../plugins/personal/note/model.ts");
+  const { resourceRef } = await import("../plugins/personal/input/state.ts");
+  const topic = await topics.ensure("retired");
+  const actor = await f.client.patchStatus(topic, { execution: { id: "curate", startedAt: new Date().toISOString() } });
+  const note = await f.client.create<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { name: "retired-matter",
+    spec: { subject: resourceRef(topic) as NoteResource["spec"]["subject"], text: "original evidence", people: personRefs([]), addresses: addressRefs([addressRef(f.contact)]) },
+    status: { updatedAt: new Date().toISOString() } });
+  await retireNote(f.client, actor, { noteId: note.metadata.name, version: noteVersion(note), reason: "consolidated" });
+  await f.client.patchStatus(actor, { execution: null });
+  f.drain();
+  const after = (await f.client.get<NoteResource["spec"], NoteResource["status"]>({ ...NOTE_TYPE, name: note.metadata.name, namespace: "v1" }))!;
+  assert.equal(after.status.retired?.reason, "consolidated"); assert.equal(noteTextVersion(after), noteTextVersion(note));
+  assert.deepEqual(after.spec.addresses, addressRefs([addressRef(f.original)]));
+  assert.ok(f.addresses.resources.get(ADDRESS_TYPE, f.contact.metadata.name).metadata.deletionTimestamp);
+  assert.ok(!f.addresses.view(addressRef(f.original)).recent.some(n => n.uid === note.metadata.uid));
 });

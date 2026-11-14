@@ -1,6 +1,7 @@
+import { dueNotePressure, recordNotePressure } from "../note/pressure.ts";
 import { readyBusinessInputs } from "../input/scheduling.ts";
 import { isResourceVersionConflict } from "@compforge/aide-plugin";
-import { pendingNoteReviews, noteReviewWatch } from "../note/reconcile.ts";
+import { notePressureWatch } from "../note/reconcile.ts";
 import { isDeepStrictEqual } from "node:util";
 import { reconcileAssignments } from "./assignment.ts";
 import { INPUT_TYPE, isInternalInput, isCapacityInput, type InputSpec, type InputStatus } from "../input/model.ts";
@@ -43,8 +44,9 @@ function watch(context: PluginContext): Watch {
       const a = oldObject as TopicResource, b = newObject as TopicResource;
       if (summaryVersion(a) !== summaryVersion(b) || JSON.stringify(a.status.absorbed) !== JSON.stringify(b.status.absorbed)
         || a.spec.parentRef?.uid !== b.spec.parentRef?.uid || a.status.weaveRevision !== b.status.weaveRevision
+        || !isDeepStrictEqual(a.status.notePressure, b.status.notePressure)
         || a.metadata.deletionTimestamp !== b.metadata.deletionTimestamp) return rootRequests(b, a);
-      return !isDeepStrictEqual(a.status.noteReviewQueue, b.status.noteReviewQueue) || a.status.execution?.id !== b.status.execution?.id || a.status.lastInputAt !== b.status.lastInputAt
+      return a.status.execution?.id !== b.status.execution?.id || a.status.lastInputAt !== b.status.lastInputAt
         ? [{ name: b.metadata.name, namespace: b.metadata.namespace }] : [];
     } } };
 }
@@ -64,9 +66,9 @@ function materialWatch(): Watch {
 export function registerTopics(context: PluginContext): void {
   registerTopicObservations(context);
   const policy = topicPolicy(context.instance.config.topic);
-  context.controllers.register({ resourceType: TOPIC_TYPE, maxConcurrency: 1, watches: [noteReviewWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
+  context.controllers.register({ resourceType: TOPIC_TYPE, maxConcurrency: 1, watches: [notePressureWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
     reconcile: (execution, c: Readonly<TopicResource>) => reconcileTopic(context, execution, c) });
-  context.controllers.register({ name: "agent", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [noteReviewWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
+  context.controllers.register({ name: "agent", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [notePressureWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
     reconcile: (execution, c: Readonly<TopicResource>) => reconcileChief(context, execution, c, policy) });
 }
 
@@ -133,6 +135,13 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   await ensureCapacityInputs(context, c);
   c = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(c)))!;
   const pending = await nextInputs(context.resources, c, 8);
+  const obsolete = pending.find(i => i.spec.origin === "aide:review" && Array.isArray(i.spec.observation?.notes));
+  if (obsolete) {
+    await context.resources.patchStatus(obsolete, { assess: { ...obsolete.status.assess, completedAt: new Date().toISOString(),
+      result: { summary: "Per-Note review was retired; current pressure and understanding are checked independently", disposition: "cancelled" } } });
+    context.logger.info("Obsolete Note review Input completed", { attributes: { inputId: obsolete.metadata.name, topicUid: c.metadata.uid } });
+    return { requeueAfterMs: 1 };
+  }
   const pressureInput = pending.find(i => isCapacityInput(i.spec));
   if (pressureInput) {
     const target = pressureInput.status.topic && await context.resources.get<TopicResource["spec"], TopicResource["status"]>(pressureInput.status.topic);
@@ -150,13 +159,10 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
       boundedPrompt(`${instructions}\nPerform this bounded organization round. If a business Input takes priority, follow the new task scope and leave unfinished maintenance pending.\n${inputPreview(pressureInput, policy.contextChars - 3500)}\nActivation: ${JSON.stringify({ kind: pressureInput.spec.origin, topicId: c.spec.id, inputId: pressureInput.metadata.name, inputs: [{ inputId: pressureInput.metadata.name }] })}`, policy.contextChars), pressureInput.metadata.name);
     return { requeueAfterMs: 1 };
   }
-  const noteReviews = await pendingNoteReviews(context, c);
-  if (!isDeepStrictEqual(noteReviews, c.status.noteReviewQueue ?? []))
-    c = await updateTopic(context.resources, c, () => ({ noteReviewQueue: noteReviews }));
-  let noteReviewDue = noteReviews.length > 0 && Date.parse(c.status.nextAbsorbAt ?? "1970-01-01") <= now;
+  const notePressure = await dueNotePressure(context.resources, c, now, Math.max(1, Math.min(8, Math.floor((policy.contextChars - 3000) / 600))));
   const weave = (c.status.weaveRevision ?? 0) > (c.status.notifiedWeaveRevision ?? 0);
   // Ordinary delivery keeps a bounded view; maintenance compares the same full tree on every pass.
-  let topics = due || weave || noteReviewDue ? await readTopicSubtree(context.resources, resourceRef(c)) : [c,
+  let topics = due || weave ? await readTopicSubtree(context.resources, resourceRef(c)) : [c,
     ...(await context.resources.page<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, {
       matchIndex: { name: "liveParent", value: c.metadata.uid }, limit: 20 })).items];
   let inputs = pending.slice(0, 8);
@@ -164,18 +170,18 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   let absorption = pendingAbsorption(topics, c, false, versions);
   const absorbDelay = Math.max(0, Date.parse(c.status.nextAbsorbAt ?? "1970-01-01") - Date.now());
   let absorb = absorption.length > 0 && absorbDelay === 0;
-  if (absorb && !due && !weave && !noteReviewDue) topics = await readTopicSubtree(context.resources, resourceRef(c));
-  if (due || inputs.some(i => canActivate(i.spec, c)) || absorb || weave || noteReviewDue) {
+  if (absorb && !due && !weave) topics = await readTopicSubtree(context.resources, resourceRef(c));
+  if (due || inputs.some(i => canActivate(i.spec, c)) || absorb || weave) {
     for (const t of topics) versions.set(t.metadata.uid, understandingVersion(t, await readNotes(context.resources, t.metadata.uid, "subject")));
     absorption = pendingAbsorption(topics, c, false, versions);
   }
-  const materialVersion = reviewMaterialVersion(topics, versions, noteReviews);
+  const materialVersion = reviewMaterialVersion(topics, versions);
   const unchanged = c.status.reviewedMaterialVersion === materialVersion;
   absorb &&= !unchanged;
-  noteReviewDue &&= !unchanged;
-  if ((noteReviewDue || absorb || weave) && !pending.some(i => canActivate(i.spec, c))) {
+  if ((absorb || weave || notePressure.length) && !pending.some(i => canActivate(i.spec, c))) {
     const agenda = await maintenanceAgenda(context.resources, [], policy);
-    const request = await tryCreateReviewInput(context, c, new Date(now).toISOString(), agenda, "aide:review", noteReviews, absorb || weave ? "understanding" : "idle");
+    if (notePressure.length) agenda.reason = "note_pressure";
+    const request = await tryCreateReviewInput(context, c, new Date(now).toISOString(), agenda, "aide:review", notePressure.length ? "note_pressure" : absorb || weave ? "understanding" : "idle");
     if (!request) return { requeueAfterMs: intervalMs };
     pending.splice(0, 0, request);
     inputs = [request];
@@ -209,6 +215,15 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     }
   }
 
+  // Failed pressure-only rounds wait for their durable retry clock; other review work can still proceed.
+  if (!notePressure.length && inputs.length && inputs.every(i => i.spec.origin === "aide:review" && i.spec.observation?.trigger === "note_pressure")
+    && !absorb && !weave) {
+    const waiting = await context.resources.page(TOPIC_TYPE, { limit: 1, matchIndex: { name: "notePressure", value: c.metadata.uid } });
+    if (!waiting.items.length) for (const input of inputs) await context.resources.patchStatus(input, {
+      assess: { ...input.status.assess, completedAt: new Date().toISOString(), result: { summary: "Note pressure no longer needs review", disposition: "cancelled" } },
+    });
+    return { requeueAfterMs: intervalMs };
+  }
   const reviewing = inputs.some(i => i.spec.origin === "aide:review");
   if (!reviewing) absorption = [];
   const input = inputs[0];
@@ -225,22 +240,24 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     nextAbsorbAt: new Date(Date.now() + Math.min(900_000, 60_000 * 2 ** (current.status.absorbAttempts ?? 0))).toISOString(),
     absorbAttempts: Math.min(5, (current.status.absorbAttempts ?? 0) + 1),
   }));
-  const prompt = `${instructions}\n${reviewing && noteReviews.length ? `Matter Notes await review: ${JSON.stringify(noteReviews)}. Read their complete content with read_note. Consider durable Topic/Person understanding and tree organization; use review_notes to confirm exactly the reviewed versions even when no summary change is useful.` : ""}\n${reviewing && weave ? "Topic structure changed. Review current subtree material and existing Work before deciding what needs attention." : ""}\n${absorption.length ? `Knowledge maintenance: review changed children bottom-up, preserve attribution and disagreements; revise summary only for lasting changes, maintain Notes for recent matters, or confirm absorbed versions without summary; no new mandate or reply obligation. Pending versions (bounded): ${JSON.stringify(absorption.slice(0, 20))}. Read remaining children as needed.` : ""}\nActivation: ${JSON.stringify({ kind: "input", topicId: c.spec.id, address: c.spec.address, summaryChars: policy.summaryChars, inputId: input?.metadata.name, inputs: inputs.map(i => ({ inputId: i.metadata.name, description: inputPreview(i, Math.floor((policy.contextChars - 3000) / inputs.length)) })), at: new Date().toISOString() })}\n${input ? "Use read_input for complete evidence and unresolved inputs." : ""}`;
+  if (reviewing && notePressure.length) await recordNotePressure(context.resources, notePressure, policy.capacityCooldownSeconds);
+  const pressurePrompt = reviewing && notePressure.length
+    ? `Note consolidation (reason: note_pressure): ${JSON.stringify(notePressure.map(({ uid, pressure: p }) => ({ uid, maxNotes: p.maxNotes, count: p.count, oversized: p.oversized.slice(0, 3).map(n => n.noteId), moreOversized: p.oversized.length > 3 })))}. Counts are lower bounds; page list_notes by each subject UID and read complete Notes. maxNotes and maxChars are soft budgets, not deletion targets. Merge compatible matters, move misplaced Notes, and distill durable knowledge into summary Notes. First confirm upsert_note or summarize_* on the destination, then prune_note the source; retire_note only if no independent value remains. Preserve evidence, uncertainty, unresolved work and disclosure boundaries. Do not raise budgets to evade consolidation. Inspect every listed Topic, working on at most 8 Notes per Topic. If you cannot inspect the full agenda, leave this Input pending. Otherwise assess_input even if no safe reduction is useful.` : "";
+  const prompt = `${instructions}\n${pressurePrompt}\n${reviewing && weave ? "Topic structure changed. Review current subtree material and existing Work before deciding what needs attention." : ""}\n${absorption.length ? `Knowledge maintenance: review changed children bottom-up, preserve attribution and disagreements; revise summary only for lasting changes, maintain Notes for recent matters, or confirm absorbed versions without summary; no new mandate or reply obligation. Pending versions (bounded): ${JSON.stringify(absorption.slice(0, 20))}. Read remaining children as needed.` : ""}\nActivation: ${JSON.stringify({ kind: "input", topicId: c.spec.id, address: c.spec.address, maxChars: policy.maxChars, inputId: input?.metadata.name, inputs: inputs.map(i => ({ inputId: i.metadata.name, description: inputPreview(i, Math.floor((policy.contextChars - 3000) / inputs.length)) })), at: new Date().toISOString() })}\n${input ? "Use read_input for complete evidence and unresolved inputs." : ""}`;
   const completed = await runInput(context, execution.withContext({ topicId: c.spec.id, ...(input ? { inputId: input.metadata.name, inputIds: inputs.map(i => i.metadata.name) } : {}) }), c,
     "chief", boundedPrompt(prompt, policy.contextChars), input?.metadata.name, inputs.map(i => i.metadata.name));
   if (reviewing) {
     const all = await readTopicSubtree(context.resources, resourceRef(c));
     const root = all[0];
     if (root && !root.spec.parentRef && !root.status.execution) {
-      const remainingNotes = await pendingNoteReviews(context, root);
       const latestVersions = new Map(await Promise.all(all.map(async t => [t.metadata.uid,
         understandingVersion(t, await readNotes(context.resources, t.metadata.uid, "subject"))] as const)));
       const remaining = pendingAbsorption(all, root, true, latestVersions);
-      const absorbed = noteReviews.some(before => !remainingNotes.some(after => after.noteId === before.noteId && after.version === before.version))
-        || absorption.some(before => !remaining.some(after => before.uid === after.uid && before.version === after.version));
+      const absorbed = absorption.some(before => !remaining.some(after => before.uid === after.uid && before.version === after.version));
       const receipts = await Promise.all(inputs.map(i => context.resources.get<InputSpec, InputStatus>(resourceRef(i))));
       const acknowledged = completed && receipts.every(i => !!i?.status.assess?.completedAt);
-      const progressed = reviewMaterialVersion(all, latestVersions, remainingNotes) !== materialVersion
+      if (acknowledged && notePressure.length) await recordNotePressure(context.resources, notePressure, policy.capacityCooldownSeconds, execution.executionId);
+      const progressed = reviewMaterialVersion(all, latestVersions) !== materialVersion
         || receipts.some(i => i && !isInternalInput(i.spec) && !!i.status.assess?.completedAt);
       const updated = await updateTopic(context.resources, root, current => current.status.execution ? {} : ({
         ...(absorbed ? { absorbAttempts: 0, nextAbsorbAt: new Date(Date.now() + 60_000).toISOString() } : {}),
@@ -250,7 +267,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
           : acknowledged ? { idleReviewCount: policy.review.backoff ? Math.min(Number.MAX_SAFE_INTEGER, (current.status.idleReviewCount ?? 0) + 1) : 0 } : {}),
       }));
       context.logger.info("Topic maintenance outcome recorded", { attributes: { topicUid: root.metadata.uid, completed: !!completed,
-        acknowledged: !!acknowledged, progressed, materialVersion, pendingNotes: remainingNotes.length, pendingChildren: remaining.length,
+        acknowledged: !!acknowledged, progressed, materialVersion, pendingChildren: remaining.length, pressureTopics: notePressure.length,
         idleReviewCount: updated.status.idleReviewCount ?? 0, dueAt: idleReviewSchedule(updated, policy.review).dueAt } });
     }
   }

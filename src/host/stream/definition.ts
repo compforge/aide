@@ -19,5 +19,7 @@ export const StreamDefinition: ResourceDefinition<Stream["spec"], Stream["status
     },
   },
   printer: { summarize: r => `${r.status.phase} · ${r.status.lastSeq} records`, describe: r => JSON.stringify(r, null, 2) },
-  retention: { releasedAt: r => r.status.closedAt, references: () => [] },
+  // @spec Retained Streams pin cited resources, including closed Streams awaiting delivery.
+  // @why Closing generation does not mean the Output has finished using its evidence.
+  retention: { releasedAt: r => r.status.closedAt, references: r => r.status.references.map(ref => ref.uid) },
 };

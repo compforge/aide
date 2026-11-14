@@ -18,7 +18,7 @@ import { groupTopics } from "./service.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { understandingVersion } from "../topic/tree.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
-export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, summaryChars: number, batchSize: number, persons?: Persons): PiSessionFactory {
+export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, maxChars: number, batchSize: number, persons?: Persons): PiSessionFactory {
   const ref = scope.resourceRef;
   if (scope.pluginInstanceId !== "personal" || ref?.kind !== "Weave" || !ref.uid) throw new Error("Weave requires its resource scope");
   return async options => {
@@ -50,8 +50,8 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
       { name: "group_topics", label: "Group topics", description: "Attach 1-8 roots to an existing parent, or create a new parent for 2-8 roots. For a new parent provide name and summary preserving long-lived connections, attribution, disagreements and confirmation state. Temporary progress stays in child Notes; grouping retains a bounded combined Note window. Do not copy temporary facts into summary. Existing parents keep their own understanding for Chief to synthesize. Running agents may finish; data ownership stays unchanged.",
         parameters: Type.Object({ topics: Type.Array(Type.Object({ uid: Type.String(), version: Type.String() }), { minItems: 1, maxItems: 8 }),
           parent: Type.Optional(Type.Object({ uid: Type.String(), version: Type.String() })),
-          people: noteFields.people, name: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })), summary: Type.Optional(Type.String({ minLength: 1, maxLength: summaryChars })) }),
-        async execute(_id, args) { return result(await groupTopics(plugins.resourceClient("personal"), active(), args, summaryChars)); } },
+          people: noteFields.people, name: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })), summary: Type.Optional(Type.String({ minLength: 1, maxLength: 16000, description: `Soft character budget: ${maxChars}` })) }),
+        async execute(_id, args) { return result(await groupTopics(plugins.resourceClient("personal"), active(), args, maxChars)); } },
     ];
     return createWeaveAgent({ ...options, config, scope: `weave:${ref.uid}`, tools, background: identityBackground(persons) });
   };

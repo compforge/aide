@@ -6,11 +6,11 @@ import type { LoopExecution } from "../loop.ts";
 import type { TopicReview } from "./review.ts";
 export const TOPIC_TYPE = { apiVersion: "aide.dev/v1alpha5", kind: "Topic" } as const;
 export const DEFAULT_TOPIC_ID = "default";
-export interface TopicSpec { address?: import("../address/model.ts").AddressRef; id: string; name?: string; default?: boolean; review?: TopicReview;
+export interface TopicSpec { maxNotes?: number; address?: import("../address/model.ts").AddressRef; id: string; name?: string; default?: boolean; review?: TopicReview;
   people?: import("../person/model.ts").PersonRefs; topicKey?: string; parentRef?: ResourceRef & { uid: string } }
 export interface TopicStatus extends ResourceContext {
   weaveReview?: { version: string; at: string };
-  noteReviewQueue?: Array<{ noteId: string; version: string }>;
+  notePressure?: import("../note/pressure.ts").NotePressure;
   reclamation?: { version: string; reason: string; writer: NonNullable<import("../note/model.ts").NoteStatus["writer"]> };
   assignmentRefresh?: { version: string; cursor: string; complete: boolean };
   summaryDependencies?: Record<string, string>;
