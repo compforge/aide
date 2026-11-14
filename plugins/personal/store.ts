@@ -29,11 +29,21 @@ export class Store {
   constructor(readonly resources: PluginResourceStore, readonly client: ResourceClient, readonly topics: TopicStore) {}
 
   read(): { works: Work[]; outputs: OutputView[] } {
-    const works = this.listResources();
     return {
-      works: works.filter((resource) => !resource.metadata.deletionTimestamp).map(r => this.toWork(r)),
+      works: this.listWorks(),
       outputs: this.topics.outputs(),
     };
+  }
+
+  /**
+   * @spec Work queries never materialize Outputs; an explicit Topic selects only its current UID, not descendants.
+   * @why Web polling must not replay message Streams or decode unrelated Work before filtering.
+   * @link docs/channel/web.md#工作管理
+   */
+  listWorks(topicId?: string): Work[] {
+    if (topicId === undefined) return this.listResources().filter(r => !r.metadata.deletionTimestamp).map(r => this.toWork(r));
+    const topic = this.topics.resource(topicId);
+    return topic ? this.workResources([topic.metadata.uid]).map(r => this.toWork(r)) : [];
   }
 
   workResources(topicUids: readonly string[]): WorkResource[] {

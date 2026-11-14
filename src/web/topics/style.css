@@ -68,6 +68,8 @@ textarea { width: 100%; resize: vertical; min-height: 80px; max-height: 200px; b
 #topic-summary, #topic-recent { font-size: 15px; }
 .context-entry + .context-entry { margin-top: 16px; padding-top: 16px; border-top: 1px solid #e1e6dc; }
 .context-entry time { display: block; margin-bottom: 6px; font-size: 12px; }
+.note-pages { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
+.note-pages button { background: #e8eee3; color: #20342b; padding: 6px 10px; font-size: 13px; }
 .work { background: white; border-radius: 10px; border: 1px solid #e1e6dc; padding: 14px; margin-bottom: 12px; }
 .work-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .work-actions { display: flex; gap: 6px; }

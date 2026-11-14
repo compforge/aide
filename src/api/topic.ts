@@ -1,6 +1,7 @@
 import { summaryText, summaryReference } from "../../plugins/personal/note/summary.ts";
 import { notes } from "../../plugins/personal/note/query.ts";
 import type { TopicStore } from "../../plugins/personal/topic/store.ts";
+export { browseTopicNotes } from "../../plugins/personal/topic/notes.ts";
 
 /** @spec Summary and recent Notes are independent indexed reads; neither projects dialogue or execution history. */
 export function topicSummary(store: TopicStore, id: string) {
