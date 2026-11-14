@@ -26,6 +26,7 @@ export const HARNESS_IDENTITIES = {
   route: { id: "route", aliases: [], label: "Route", sessionKey: "route", icon: iconFor("harness:chief") },
   routine: { id: "routine", aliases: [], label: "Routine", sessionKey: "routine", icon: iconFor("harness:chief") },
   task: { id: "task", aliases: [], label: "Task", sessionKey: "task", icon: iconFor("harness:chief") },
+  gate: { id: "gate", aliases: [], label: "Gate", sessionKey: "gate", icon: iconFor("harness:chief") },
   chief: { id: "chief", aliases: [], label: "Chief", sessionKey: "chief", icon: iconFor("harness:chief") },
 } as const satisfies Record<string, HarnessIdentity>;
 

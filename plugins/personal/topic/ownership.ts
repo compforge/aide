@@ -35,7 +35,7 @@ export function guardInputTopic(previous: Resource<InputSpec, InputStatus>, curr
  */
 export function requireOrganization(organization: Organization | undefined, context: ResourceValidationContext, topics: readonly TopicResource[]) {
   const actor = organization && context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, organization.actorUid);
-  if (!actor || actor.metadata.deletionTimestamp || actor.spec.parentRef || !organization?.executionId
+  if (!actor || actor.spec.gate || topics.some(t => t.spec.gate) || actor.metadata.deletionTimestamp || actor.spec.parentRef || !organization?.executionId
     || actor.status.execution?.id !== organization.executionId) throw new Error("Organization requires the active root Chief");
   for (const topic of topics) {
     let current = topic;

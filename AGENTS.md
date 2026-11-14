@@ -13,6 +13,7 @@ src/
   main.ts                  # 启动 Channel 与 Harness
   app.ts                   # 装配全局 ApplicationRuntime、Personal 与通信入口
   web/                     # 浏览器页面；每页的 HTML、TS 入口、样式与交互模块放在一起
+    gate/                  # 固定对话入口，复用对话、进展与 Work 展示
     topics/                # 导航、时间线、输入、工作与审批；main 管理轮询和 SSE
     persons/               # 人物导航、资料和认识编辑
     addresses/             # 场合列表、禁言设置、认识、参与者、默认通知地址与禁言操作
@@ -123,6 +124,7 @@ agents/
   weave/                   # 专用主题整理 Agent，识别 root 关联并提议归组
   task/                    # 稳定目标的持续办理 Agent，复用 Pi
   routine/                 # 持续职责 Agent，复用 Pi
+  gate/                    # 独立 Gate Agent：跨 Topic 问答与 Gate Work 委托
   chief/                   # Personal 提示词、Person / Work / 问答 / Connector 工具
 connectors/                # 全局环境目录、需求平台访问；Forge 配置装配与 repocli 只读能力
 packages/common/           # @compforge/aide-common：跨 Host、Plugin、Connector、Channel 的公共错误契约
@@ -134,7 +136,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 ## 关键约定
 
-- Aide 是 Me 的独立助理；Chief / Route / Weave / Task / Routine 是助理内部角色。外部交流不是自动委托，凭证不决定身份；摘要、归并和工作交接保留作者、确认状态与授权范围。身份契约见 [Kernel](docs/kernel.md#助理定位与身份边界)。
+- Gate 是系统管理的独立对话入口，以专用 Topic 承载会话、以 `gate` Harness 执行；不参与普通 Topic tree、Route 候选、Weave、维护与回收。跨 Topic 读取不扩大写入范围；Gate 及其 Work 的结果返回 Gate。见 [Gate](docs/personal/gate.md)。
+- Aide 是 Me 的独立助理；Gate / Chief / Route / Weave / Task / Routine 是助理内部角色。外部交流不是自动委托，凭证不决定身份；摘要、归并和工作交接保留作者、确认状态与授权范围。身份契约见 [Kernel](docs/kernel.md#助理定位与身份边界)。
 - 底座提供 TypeScript controller-runtime，服务 Plugin Operator；Personal 拥有 Input、Note、Output、Person、Topic、Task、Routine 与业务判断。通用资源和调度不能导入 Personal，应用装配负责安装定义、通信 action 和投递器。
 - 修改资源更新、并发、条件写入或协调机制时，先核对 [Resource 更新契约](docs/plugin/resource.md#更新操作与并发) 与 Kubernetes / controller-runtime；通用能力缺口优先在底座解决，再接入业务调用方。明确当前实现与设计目标，不用上层逐点重试或独立版本体系替代缺失的写入语义。
 - Host / Runner 不互相导入实现。Runner 经 ResourceClient、Connector API 与 Verb 请求宿主能力，不持有 Store、凭证客户端或 Harness SDK。共享协议放在 src/protocol，公共插件契约放在 packages/plugin。

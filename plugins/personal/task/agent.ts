@@ -1,3 +1,4 @@
+import { gateReadTools } from "../gate/read-tools.ts";
 import { Addresses } from "../address/service.ts";
 import { addressReadTools } from "../address/tools.ts";
 import { summaryText, summaryReference } from "../note/summary.ts";
@@ -68,6 +69,18 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
           return result(report);
         } }),
     ];
-    return createTaskAgent({ ...options, config, scope: `task:${ref.uid}`, tools, background: identityBackground(persons, () => new Background(store, current())) });
+    const gateOwned = !!store.topics.byRef(current().status.topic)?.spec.gate;
+    if (gateOwned) {
+      const reads = gateReadTools(store, () => {
+        if (!store.topics.byRef(current().status.topic)?.spec.gate) throw new Error("Global reads require Gate-owned Work");
+      });
+      const names = new Set(reads.map(t => t.name));
+      const local = tools.filter(t => !names.has(t.name));
+      tools.splice(0, tools.length, ...local, ...reads);
+    }
+    return createTaskAgent({ ...options, config, scope: `task:${ref.uid}`, tools, background: identityBackground(persons, () => {
+      const background = new Background(store, current());
+      return { text: () => background.text() + (gateOwned ? "\nThis Work belongs to Gate. Global read tools expose evidence across Topics; only this Work may be updated. Return results with say in Gate, cite source Note uid/version in say.notes, and include clickable source URLs. For new memory, list_notes(subject=this Work UID) first. Do not modify domain Work or knowledge." : "") };
+    }) });
   };
 }

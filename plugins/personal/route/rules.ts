@@ -1,6 +1,7 @@
+import { ensureGateTopic } from "../gate/topic.ts";
 import { ensureDefaultTopic } from "../topic/default.ts";
 import { digest } from "../chief-model.ts";
-import { DEFAULT_TOPIC_ID, TOPIC_TYPE, initialTopicName, type TopicSpec, type TopicStatus } from "../topic/model.ts";
+import { DEFAULT_TOPIC_ID, GATE_TOPIC_ID, TOPIC_TYPE, initialTopicName, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { deliver, routed, type RoutingContext, type RoutingInput } from "./delivery.ts";
 import type { Destination } from "./model.ts";
@@ -16,12 +17,18 @@ import { ensureSourceTopic } from "../topic/tree.ts";
 export async function routeByRules(context: RoutingContext, original: RoutingInput): Promise<boolean> {
   const input = (await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, ...original.metadata }))!;
   if (routed(input)) return true;
+  if (input.spec.topicId === GATE_TOPIC_ID) {
+    if (input.spec.origin !== "channel" || input.spec.originId !== "web") throw new Error("Gate accepts explicit Web input only");
+    const gate = await ensureGateTopic(context.resources);
+    await deliver(context, input, [gate.metadata], "Explicit Gate input");
+    return true;
+  }
   if (input.spec.topicKey) {
     const topic = await ensureSourceTopic(context.resources, input.spec.topicKey, input.spec.text, input.spec.topicName);
     await deliver(context, input, [topic.metadata], "Source topic key");
     return true;
   }
-  const topics = (await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE)).filter(c => !c.metadata.deletionTimestamp);
+  const topics = (await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE)).filter(c => !c.metadata.deletionTimestamp && !c.spec.gate);
   const destinations = new Map<string, Destination>();
   if (input.spec.topicId) {
     const address = input.spec.source && await context.resources.get<import("../address/model.ts").AddressSpec, import("../address/model.ts").AddressStatus>(input.spec.source);

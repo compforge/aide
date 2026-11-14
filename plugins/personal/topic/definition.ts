@@ -19,7 +19,7 @@ import { z } from "zod";
 import { TopicReviewSchema } from "./review.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { AddressRefSchema } from "../address/model.ts";
-import { TOPIC_TYPE, TopicDeletionBlocked, DEFAULT_TOPIC_ID, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
+import { TOPIC_TYPE, TopicDeletionBlocked, DEFAULT_TOPIC_ID, GATE_TOPIC_ID, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
 import { LoopExecutionSchema } from "../loop.ts";
 import { ResourceRefSchema } from "../topic/ref.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
@@ -31,6 +31,12 @@ import { understandingVersion } from "./tree.ts";
  * @link docs/personal/topic.md#默认主题
  */
 function validateDefault(resource: Readonly<TopicResource>, context: ResourceValidationContext, previous?: Readonly<TopicResource>) {
+  const gate = !!resource.spec.gate;
+  if (gate !== (resource.spec.id === GATE_TOPIC_ID) || gate !== (resource.metadata.name === digest(GATE_TOPIC_ID)))
+    throw new Error("Gate Topic identity is reserved for the system");
+  if (previous && !!previous.spec.gate !== gate) throw new Error("Gate Topic identity is immutable");
+  if (gate && (resource.spec.parentRef || resource.spec.default || resource.spec.topicKey || resource.spec.address || resource.spec.review?.enabled))
+    throw new Error("Gate Topic cannot join the topic tree or enable maintenance");
   const systemDefault = !!resource.spec.default;
   if (systemDefault !== (resource.spec.id === DEFAULT_TOPIC_ID) || systemDefault !== (resource.metadata.name === digest(DEFAULT_TOPIC_ID)))
     throw new Error("Default Topic identity is reserved for the system");
@@ -44,6 +50,7 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
     if (visited.has(parent.uid)) throw new Error("Topic parent cycle");
     visited.add(parent.uid);
     const value = requireTopic(parent, context);
+    if (value.spec.gate) throw new Error("Gate Topic cannot have children");
     parent = value.spec.parentRef;
   }
   // Default identity cannot change after creation; status writes need no uniqueness lookup.
@@ -54,8 +61,8 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
   }
 }
 export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
-  type: TOPIC_TYPE, indexVersion: 3,
-  schema: { spec: z.object({ maxNotes: z.number().int().min(1).max(999).optional(), id: z.string(), address: AddressRefSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
+  type: TOPIC_TYPE, indexVersion: 4,
+  schema: { spec: z.object({ gate: z.boolean().optional(), maxNotes: z.number().int().min(1).max(999).optional(), id: z.string(), address: AddressRefSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     people: PersonRefsSchema(1000).optional(), review: TopicReviewSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
     status: z.object({ conditions: ConditionsSchema, summaryDependencies: z.record(z.string(), z.string()).optional(), organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
       weaveReview: z.object({ version: z.string(), at: z.string().datetime() }).strict().optional(),
@@ -101,6 +108,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     // @spec Deletion checks current indexed dependents in the write transaction, including preceding writes.
     // @case tests/resource-validation-scope.test.ts
     // @link docs/personal/topic.md#静默回收
+    if (resource.spec.gate) throw new TopicDeletionBlocked("gate", "Gate Topic cannot be deleted");
     if (resource.spec.default) throw new TopicDeletionBlocked("default", "Default Topic cannot be deleted");
     if (resource.status.execution) throw new TopicDeletionBlocked("busy", "Topic is busy");
     if (context.page(TOPIC_TYPE, { limit: 1, matchIndex: { name: "parent", value: resource.metadata.uid } }).items.length) throw new TopicDeletionBlocked("children", "Topic still has children");
@@ -115,16 +123,16 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   indexes: { address: r => !r.metadata.deletionTimestamp && r.spec.address ? [r.spec.address.uid] : [], uid: r => [r.metadata.uid], default: r => r.spec.default && !r.metadata.deletionTimestamp ? ["default"] : [],
     topicKey: r => r.metadata.deletionTimestamp || !r.spec.topicKey ? [] : [r.spec.topicKey],
     liveParent: r => !r.metadata.deletionTimestamp && r.spec.parentRef ? [r.spec.parentRef.uid] : [],
-    parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], weaveRoot: r => !r.metadata.deletionTimestamp && !r.spec.parentRef && !r.spec.default ? ["root"] : [], root: r => !r.metadata.deletionTimestamp && !r.spec.parentRef ? ["root"] : [] },
+    parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], weaveRoot: r => !r.metadata.deletionTimestamp && !r.spec.gate && !r.spec.parentRef && !r.spec.default ? ["root"] : [], root: r => !r.metadata.deletionTimestamp && !r.spec.gate && !r.spec.parentRef ? ["root"] : [] },
   orderedIndexes: {
     notePressure: r => !r.metadata.deletionTimestamp && r.status.notePressure && r.status.notePressure.version !== r.status.notePressure.reviewedVersion
       ? [{ value: r.status.notePressure.rootUid, order: r.status.notePressure.nextAt }] : [],
-    weavePending: r => !r.metadata.deletionTimestamp && !r.spec.parentRef && !r.spec.default && r.status.weaveReview?.version !== candidateVersion(r)
+    weavePending: r => !r.metadata.deletionTimestamp && !r.spec.gate && !r.spec.parentRef && !r.spec.default && r.status.weaveReview?.version !== candidateVersion(r)
       ? [{ value: "root", order: r.status.weaveReview?.at ?? "" }] : [],
-    weaveReviewed: r => !r.metadata.deletionTimestamp && !r.spec.parentRef && !r.spec.default && r.status.weaveReview?.version === candidateVersion(r)
+    weaveReviewed: r => !r.metadata.deletionTimestamp && !r.spec.gate && !r.spec.parentRef && !r.spec.default && r.status.weaveReview?.version === candidateVersion(r)
       ? [{ value: "root", order: r.status.weaveReview.at }] : [],
   },
-  retention: { releasedAt: r => !r.spec.default && !r.status.execution && !r.status.agent?.sessionId
+  retention: { releasedAt: r => !r.spec.gate && !r.spec.default && !r.status.execution && !r.status.agent?.sessionId
     ? r.status.lastInputAt ?? r.metadata.creationTimestamp : undefined,
     canEvict: canReclaimTopic, references: () => [] },
 };

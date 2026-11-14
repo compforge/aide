@@ -11,7 +11,7 @@ type LiveActivity = NonNullable<TopicView['meta']['activity']> & {
 const outputText = (block: TopicBlock) => block.label ? `**${block.label}**\n\n${block.content}` : block.content;
 const inputLabels: Record<string, string> = { queued: '待处理', running: '处理中', done: '已处理', quiet: '已查看 · 保持安静', failed: '处理失败' };
 
-export function createTimeline(topicId: string | null, signal: AbortSignal) {
+export function createTimeline(topicId: string | null, signal: AbortSignal, expandLatest = false) {
   let lastMessages = '';
   const messageNodes = new Map<string, { version: string; node: HTMLDetailsElement }>();
   /**
@@ -19,12 +19,12 @@ export function createTimeline(topicId: string | null, signal: AbortSignal) {
    * @spec Topic changes abort detail requests; replaced rows reject late responses and offer retry on failure.
    * @link docs/channel/web.md#实时进展与历史
    */
-  function messageRow(block: TopicBlock) {
+  function messageRow(block: TopicBlock, defaultOpen: boolean) {
     const identity = block.lazy!;
     const version = JSON.stringify([identity, block.status, block.content]);
     const saved = messageNodes.get(block.id);
     if (saved?.version === version) return saved.node;
-    const node = replyRegion('message-detail:' + block.id, '', saved?.node.open ?? false);
+    const node = replyRegion('message-detail:' + block.id, '', saved?.node.open ?? defaultOpen);
     node.className = 'message message-list-item'; node.dataset.scrollKey = block.id;
     const heading = find(node, 'summary');
     const label = block.type === 'input' ? block.label || '输入' : 'Aide';
@@ -43,10 +43,15 @@ export function createTimeline(topicId: string | null, signal: AbortSignal) {
         const view = await request<TopicView>('/topics/message?' + new URLSearchParams({ topicId,
           topicUid: identity.topicUid, id: block.id, uid: identity.uid }), { signal });
         if (signal.aborted || messageNodes.get(block.id) !== entry) return;
-        renderMessages(view.blocks, null, body);
-        for (const detail of body.querySelectorAll<HTMLDetailsElement>('.reply-envelope, .reply-part[data-kind="answer"]')) {
-          detail.open = true; detail.dataset.state = 'full';
-        }
+        const render = () => {
+          renderMessages(view.blocks, null, body);
+          for (const detail of body.querySelectorAll<HTMLDetailsElement>('.reply-envelope, .reply-part[data-kind="answer"]')) {
+            detail.open = true; detail.dataset.state = 'full';
+          }
+        };
+        // Auto-opened replies grow after the stream update; keep following only readers already at the bottom.
+        if (expandLatest) preserveTranscriptPosition($('messages'), render);
+        else render();
         loaded = true;
       } catch (error) {
         if (signal.aborted || messageNodes.get(block.id) !== entry) return;
@@ -172,8 +177,9 @@ export function createTimeline(topicId: string | null, signal: AbortSignal) {
     }
     const rendered = new Set();
     const roots = history.filter((block) => !block.parent_id);
+    const latest = new Set(expandLatest ? roots.slice(-2).map(b => b.id) : []);
     for (const block of roots) {
-      if (block.lazy) { target.append(messageRow(block)); continue; }
+      if (block.lazy) { target.append(messageRow(block, latest.has(block.id))); continue; }
       if (block.type === 'input' || block.type === 'summary') {
         target.append(receivedInput(block)); continue;
       }

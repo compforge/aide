@@ -20,7 +20,7 @@ export function reclamationVersion(topic: TopicResource, reader: NoteReader): st
  * @link docs/personal/topic.md#静默回收
  */
 export function canReclaimTopic(topic: TopicResource, context: ResourceValidationContext): boolean {
-  if (topic.spec.default || topic.metadata.deletionTimestamp || topic.status.execution || topic.status.agent?.sessionId || topic.status.lastError) return false;
+  if (topic.spec.gate || topic.spec.default || topic.metadata.deletionTimestamp || topic.status.execution || topic.status.agent?.sessionId || topic.status.lastError) return false;
   const uid = topic.metadata.uid;
   if (context.page(TOPIC_TYPE, { limit: 1, matchIndex: { name: "parent", value: uid } }).items.length
     || context.page(INPUT_TYPE, { limit: 1, matchIndex: { name: "assessPending", value: uid } }).items.length

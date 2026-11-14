@@ -54,6 +54,7 @@ import { TOPIC_TYPE, INPUT_TYPE, digest } from "./chief-model.ts";
 import { TopicDeletionBlocked, type TopicDeletion } from "./topic/model.ts";
 import { TopicStore } from "./topic/store.ts";
 import type { InputStore } from "./input/store.ts";
+import { gateSession } from "./gate/agent.ts";
 import { chiefTools } from "../../agents/chief/chief-tools.ts";
 import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
@@ -89,12 +90,16 @@ export class Personal {
   }
 
   /** @spec Persistent native tools resolve the live execution on each call, never capture a completed invocation's verbs. */
+  gateSession(scope: ExecutionScope, config: ChiefAgentOptions["config"]): PiSessionFactory {
+    return gateSession(scope, config, this.store, this.plugins, this.log, this.options.persons, this.mailSender);
+  }
+
   chiefSession(scope: ExecutionScope, config: ChiefAgentOptions["config"]): PiSessionFactory {
     const ref = scope.resourceRef;
     if (scope.pluginInstanceId !== "personal" || ref?.kind !== TOPIC_TYPE.kind || ref.apiVersion !== TOPIC_TYPE.apiVersion || !ref.uid) throw new Error("Chief requires a Topic resource scope");
     return async (options) => {
       const initial = this.store.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, ref.name, ref.namespace);
-      if (initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Chief Topic is missing or replaced");
+      if (initial.spec.gate || initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Chief Topic is missing or replaced");
       const topicId = initial.spec.id;
       const active = () => {
         const c = this.topics.resource(topicId);
@@ -159,7 +164,7 @@ export class Personal {
     if (scope.pluginInstanceId !== "personal" || ref?.kind !== ROUTE_TYPE.kind || ref.apiVersion !== ROUTE_TYPE.apiVersion || !ref.uid) throw new Error("Route requires a Route resource scope");
     return async options => {
       const initial = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ref.name, ref.namespace);
-      if (initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Route resource is missing or replaced");
+      if (initial.spec.gate || initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Route resource is missing or replaced");
       const active = () => {
         const route = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ref.name, ref.namespace);
         if (route.metadata.uid !== initial.metadata.uid || !route.status.execution) throw new Error("Route execution is not active");

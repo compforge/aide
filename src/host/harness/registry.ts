@@ -33,6 +33,7 @@ export interface HarnessAdapterOptions {
   piConfig?: PiConfig;
   /** Personal composition supplies the Chief agent and topic-scoped capabilities. */
   chiefSession?: PiSessionFactory;
+  gateSession?: PiSessionFactory;
   taskSession?: PiSessionFactory;
   routineSession?: PiSessionFactory;
   routeSession?: PiSessionFactory;
@@ -72,6 +73,13 @@ export interface HarnessProbeOptions {
  * @link docs/harness/README.md
  */
 export const HARNESS_REGISTRY = [
+  { ...HARNESS_IDENTITIES.gate, shortName: "gate", color: "#a6da95",
+    create: ({ gateSession, log, nativeEvent, env }) => {
+      if (!gateSession) throw new Error("Gate requires a host-bound Gate agent factory");
+      if (env && Object.keys(env).length) throw new Error("Embedded Gate does not support environment overrides");
+      return new PiAdapter({ harness: "gate", createSession: gateSession, log, nativeEvent });
+    },
+  },
   { ...HARNESS_IDENTITIES.weave, shortName: "weave", color: "#a6da95",
     create: ({ weaveSession, log, nativeEvent, env }) => {
       if (!weaveSession) throw new Error("Weave requires a host-bound agent factory");

@@ -6,8 +6,8 @@ import { createTimeline } from "./timeline.ts";
 import { createDialogueHistory } from "./history.ts";
 
 /** @spec Upward scrolling loads ten older records without stopping live updates, replacing the transcript or moving the reader's anchor. */
-export function createDialogue(topicId: string | null, signal: AbortSignal, visible: () => boolean) {
-  const timeline = createTimeline(topicId, signal), history = createDialogueHistory();
+export function createDialogue(topicId: string | null, signal: AbortSignal, visible: () => boolean, expandLatest = false) {
+  const timeline = createTimeline(topicId, signal, expandLatest), history = createDialogueHistory();
   let stream: EventSource | undefined;
   let loading = false, failed = false;
   const messages = byId("messages"), notice = byId("history-notice");

@@ -19,7 +19,7 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
     if (destinations.length !== 1) throw new Error("Route needs exactly one Topic destination");
     const topics = await Promise.all([...new Map(destinations.map(d => [d.uid, d])).values()].map(async d => {
       const c = await context.resources.get<TopicSpec, TopicStatus>({ ...TOPIC_TYPE, namespace: "v1", ...d });
-      if (!c || c.metadata.deletionTimestamp || (rootsOnly && c.spec.parentRef)) throw new Error(`Topic no longer exists: ${d.uid}`);
+      if (!c || c.metadata.deletionTimestamp || (rootsOnly && (c.spec.parentRef || c.spec.gate))) throw new Error(`Topic no longer exists: ${d.uid}`);
       return c;
     }));
     const at = new Date().toISOString();

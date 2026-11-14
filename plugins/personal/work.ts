@@ -50,7 +50,7 @@ export class WorkService {
     const inputId = digest([topic.metadata.uid, "chief-input", key]);
     const at = new Date().toISOString();
     await this.store.client.create(INPUT_TYPE, { name: inputId,
-      spec: { origin: "chief", originId: "personal.chief", text: content, topicId: this.topicId }, status: {
+      spec: { origin: "chief", originId: this.store.topics.resource(this.topicId)?.spec.gate ? "personal.gate" : "personal.chief", text: content, topicId: this.topicId }, status: {
         topic: resourceRef(topic),
         route: { completedAt: at, result: { topics: [resourceRef(topic)], reason: "Independent Chief decision" } },
         assess: { completedAt: at, result: { summary: content } },
@@ -69,7 +69,7 @@ export class WorkService {
       const at = new Date().toISOString();
       await commitStatus(this.store.client, [
         ...(!inputId ? [{ operation: "create" as const, type: INPUT_TYPE, name: initialInputId,
-          spec: { origin: "chief", originId: "personal.chief", text: work.instruction, topicId: this.topicId }, status: {
+          spec: { origin: "chief", originId: this.store.topics.resource(this.topicId)?.spec.gate ? "personal.gate" : "personal.chief", text: work.instruction, topicId: this.topicId }, status: {
             topic: resourceRef(topic),
             route: { completedAt: at, result: { topics: [resourceRef(topic)], reason: "Independent Chief task" } },
             assess: { completedAt: at, result: { summary: work.instruction } },
@@ -97,7 +97,7 @@ export class WorkService {
     if (previous && !isDeepStrictEqual(previous.status.handle?.[target.metadata.uid]?.request, parsed)) throw new Error("Input already has a different Work request; use a new identity");
     await commitStatus(this.store.client, [
       { operation: "patchStatus", resource: target, patch: { idleSince: null, agentStoppedAt: null } },
-      { operation: "create", type: INPUT_TYPE, name, spec: { origin: "chief", originId: "personal.chief", text, topicId: c.spec.id, observation: { work: resourceRef(target), request: parsed } }, status: {
+      { operation: "create", type: INPUT_TYPE, name, spec: { origin: "chief", originId: this.store.topics.resource(this.topicId)?.spec.gate ? "personal.gate" : "personal.chief", text, topicId: c.spec.id, observation: { work: resourceRef(target), request: parsed } }, status: {
         topic: resourceRef(c),
         route: { completedAt: at, result: { topics: [resourceRef(c)], reason: "Independent Chief request" } },
         assess: { completedAt: at, result: { summary: text } },

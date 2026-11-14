@@ -2,7 +2,7 @@ import { byId as $, newId } from '../shared/dom.ts';
 import { request, errorMessage } from '../shared/http.ts';
 
 /** @spec A failed submission keeps its original message ID; editing the text starts a new submission. */
-export function mountComposer(topicId: string, onAccepted: () => Promise<void>, signal: AbortSignal) {
+export function mountComposer(topicId: string, onAccepted: () => Promise<void>, signal: AbortSignal, endpoint = "/messages") {
   let sending = false;
   let draft: { id: string; topicId: string; text: string } | null = null;
   $<HTMLFormElement>('composer').addEventListener('submit', async (event) => {
@@ -15,7 +15,7 @@ export function mountComposer(topicId: string, onAccepted: () => Promise<void>, 
       if (!draft || draft.text !== text) {
         draft = { id: newId(), topicId, text };
       }
-      await request('/messages', { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify(draft) });
+      await request(endpoint, { method: 'POST', signal, headers: { 'content-type': 'application/json' }, body: JSON.stringify(endpoint === "/gate/messages" ? { id: draft.id, text: draft.text } : draft) });
       if (signal.aborted) return;
       draft = null; $<HTMLTextAreaElement>('input').value = ''; $('notice').textContent = '已接收，后续进展会显示在这里。';
       await onAccepted(); if (!signal.aborted) $('messages').scrollTop = $('messages').scrollHeight;
