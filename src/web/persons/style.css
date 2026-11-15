@@ -50,7 +50,9 @@ button.secondary { background: #e8eee3; color: #20342b; }
 .person-panel[hidden] { display: none; }
 .person-note { border-bottom: 1px solid #d8dfd5; padding: 20px 0; overflow-wrap: anywhere; }
 .person-note time { font-size: 13px; }
-#person-notes-more[hidden] { display: none; }
+.note-pages { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; font-size: 13px; }
+.note-pages button { padding: 6px 10px; font-size: 13px; }
+.note-pages[hidden] { display: none; }
 
 .person-title { display: flex; align-items: center; gap: 6px; margin-bottom: 18px; }
 .person-title h2 { margin: 0; }

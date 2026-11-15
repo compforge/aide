@@ -16,4 +16,4 @@ export type InputFiltersView = ReturnType<typeof import("./inputs.ts").inputFilt
 export type InputDetailView = NonNullable<ReturnType<typeof import("./inputs.ts").inputDetail>>;
 export type { InputRequest as Approval } from "../host/message/types.ts";
 
-export type PersonNotesView = Awaited<ReturnType<Persons["notes"]>>;
+export type PersonNotesView = NonNullable<ReturnType<typeof import("../../plugins/personal/person/notes.ts").browsePersonNotes>>;
