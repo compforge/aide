@@ -11,6 +11,7 @@ Note 为主题与人物的长期认识、主题组织提供依据，提炼主线
 | 字段 | 含义 |
 | --- | --- |
 | metadata.name / uid | 稳定 Note ID 和具体资源实例 |
+| spec.name | 可维护的事项或知识名称，最长 200 字符；读取与更新使用稳定 ID |
 | spec.subject | 必填的 Topic / Task / Routine / Person / Address UID 引用；subject 表示认识的关联对象，people 表示相关人物 |
 | spec.summaryOf | 可选的摘要对象引用，与 subject 一致；按对象 UID 索引，每个对象至多一份摘要 Note |
 | spec.people | 涉及的人物引用，按 UID 去重；默认空数组 |
@@ -27,9 +28,19 @@ Note 为主题与人物的长期认识、主题组织提供依据，提炼主线
 
 subject、people 和 addresses 均有索引；recentSubject / recentPeople / recentAddresses 另按 updatedAt 排序，recent 直接查询最新 40 条后应用字符预算，不加载全部历史。Topic 按自身 UID 查询 Note，相关 Work 的 Note 通过 Work 视图展示；Person 按 people 查询，同一 Note 可以出现在多个人物视图中。不是将正文复制进每个对象。普通事项没有配置 owner；subject / people 不阻止其所关联资源回收。Person 合并保留历史 people 引用，不将旧人物证据自动改写成目标人物。
 
+## 名称与按需读取
+
+普通 Note 创建时由 Agent 提供简明名称，事项范围变化或整理后按需更新。`upsert_note` 可单独修改 name，省略时保留原名；名称不要求唯一，改名保留 ID、UID 与正文引用。`list_notes` 同时搜索名称和正文。
+
+未命名 Note 以正文首个非空行作为占位名称，读取投影带 `nameMissing: true`，Web 显示 `[未命名]`。Agent 在维护该 Note 时补齐名称；补齐前不改写存储。Summary 由所属对象识别，无需额外命名。
+
+Prompt 中的 summary 提供紧凑背景，普通 Note 目录只包含 id、name、nameMissing、nature、updatedAt 和 version。目录独立于正文预览预算，选取最新 40 条并按稳定 ID 排序，最多 8000 个 JSON 字符；提供总数（已知时）、truncated 与 list_notes 查询条件。异步有界读取无法确定总数时明确截断，不把当前页数量当作总量。Topic、Person、Address 和 Work 按各自关联查询；退休 Note 和 summary 不进入普通目录。Agent 根据名称判断相关性，再以 read_note 读取完整内容。Chief、Gate 和 Work 复用只读 Note 检索；读取证据不授予修改其它资源的权限，写入继续校验当前执行和 subject 归属。
+
+目录随每次模型调用重新生成，新增、改名、内容更新、移动和退休都反映到下一次请求。当前背景 part 直接替换，历史消息保留。目录变化可能降低 prefix cache 复用；以信息准确性和任务效果为先，结合缓存使用、token 与延迟衡量成本。
+
 ## 作为 summary 的 Note
 
-summary 与普通事项使用同一种 Note 载体，共用正文、关联、内容版本、分类与 maxChars 软预算；差别在于认识的视角、内容层级与上下文使用方式。普通 Note 围绕具体事项保存进展、依据、结论和未决问题；summary Note 从特定对象的视角提炼跨事项、长期有效的认识：Topic 面向主题与领域，Person 面向人物，Address 面向沟通场合。summary Note 面向常驻上下文，提供紧凑、稳定的对象认识，具体加载范围由当前任务和上下文预算决定；普通 Note 通过近期预览和按需检索提供事项细节及其依据。
+summary 与普通事项使用同一种 Note 载体，共用正文、关联、内容版本、分类与 maxChars 软预算；差别在于认识的视角、内容层级与上下文使用方式。普通 Note 围绕具体事项保存进展、依据、结论和未决问题；summary Note 从特定对象的视角提炼跨事项、长期有效的认识：Topic 面向主题与领域，Person 面向人物，Address 面向沟通场合。summary Note 面向常驻上下文，提供紧凑、稳定的对象认识，具体加载范围由当前任务和上下文预算决定；普通 Note 通过名称目录发现，使用 read_note 按稳定 ID 获取正文及其依据。
 
 Chief 按需整理事项，并将其中有长期价值的信息沉淀到相应对象的 summary。Topic summary 保留长期背景、约束、稳定结论和可复用方法，关键事件仅保留解释当前状态或重要转折所需的摘要；Person summary 保留人物的稳定职责、观点、偏好、关系与协作方式；Address summary 保留场合的用途、讨论范围、角色分工和沟通惯例。
 

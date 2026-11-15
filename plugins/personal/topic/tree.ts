@@ -1,4 +1,4 @@
-import { isProcessingRoot } from "./boundary.ts";
+import { isGateTopic, isProcessingRoot } from "./boundary.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { ResourceClient, ResourceReader, ResourceRef } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, initialTopicName, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
@@ -28,7 +28,7 @@ export function topicPath(all: readonly TopicResource[], leaf: TopicResource): T
  */
 export function topicSubtree(root: TopicResource, children: (parent: TopicResource) => readonly TopicResource[]): TopicResource[] {
   if (root.metadata.deletionTimestamp) return [];
-  if (root.spec.gate) return [root];
+  if (isGateTopic(root)) return [root];
   const topics = [root], seen = new Set([root.metadata.uid]);
   for (let index = 0; index < topics.length; index++) {
     for (const child of children(topics[index]!)) {
@@ -44,7 +44,7 @@ export function topicSubtree(root: TopicResource, children: (parent: TopicResour
 export async function readTopicSubtree(resources: ResourceReader, ref: ResourceRef): Promise<TopicResource[]> {
   const root = await resources.get<TopicSpec, TopicStatus>(ref);
   if (!root || root.metadata.deletionTimestamp) return [];
-  if (root.spec.gate) return [root];
+  if (isGateTopic(root)) return [root];
   const topics = [root], seen = new Set([root.metadata.uid]);
   for (let index = 0; index < topics.length; index++) {
     const parent = topics[index]!;

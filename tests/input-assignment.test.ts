@@ -1,3 +1,4 @@
+import { fixtureGateRef } from "./summary-fixture.ts";
 import { createWithSummary } from "./summary-fixture.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -117,7 +118,7 @@ test("Periodic direct reconciliation notices ancestor moves, including an A-B-A 
   await f.resources.replace(root, { ...root.spec, parentRef: resourceRef(f.other) }, root.status);
   await assignInput(f.context, f.aide.topics.inputStore.get("deep")!);
   root = f.read(f.root); const { parentRef, ...spec } = root.spec;
-  await f.resources.replace(root, spec, root.status);
+  await f.resources.replace(root, { ...spec, parentRef: fixtureGateRef(f.aide.topics.resources) }, root.status);
   await reconcileAssignments(f.context, f.read(f.child));
   assert.notEqual(f.read(f.child).status.assignmentRefresh!.version, version);
   assert.equal(f.aide.topics.inputStore.get("deep")!.status.assess!.topic!.uid, f.root.metadata.uid);

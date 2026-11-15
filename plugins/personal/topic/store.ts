@@ -1,3 +1,4 @@
+import { isGateTopic } from "./boundary.ts";
 import { HANDOFF_TYPE, type HandoffSpec, type HandoffStatus } from "../handoff/model.ts";
 import { AddressRefSchema, type AddressRef } from "../address/model.ts";
 import { OUTPUT_TYPE } from "../output/model.ts";
@@ -49,7 +50,7 @@ export class TopicStore {
   byKey(key: string): TopicResource | undefined {
     return this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { matchIndex: { name: "topicKey", value: key } })[0];
   }
-  list(): Topic[] { return this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE).filter((r) => !r.metadata.deletionTimestamp && !r.spec.gate).map((r) => this.project(r as TopicResource)); }
+  list(): Topic[] { return this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE).filter((r) => !r.metadata.deletionTimestamp && !isGateTopic(r)).map((r) => this.project(r as TopicResource)); }
   get(id: string): Topic | undefined { const r = this.resource(id); return r && this.project(r); }
   /** @spec The creating Channel supplies its address and first-input name before asynchronous routing; later attachment cannot replace either. */
   async ensure(id: string, address?: AddressTarget, name?: string): Promise<TopicResource> {
@@ -167,7 +168,7 @@ export class TopicStore {
     let target = options.target && AddressRefSchema.parse(options.target);
     let replyToMessageId: string | undefined;
     let replyTo: import("../output/model.ts").OutputSpec["replyTo"];
-    let conversation = initial.spec.gate ? resourceRef(initial) : undefined;
+    let conversation = isGateTopic(initial) ? resourceRef(initial) : undefined;
     let handoffId: string | undefined;
     let receivers = options.receivers === undefined ? undefined : [...options.receivers];
     if (options.to) {
@@ -182,7 +183,7 @@ export class TopicStore {
       const domainRef = delegated?.status.topic ?? handoff?.status.topic;
       const domain = domainRef && this.byRef(domainRef);
       const allowed = handoff && (owner ? delegated ? !!delegated.status.handle?.[owner.metadata.uid] : handoff.status.works.some(w => w.uid === owner?.metadata.uid)
-        : initial.spec.gate ? handoff.spec.gate.uid === initial.metadata.uid
+        : isGateTopic(initial) ? handoff.spec.gate.uid === initial.metadata.uid
         : domain && this.scope(initial.metadata.uid).some(t => t.metadata.uid === domain.metadata.uid));
       if (!handoff || handoff.metadata.deletionTimestamp || !allowed) throw new Error("Handoff reply is outside this owner's scope");
       target = handoff.status.reply.address; replyToMessageId = handoff.status.reply.messageId;

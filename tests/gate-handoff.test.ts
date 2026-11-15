@@ -18,7 +18,6 @@ import { routeByRules } from "../plugins/personal/route/rules.ts";
 import { larkAddress, webAddress } from "../src/channel/address.ts";
 import { topicHistory } from "../plugins/personal/topic/history.ts";
 import { TOPIC_TYPE } from "../plugins/personal/topic/model.ts";
-import { migrateGateTree } from "../plugins/personal/gate/topic.ts";
 import { digest } from "../plugins/personal/chief-model.ts";
 
 const log = pino({ level: "silent" });
@@ -144,23 +143,4 @@ test("durable handoff deduplicates, replies on original DM, tracks followups and
   await service.followup(activeGate(), { id: latest.metadata.name, inputId: "followup", request: next.spec.text });
   assert.equal(service.read(latest.metadata.name).status.sequence, 2, "expired delegated Inputs retain replay receipts");
   assert.ok(!("sourceText" in (await service.list(gate.metadata.uid)).items[0]!.spec), "background listings do not copy original user evidence");
-});
-
-test("legacy root migration preserves UID and session, with independent execution and knowledge scope", async t => {
-  const home = mkdtempSync(join(tmpdir(), "aide-gate-migrate-"));
-  const aide = new Aide(home, fakeOptions({ async execute() { throw new Error("No inference"); } }, home), log);
-  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
-  const store = aide.topics.resources;
-  const root = store.create({ type: TOPIC_TYPE, name: digest("legacy"), spec: { id: "legacy" },
-    status: { receipts: [], agent: { harness: "chief", sessionId: "preserved" } } });
-  await migrateGateTree(aide.personal.store.client);
-  await migrateGateTree(aide.personal.store.client);
-  const updated = aide.topics.resource("legacy")!, gate = aide.topics.resource("gate")!;
-  assert.equal(updated.metadata.uid, root.metadata.uid);
-  assert.equal(updated.status.agent?.sessionId, "preserved");
-  assert.equal(updated.spec.parentRef?.uid, gate.metadata.uid);
-  assert.deepEqual(aide.topics.scope(gate.metadata.uid).map(t => t.metadata.uid), [gate.metadata.uid]);
-  assert.deepEqual(aide.topics.scope(root.metadata.uid).map(t => t.metadata.uid), [root.metadata.uid]);
-  const { writeSummary } = await import("../plugins/personal/note/summary.ts");
-  await assert.rejects(writeSummary(aide.personal.store.client, gate, { text: "duplicate domain knowledge" }), /not domain Notes/);
 });

@@ -1,5 +1,5 @@
 import { ensureGateTopic } from "../gate/topic.ts";
-import { isDomainRoot } from "./boundary.ts";
+import { isRootTopic } from "./boundary.ts";
 import { writeSummary } from "../note/summary.ts";
 import { WriterResourceSchema } from "../note/model.ts";
 import { commitStatus } from "../status.ts";
@@ -23,7 +23,7 @@ const reasonSchema = z.string().trim().min(1).max(2000);
 async function scope(resources: ResourceClient, actor: TopicResource) {
   const topics = await readTopicSubtree(resources, resourceRef(actor));
   const root = topics[0];
-  if (!root || !isDomainRoot(root) || !root.status.execution || root.status.execution.id !== actor.status.execution?.id)
+  if (!root || !isRootTopic(root) || !root.status.execution || root.status.execution.id !== actor.status.execution?.id)
     throw new Error("Organization requires the active root Chief");
   return { root, topics };
 }

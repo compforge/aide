@@ -1,3 +1,4 @@
+import { isGateTopic } from "../topic/boundary.ts";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Logger } from "pino";
@@ -36,7 +37,7 @@ export function gateSession(scope: ExecutionScope, config: PiConfig, store: Stor
   return async options => {
     const current = () => {
       const gate = store.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, ref.name, ref.namespace);
-      if (!gate.spec.gate || gate.metadata.uid !== ref.uid || gate.metadata.deletionTimestamp || !gate.status.execution)
+      if (!isGateTopic(gate) || gate.metadata.uid !== ref.uid || gate.metadata.deletionTimestamp || !gate.status.execution)
         throw new Error("Gate execution is no longer active");
       plugins.executionVerbs(gate.status.execution.id, { topicId: gate.spec.id });
       return gate;

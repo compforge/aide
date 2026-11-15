@@ -1,3 +1,4 @@
+import { readNoteDirectory } from "../note/directory.ts";
 import { identityContactLocator } from "../../../src/channel/address.ts";
 import { ADDRESS_TYPE, addressRef, locatorKey, type AddressSpec, type AddressStatus } from "../address/model.ts";
 import { personRef, personRefs } from "./model.ts";
@@ -31,6 +32,10 @@ export class Persons {
   async notes(id: string, uid: string, continuation?: string) {
     const person = await this.profile(id, uid);
     return pageNotes(this.resources, person.metadata.uid, "people", continuation);
+  }
+  async noteDirectory(id: string, uid: string) {
+    const person = await this.profile(id, uid);
+    return readNoteDirectory(this.resources, person.metadata.uid, "people");
   }
   async read(id: string, uid?: string) {
     const person = await this.profile(id, uid);

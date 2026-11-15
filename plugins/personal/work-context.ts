@@ -23,14 +23,13 @@ export function workContextTools(kind: "task" | "routine", resources: ResourceCl
     return resource;
   };
   return [
-    tool({ name: "list_notes", label: "Find Work Notes", description: "Find this Work's retained Notes beyond recent. Text q filters one bounded page; follow continue even when a page has no matches. Use read_note for complete content.",
-      parameters: Type.Object({ q: Type.Optional(Type.String({ maxLength: 500 })), continue: Type.Optional(Type.String()), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }, { additionalProperties: false }),
-      async execute(_id, args) { return result(await listNotes(resources, { ...args, subject: read().metadata.uid })); } }),
-    tool({ name: "read_note", label: "Read note", description: "Read the complete text and content version of one Note belonging to this Work.",
+    tool({ name: "list_notes", label: "Find Work Notes", description: "Discover Notes by name/body q. Defaults to this Work; use a directory's subject/people/addresses filter for related evidence. Reading grants no authority to edit other resources. Each call scans one bounded page; follow continue even when a page has no matches. Use read_note for complete content.",
+      parameters: Type.Object({ subject: Type.Optional(Type.String({ minLength: 1 })), people: Type.Optional(Type.String({ minLength: 1 })), addresses: Type.Optional(Type.String({ minLength: 1 })), q: Type.Optional(Type.String({ maxLength: 500 })), continue: Type.Optional(Type.String()), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }, { additionalProperties: false }),
+      async execute(_id, args) { const owner = read(); return result(await listNotes(resources, { ...args, ...(!args.subject && !args.people && !args.addresses ? { subject: owner.metadata.uid } : {}) })); } }),
+    tool({ name: "read_note", label: "Read note", description: "Read a complete Note identified by a directory or citation, including its name, body and version. Reading evidence grants no ownership or permission to change its subject.",
       parameters: Type.Object({ noteId: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
       async execute(_id, args) {
-        const owner = read(), note = await readNote(resources, args.noteId);
-        if (note.subject.uid !== owner.metadata.uid) throw new Error("Note belongs to another Work");
+        read(); const note = await readNote(resources, args.noteId);
         return result(note);
       } }),
     tool({ name: `summarize_${kind}`, label: `Summarize ${kind}`, description: `${summaryDescription} Retain findings, constraints and conclusions that remain useful within this ${kind === "task" ? "task's lifetime" : "ongoing responsibility"}. The Host binds the target. Never changes the objective, schedule or business status.`,

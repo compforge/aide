@@ -48,7 +48,7 @@ export class PersonNotes {
         const item = element('article', undefined, 'person-note');
         const time = element('time', new Date(note.updatedAt).toLocaleString(), 'muted'); time.dateTime = note.updatedAt;
         const content = element('div', undefined, 'markdown'); updateMarkdown(content, note.text);
-        item.append(time, content); renderNoteClassification(item, note); $('person-notes').append(item);
+        item.append(element("h3", (note.nameMissing ? "[未命名] " : "") + (note.name ?? "未命名笔记")), time, content); renderNoteClassification(item, note); $('person-notes').append(item);
       }
       this.loaded = true; this.page = this.requestedPage = page.page; this.pages = page.pages;
       $('person-note-pages').hidden = false;

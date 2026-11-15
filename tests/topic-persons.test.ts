@@ -1,3 +1,4 @@
+import { isGateTopic } from "../plugins/personal/topic/boundary.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { seedNotes } from "./fixtures/notes.ts";
@@ -93,8 +94,8 @@ test("Topic people use only its own recent Notes and project names without Input
   assert.equal(db.prepare("SELECT total_changes() AS n").get()!.n, before);
   assert.equal(expected.items.length, 8); assert.equal(expected.omittedPersons, 2);
   assert.equal(expected.source, "recentNotes"); assert.equal(expected.noteCount, 1);
-  const preview = understanding({ ...noted.status, summary: "", recent: notes(f.store.resources, noted.metadata.uid, "subject") }).recent[0]!;
-  assert.equal(preview.people!.length, 8); assert.equal(preview.peopleOmitted, 2);
+  const preview = understanding({ ...noted.status, summary: "", recent: notes(f.store.resources, noted.metadata.uid, "subject") }).notes.items[0]!;
+  assert.ok(!("people" in preview), "Directory only contains discovery metadata");
   assert.equal(notes(f.store.resources, noted.metadata.uid, "subject")[0]!.people!.length, 10, "Only the preview is truncated");
   assert.deepEqual(topicCandidatePage(f.store).items.find(t => t.uid === root.metadata.uid)!.persons, expected);
   assert.match(topicParts(f.store, noted, root.spec.id).topic, /recentNotes/);
@@ -143,7 +144,7 @@ test("Route and Chief query people and recent activity only for the current page
   assert.ok(page.items.length < 20);
   assert.equal(people, page.items.length + 1); assert.equal(activities, page.items.length + 1);
   const root = await f.aide.topics.ensure("chief");
-  for (const child of f.store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE).filter(t => !t.spec.gate && t.metadata.uid !== root.metadata.uid))
+  for (const child of f.store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE).filter(t => !isGateTopic(t) && t.metadata.uid !== root.metadata.uid))
     await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(root) }, child.status);
   people = 0;
   const tools = topicTools(f.store, () => root);

@@ -1,3 +1,4 @@
+import { fixtureGateRef } from "./summary-fixture.ts";
 import { deliveryIdentity } from "../plugins/personal/output/model.ts";
 import { MailWriter, composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
@@ -247,13 +248,13 @@ test("real Runner isolates one Output's transport failure and automatically retr
 test("root visibility follows current parent relationships before delivery", async t => {
   const f = await setup(t);
   const { TOPIC_TYPE } = await import("../plugins/personal/topic/model.ts");
-  const root = await f.client.create(TOPIC_TYPE, { name: "root", spec: { id: "root", people: [personRef(f.other)] }, status: {} });
+  const root = await f.client.create(TOPIC_TYPE, { name: "root", spec: { id: "root", parentRef: fixtureGateRef(f.store.resources), people: [personRef(f.other)] }, status: {} });
   const attached = await f.client.replace(f.topic, { ...f.topic.spec, parentRef: resourceRef(root) }, f.topic.status);
   f.output("root-scope", await f.note("L1", "root"));
   await f.checker.reconcile("root-scope");
   assert.equal(f.store.get("root-scope")!.status.disclosure!.decision, "allowed");
   const { parentRef: _parent, ...detached } = attached.spec;
-  await f.client.replace(attached, detached, attached.status);
+  await f.client.replace(attached, { ...detached, parentRef: fixtureGateRef(f.store.resources) }, attached.status);
   await f.checker.reconcile("root-scope");
   assert.equal(f.store.get("root-scope")!.status.disclosure!.decision, "denied");
 });

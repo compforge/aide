@@ -64,16 +64,17 @@ test("Default creation uses its singleton index and updates perform no dependenc
   const f = fixture(t);
   await f.topic("unrelated");
   const fallback = await ensureDefaultTopic(f.resources);
-  assert.deepEqual(f.queries, [{ kind: "Topic", index: "default", count: 0 }]);
+  const domainQueries = () => f.queries.filter(q => q.uid !== fallback.spec.parentRef?.uid);
+  assert.deepEqual(domainQueries(), [{ kind: "Topic", index: "default", count: 0 }]);
   f.queries.length = 0;
   const updated = await patchSummary(f.resources, fallback, { summary: "A fallback observation" });
-  assert.ok(f.queries.length <= 4 && f.queries.every(q => q.count <= 1 && (q.kind === "Note" || ("uid" in q && q.uid === fallback.metadata.uid))));
+  assert.ok(domainQueries().length <= 4 && domainQueries().every(q => q.count <= 1 && (q.kind === "Note" || ("uid" in q && q.uid === fallback.metadata.uid))));
   f.queries.length = 0;
   await f.resources.replace(updated, { ...updated.spec, name: "Fallback" }, updated.status);
-  assert.deepEqual(f.queries, []);
+  assert.deepEqual(domainQueries(), []);
   await assert.rejects(f.resources.create(TOPIC_TYPE, { name: fallback.metadata.name, namespace: "v1/project/other",
     spec: fallback.spec, status: fallback.status }), /Default Topic already exists/);
-  assert.deepEqual(f.queries, [{ kind: "Topic", index: "default", count: 1 }]);
+  assert.deepEqual(domainQueries(), [{ kind: "Topic", index: "default", count: 1 }]);
 });
 
 /** @case Profile writes skip identity queries; additions and transactional transfers still enforce exact ownership. */

@@ -4,7 +4,8 @@ import type { Store } from "../store.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { topicCandidatePage } from "../background.ts";
 import { summaryText, summaryReference } from "../note/summary.ts";
-import { notes, listNotes } from "../note/query.ts";
+import { noteDirectory } from "../note/directory.ts";
+import { listNotes } from "../note/query.ts";
 import { readNote } from "../note/service.ts";
 import { inputPrinter } from "../input/printer.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
@@ -37,16 +38,16 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
         const page = topicCandidatePage(store, args.offset, args.q, args.parentUid);
         return result({ ...page, items: page.items.map(item => ({ ...item, url: topicURL(topic(item.uid).spec.id) })) });
       } }),
-    tool({ name: "read_topic", label: "Read Topic", description: "Read any Topic's summary and bounded recent Notes in text pages. Read truncated Notes individually; list_notes discovers retained material beyond recent. Current progress may require Work or Input evidence.",
+    tool({ name: "read_topic", label: "Read Topic", description: "Read any Topic's summary and Note directory in text pages. Use read_note for bodies and list_notes for further discovery. Current progress may require Work or Input evidence.",
       parameters: Type.Object({ uid: text, offset }),
       async execute(_id, { uid, offset = 0 }) {
         const value = topic(uid);
         return result({ uid, url: topicURL(value.spec.id), ...pageText({ ...value.spec,
           summary: summaryText(store.resources, value), summaryNote: summaryReference(store.resources, value),
-          recent: notes(store.resources, uid), lastInputAt: value.status.lastInputAt }, offset) });
+          notes: noteDirectory(store.resources.storage, uid), lastInputAt: value.status.lastInputAt }, offset) });
       } }),
-    tool({ name: "list_notes", label: "Find Notes", description: "Find retained Notes across Topics, including summaries. Filter subject UID or q; each request scans at most 20 records. Follow continue even on empty matching pages. Previews are incomplete.",
-      parameters: Type.Object({ subject: Type.Optional(text), q: Type.Optional(Type.String({ maxLength: 500 })), continue: Type.Optional(text), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }),
+    tool({ name: "list_notes", label: "Find Notes", description: "Find retained Notes across Topics, including summaries. Filter subject UID or name/body q; each request scans at most 20 records. Follow continue even on empty matching pages. Previews are incomplete.",
+      parameters: Type.Object({ subject: Type.Optional(text), people: Type.Optional(text), addresses: Type.Optional(text), q: Type.Optional(Type.String({ maxLength: 500 })), continue: Type.Optional(text), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }),
       async execute(_id, args) { return result(await listNotes(store.client, args)); } }),
     tool({ name: "read_note", label: "Read Note", description: "Read a complete Note with provenance, nature and uid/version for citations. The returned URL opens the evidence in Gate.",
       parameters: Type.Object({ noteId: text }),

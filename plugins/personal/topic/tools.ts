@@ -1,4 +1,5 @@
-import { isDomainRoot } from "./boundary.ts";
+import { noteDirectory } from "../note/directory.ts";
+import { isRootTopic } from "./boundary.ts";
 import { noteFields } from "../../../agents/context-tools.ts";
 import { summaryText, summaryReference } from "../note/summary.ts";
 import { reclamationVersion } from "./retention.ts";
@@ -30,7 +31,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
       parameters: Type.Object({ uid: Type.Optional(Type.String()), version: Type.String(), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
       async execute(_id, args) {
         const actor = active(), topic = await readTopicInScope(store.client, actor, args.uid);
-        if (!topic || !actor.status.execution || !isDomainRoot(topic)) throw new Error("Release requires an active Chief and a root Topic");
+        if (!topic || !actor.status.execution || !isRootTopic(topic)) throw new Error("Release requires an active Chief and a root Topic");
         if (reclamationVersion(topic, store.resources) !== args.version) throw new Error("Topic understanding changed; read_topic again");
         const updated = await store.client.patchStatus(topic, { reclamation: { version: args.version, reason: args.reason,
           writer: { resource: WriterResourceSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id } } });
@@ -57,21 +58,21 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
         const items = store.topics.inputStore.query("topic", topic.metadata.uid).filter(i => !i.metadata.deletionTimestamp && !isInternalInput(i.spec));
         return result(contextPage(items.map(i => ({ id: i.metadata.name, topicUid: i.status.topic!.uid, text: i.spec.text.slice(0, 240), assessed: !!i.status.assess?.completedAt })), offset));
       } }),
-    { name: "list_topics", inputOrigins: INPUT_ORIGINS, label: "List child topics", description: "List direct children within this root's subtree with summary and Note previews for discovery. Text ending in [truncated] is incomplete; noteTotal counts Notes in the retained recent window, including omitted previews. Before relying on incomplete context or confirming absorbed versions, use read_topic(uid) and continue with offset=nextOffset until the needed context is read. Follow this list's nextOffset to discover remaining children.",
+    { name: "list_topics", inputOrigins: INPUT_ORIGINS, label: "List child topics", description: "List direct children within this root's subtree with summary and Note directories for discovery. Text ending in [truncated] is incomplete; notes.total counts active ordinary Notes. Use read_note(id) for bodies and list_notes with notes.listNotes for further discovery. Before relying on incomplete context or confirming absorbed versions, use read_topic(uid) and continue with offset=nextOffset until the needed context is read. Follow this list's nextOffset to discover remaining children.",
       parameters: Type.Object({ parentUid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, { parentUid, offset = 0 }) {
         const root = active(), parent = parentUid ?? root.metadata.uid;
         if (!await readTopicInScope(store.client, root, parent)) throw new Error("Topic is outside this root");
         return result(topicPage(store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, { matchIndex: { name: "parent", value: parent } }), t => ({
-          uid: t.metadata.uid, name: t.spec.name, persons: topicPersons(store, t), ...understanding({ ...t.status, summary: summaryText(store.resources, t), summaryUid: summaryReference(store.resources, t)?.uid, summaryNote: summaryReference(store.resources, t), recent: notes(store.resources, t.metadata.uid, "subject") }, 1200), version: understandingVersion(t, notes(store.resources, t.metadata.uid, "subject")), organization: t.status.organization,
+          uid: t.metadata.uid, name: t.spec.name, persons: topicPersons(store, t), ...understanding({ ...t.status, summary: summaryText(store.resources, t), summaryUid: summaryReference(store.resources, t)?.uid, summaryNote: summaryReference(store.resources, t), recent: notes(store.resources, t.metadata.uid, "subject") }, 1200, noteDirectory(store.resources.storage, t.metadata.uid)), version: understandingVersion(t, notes(store.resources, t.metadata.uid, "subject")), organization: t.status.organization,
         }), offset));
       } },
-    { name: "read_topic", inputOrigins: INPUT_ORIGINS, label: "Read topic", description: "Read this root or a descendant's full summary and recent Note window in text pages. Use read_note for the complete text of a truncated Note. A non-null nextOffset means more text remains: continue with offset=nextOffset; null marks the end. Use its content version for summarize_topic and understandingVersion for absorbed receipts after reviewing the child context.",
+    { name: "read_topic", inputOrigins: INPUT_ORIGINS, label: "Read topic", description: "Read this root or a descendant's full summary and Note directory in text pages. Use read_note for Note bodies. A non-null nextOffset means more text remains: continue with offset=nextOffset; null marks the end. Use its content version for summarize_topic and understandingVersion for absorbed receipts after reviewing the child context.",
       parameters: Type.Object({ uid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, { uid, offset = 0 }) {
         const root = active(), topic = await readTopicInScope(store.client, root, uid);
         if (!topic) throw new Error("Topic is outside this root");
-        const text = JSON.stringify({ ...topic.spec, persons: topicPersons(store, topic), conditions: topic.status.conditions, summaryDependencies: topic.status.summaryDependencies, summary: summaryText(store.resources, topic), summaryUid: summaryReference(store.resources, topic)?.uid, summaryNote: summaryReference(store.resources, topic), recent: notes(store.resources, topic.metadata.uid, "subject"), organization: topic.status.organization });
+        const text = JSON.stringify({ ...topic.spec, persons: topicPersons(store, topic), conditions: topic.status.conditions, summaryDependencies: topic.status.summaryDependencies, summary: summaryText(store.resources, topic), summaryUid: summaryReference(store.resources, topic)?.uid, summaryNote: summaryReference(store.resources, topic), notes: noteDirectory(store.resources.storage, topic.metadata.uid), organization: topic.status.organization });
         return result({ uid: topic.metadata.uid, version: contentVersion(topic), reclamationVersion: reclamationVersion(topic, store.resources), understandingVersion: understandingVersion(topic, notes(store.resources, topic.metadata.uid, "subject")),
           text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
       } },

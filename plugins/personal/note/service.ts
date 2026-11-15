@@ -7,15 +7,15 @@ import { z } from "zod";
 import type { Resource, ResourceClient } from "@compforge/aide-plugin";
 import { personRefs, PersonRefsSchema } from "../person/model.ts";
 import { resourceRef } from "../input/state.ts";
-import { NOTE_TYPE, NoteNatureSchema, MaxCharsSchema, noteMaxChars, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
+import { NOTE_TYPE, NoteNameSchema, NoteNatureSchema, MaxCharsSchema, noteMaxChars, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
 
 export const NoteUpdateSchema = z.object({ version: z.string().min(1).optional(), noteId: z.string().min(1).optional(),
-  nature: NoteNatureSchema.optional(), maxChars: MaxCharsSchema.optional(),
+  name: NoteNameSchema.optional(), nature: NoteNatureSchema.optional(), maxChars: MaxCharsSchema.optional(),
   sensitivity: SensitivitySchema.optional(), visibility: VisibilitySchema.optional(),
   addresses: AddressRefsSchema.optional(), subject: SubjectSchema.optional(), text: z.string().trim().min(1).max(16000).optional(), people: PersonRefsSchema().optional(),
 }).strict().refine(a => !a.noteId || !!a.version, "Updating a Note requires its version")
   .refine(a => !!a.noteId || a.text !== undefined, "Creating a Note requires text")
-  .refine(a => [a.text, a.people, a.addresses, a.sensitivity, a.visibility, a.nature, a.maxChars].some(v => v !== undefined), "Supply Note content or classification");
+  .refine(a => [a.name, a.text, a.people, a.addresses, a.sensitivity, a.visibility, a.nature, a.maxChars].some(v => v !== undefined), "Supply Note content or classification");
 export type NoteUpdate = z.infer<typeof NoteUpdateSchema>;
 export function noteReceipt(note: NoteResource) {
   return { noteId: note.metadata.name, uid: note.metadata.uid, version: noteVersion(note),
@@ -44,6 +44,7 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
     throw new Error("Pruning requires a shorter nonempty body; use retire_note to discard a Note");
   const visibility = args.visibility ?? previous?.spec.visibility ?? "people";
   const spec = { ...previous?.spec,
+    ...(args.name !== undefined ? { name: args.name } : {}),
     ...(args.nature !== undefined ? { nature: args.nature } : {}),
     ...(args.maxChars !== undefined ? { maxChars: args.maxChars } : !previous ? { maxChars: noteMaxChars({}) } : {}), sensitivity: args.sensitivity ?? previous?.spec.sensitivity ?? "L3", visibility,
     subject: args.subject ?? previous?.spec.subject ?? writer.resource, text: args.text ?? previous?.spec.text ?? "",
@@ -53,7 +54,7 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
     const owner = await resources.get<SummaryResource["spec"], SummaryResource["status"]>(previous.spec.subject);
     if (owner) {
       if (owner.status.summaryRevision !== args.version) throw new Error("Note content version conflict; read the Note again");
-      const updated = await writeSummary(resources, owner, { text: args.text ?? previous?.spec.text ?? "", people: args.people, addresses: args.addresses, sensitivity: spec.sensitivity, visibility, nature: spec.nature, maxChars: spec.maxChars, pruned: pruning }, writer,
+      const updated = await writeSummary(resources, owner, { name: args.name, text: args.text ?? previous?.spec.text ?? "", people: args.people, addresses: args.addresses, sensitivity: spec.sensitivity, visibility, nature: spec.nature, maxChars: spec.maxChars, pruned: pruning }, writer,
         undefined, owner.kind === "Person" ? { updatedAt: new Date().toISOString(), updatedBy: "chief" } : {});
       const note = updated.summaryNote!;
       return { noteId: note.id, uid: note.uid, version: note.version,

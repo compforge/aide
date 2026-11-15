@@ -1,3 +1,4 @@
+import { isGateTopic } from "../topic/boundary.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { requireOrganization, requireTopic } from "../topic/ownership.ts";
 import { noteVersion, noteMaxChars } from "./model.ts";
@@ -21,7 +22,7 @@ function validate(note: NoteResource, context: ResourceValidationContext) {
   const writer = note.status.writer;
   const subject = context.get(note.spec.subject, note.spec.subject.uid);
   if (!subject || subject.metadata.deletionTimestamp || subject.metadata.name !== note.spec.subject.name || subject.metadata.namespace !== note.spec.subject.namespace) throw new Error("Note subject no longer exists");
-  if (subject.kind === "Topic" && (subject.spec as { gate?: boolean }).gate) throw new Error("Gate keeps dialogue continuity, not domain Notes");
+  if (subject.kind === "Topic" && isGateTopic(subject as import("../topic/model.ts").TopicResource)) throw new Error("Gate keeps dialogue continuity, not domain Notes");
   if (note.spec.summaryOf) {
     if (!equalResourceValue(note.spec.subject, note.spec.summaryOf)) throw new Error("Summary Note subject must match summaryOf");
     const summaries = context.page<NoteSpec, NoteStatus>(NOTE_TYPE, { namespace: "v1", limit: 2,

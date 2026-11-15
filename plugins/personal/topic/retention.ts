@@ -1,5 +1,5 @@
 import { HANDOFF_TYPE } from "../handoff/model.ts";
-import { isDomainRoot } from "./boundary.ts";
+import { isGateTopic, isRootTopic } from "./boundary.ts";
 import { summaryText } from "../note/summary.ts";
 import type { ResourceValidationContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource } from "./model.ts";
@@ -22,14 +22,14 @@ export function reclamationVersion(topic: TopicResource, reader: NoteReader): st
  * @link docs/personal/topic.md#静默回收
  */
 export function canReclaimTopic(topic: TopicResource, context: ResourceValidationContext): boolean {
-  if (topic.spec.gate || topic.spec.default || topic.metadata.deletionTimestamp || topic.status.execution || topic.status.agent?.sessionId || topic.status.lastError) return false;
+  if (isGateTopic(topic) || topic.spec.default || topic.metadata.deletionTimestamp || topic.status.execution || topic.status.agent?.sessionId || topic.status.lastError) return false;
   const uid = topic.metadata.uid;
   if (context.page(HANDOFF_TYPE, { limit: 1, matchIndex: { name: "activeTopic", value: uid } }).items.length
     || context.page(TOPIC_TYPE, { limit: 1, matchIndex: { name: "parent", value: uid } }).items.length
     || context.page(INPUT_TYPE, { limit: 1, matchIndex: { name: "assessPending", value: uid } }).items.length
     || WORK_TYPES.some(t => context.page(t, { limit: 1, matchIndex: { name: "topic", value: uid } }).items.length)) return false;
   const recent = notes(context, uid, "subject"), version = understandingVersion(topic, recent);
-  if (topic.spec.parentRef && !isDomainRoot(topic)) {
+  if (topic.spec.parentRef && !isRootTopic(topic)) {
     const parent = context.get<TopicResource["spec"], TopicResource["status"]>(topic.spec.parentRef, topic.spec.parentRef.uid);
     return !!parent && !parent.metadata.deletionTimestamp && parent.status.absorbed?.[uid] === version;
   }

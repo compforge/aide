@@ -42,6 +42,8 @@ Personal 的 Route、Topic、Task、Routine 分别在自己的目录实现 Backg
 
 读取当前背景失败会终止本次推理，避免带着旧事实继续。快照生成之后资源仍可能变化，写入工具继续校验 UID、版本和执行归属。动态前缀也占上下文预算；Personal 提供有界预览和分页补查，不把常驻背景当作额外授权。
 
+Note 目录属于每次请求刷新的业务背景：条目增减或改名会替换该 part，不重写历史消息。prefix cache 复用与最新信息之间的取舍由业务背景预算决定，观察请求 token、缓存使用和延迟评估效果。
+
 ## 压缩与失败恢复
 
 Pi 原生管理上下文压缩与 checkpoint。使用 Pi 1.4.0 的摘要预算：`reserveTokens` 决定压缩触发时机，摘要输出受模型能力与实际请求剩余空间约束，不再额外限制为 `0.8 × reserveTokens`。模型的 `contextWindow` 和 `maxTokens` 仍需按实际服务配置。

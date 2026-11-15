@@ -1,3 +1,4 @@
+import { fixtureGateRef } from "./summary-fixture.ts";
 import { larkInputKey } from "../src/channel/lark/input-key.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -56,7 +57,7 @@ for (const order of ["source-first", "channel-first", "concurrent"] as const) {
 test("Late Channel admission preserves active or completed processing receipts and does not create another request", async t => {
   const f = fixture(t);
   f.inputs.storage.register("personal", [TopicDefinition]);
-  const topic = f.inputs.resources.create({ type: TOPIC_TYPE, name: "root", spec: { id: "root" },
+  const topic = f.inputs.resources.create({ type: TOPIC_TYPE, name: "root", spec: { id: "root", parentRef: fixtureGateRef(f.inputs.resources) },
     status: { receipts: [], execution: { id: "chief-existing", startedAt: "2026-11-03T00:00:00Z" } } });
   let input = await f.submit("source", f.source);
   input = await f.resources.patchStatus(input, { topic: resourceRef(topic), assess: { topic: resourceRef(topic), executionId: "chief-existing", startedAt: "2026-11-03T00:00:00Z" } });

@@ -1,3 +1,5 @@
+import { noteDirectory } from "../note/directory.ts";
+import { isGateTopic } from "../topic/boundary.ts";
 import { gateReadTools } from "../gate/read-tools.ts";
 import { domainHandoffTools } from "../handoff/tools.ts";
 import { Handoffs } from "../handoff/service.ts";
@@ -5,7 +7,6 @@ import { Addresses } from "../address/service.ts";
 import { addressReadTools } from "../address/tools.ts";
 import { summaryText, summaryReference } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
-import { notes } from "../note/query.ts";
 import { workContextTools } from "../work-context.ts";
 import { sayTool } from "../output/tool.ts";
 import { identityBackground } from "../../../agents/personal.ts";
@@ -45,10 +46,10 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
       tool({ name: "list_work", label: "List related work", description: "Page through this Topic's Task and Routine summaries; does not delegate or resume work.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { offset = 0 }) { return result(contextPage(relatedWork(store, store.topicId(current().status.topic)), offset)); } }),
-      tool({ name: "read_routine", label: "Read routine", description: "Read this Routine's objective, state, latest handling report, long-lived summary and recent Notes.", parameters: Type.Object({}),
-        async execute() { const r = current(); return result({ ...r, summaryText: summaryText(store.resources, r), summaryNote: summaryReference(store.resources, r), version: contentVersion(r), recent: notes(store.resources, r.metadata.uid, "subject") }); } }),
+      tool({ name: "read_routine", label: "Read routine", description: "Read this Routine's objective, state, latest handling report, long-lived summary and Note directory. Use read_note for complete bodies.", parameters: Type.Object({}),
+        async execute() { const r = current(); return result({ ...r, summaryText: summaryText(store.resources, r), summaryNote: summaryReference(store.resources, r), version: contentVersion(r), notes: noteDirectory(store.resources.storage, r.metadata.uid) }); } }),
       tool({ name: "read_topic", label: "Read topic", description: "Read the owning Topic as context, not additional authority.", parameters: Type.Object({}),
-        async execute() { const c = store.topics.resource(store.topicId(current().status.topic)); return result(c ? { ...c.spec, summary: summaryText(store.resources, c), summaryUid: summaryReference(store.resources, c)?.uid, summaryNote: summaryReference(store.resources, c), recent: notes(store.resources, c.metadata.uid, "subject") } : null); } }),
+        async execute() { const c = store.topics.resource(store.topicId(current().status.topic)); return result(c ? { ...c.spec, summary: summaryText(store.resources, c), summaryUid: summaryReference(store.resources, c)?.uid, summaryNote: summaryReference(store.resources, c), notes: noteDirectory(store.resources.storage, c.metadata.uid) } : null); } }),
       tool({ name: "read_input", label: "Read input", description: "List pending assigned inputs, or page through one assigned input. Failed attempts need effect inspection.",
         parameters: Type.Object({ inputId: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { inputId, offset = 0 }) {
@@ -72,7 +73,7 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
         } }),
     ];
     // @tmp Existing Gate Work retains its admitted read scope; guardWork rejects every new Gate Work.
-    if (store.topics.byRef(current().status.topic)?.spec.gate) {
+    if (isGateTopic(store.topics.byRef(current().status.topic))) {
       const reads = gateReadTools(store, current), names = new Set(reads.map(t => t.name));
       tools.splice(0, tools.length, ...tools.filter(t => !names.has(t.name)), ...reads);
     }

@@ -1,3 +1,4 @@
+import { isGateTopic } from "../plugins/personal/topic/boundary.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -33,13 +34,16 @@ test("Gate is persistent, global root with isolated domain Chiefs, outside navig
   const domain = await aide.topics.ensure("domain");
   assert.deepEqual(browseTopics(aide.topics, { selectedId: "gate" }).items.map(t => t.id), ["domain"]);
   assert.equal(browseTopics(aide.topics, { selectedId: "gate" }).path.length, 0);
-  assert.ok(!topicCandidates(aide.personal.store).some(t => t.spec.gate));
+  assert.ok(!topicCandidates(aide.personal.store).some(t => isGateTopic(t)));
   for (const index of ["root", "weaveRoot", "weavePending", "weaveReviewed"]) {
     assert.ok(!(await resources.page(TOPIC_TYPE, { limit: 20, matchIndex: { name: index, value: "root" } })).items.some(t => t.metadata.uid === gate.metadata.uid));
   }
-  await assert.rejects(resources.replace(domain, { ...domain.spec, gate: true }, domain.status), /reserved/);
-  await assert.rejects(resources.replace(gate, { ...gate.spec, gate: false }, gate.status), /reserved/);
-  await assert.rejects(resources.replace(gate, { ...gate.spec, parentRef: resourceRef(domain) }, gate.status), /cannot join/);
+  const { parentRef: _parent, ...detached } = domain.spec;
+  await assert.rejects(resources.replace(domain, detached, domain.status), /reserved/);
+  assert.ok(isGateTopic(gate));
+  assert.ok(!isGateTopic(domain));
+  assert.ok(!("gate" in gate.spec));
+  await assert.rejects(resources.replace(gate, { ...gate.spec, parentRef: resourceRef(domain) }, gate.status), /reserved/);
   assert.equal(domain.spec.parentRef?.uid, gate.metadata.uid);
   assert.deepEqual(aide.topics.scope(gate.metadata.uid).map(t => t.metadata.uid), [gate.metadata.uid]);
   assert.deepEqual(aide.topics.scope(domain.metadata.uid).map(t => t.metadata.uid), [domain.metadata.uid]);

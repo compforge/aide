@@ -1,5 +1,5 @@
 import { receiveDomain } from "./address-fixture.ts";
-import { isDomainRoot } from "../plugins/personal/topic/boundary.ts";
+import { isRootTopic } from "../plugins/personal/topic/boundary.ts";
 import { summaryText, prepareSummary } from "../plugins/personal/note/summary.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { committedStatus } from "./fixtures/resource-write.ts";
@@ -300,7 +300,7 @@ test("Replay SDK groups roots and routes subsequent source input to the new root
   }, { directory, weave: true, batchSize: 1, timeoutMs: 15_000, revision: "fixture", datasetHash: "fixture", model: fixture.config.config });
   const result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
   assert.equal(result.topics.length, 3);
-  const root = result.topics.find((topic: import("../plugins/personal/topic/model.ts").TopicSpec) => isDomainRoot({ spec: topic }));
+  const root = result.topics.find((topic: import("../plugins/personal/topic/model.ts").TopicSpec) => isRootTopic({ spec: topic }));
   const later = result.inputs.find((input: any) => input.input.spec.observation?.message?.id === "later").input;
   assert.notEqual(later.status.route.result.topics[0].uid, root.uid);
   assert.ok(later.status.assess);
@@ -833,7 +833,7 @@ test("Weave uses a dedicated native session and commits grouping through its res
     selected.push({ uid: topic.metadata.uid, version: understandingVersion(topic) });
   }
   await aide.start(); await aide.settled();
-  assert.equal(aide.topics.list().filter(t => !isDomainRoot({ spec: t })).length, 2);
+  assert.equal(aide.topics.list().filter(t => !isRootTopic({ spec: t })).length, 2);
   const weave = (await aide.runtime.plugins.resourceClient("personal").list<Record<string, never>, import("../plugins/personal/weave/model.ts").WeaveStatus>(WEAVE_TYPE))[0]!;
   assert.equal(weave.status.agent?.harness, "weave");
   assert.ok(weave.status.agent?.sessionId);

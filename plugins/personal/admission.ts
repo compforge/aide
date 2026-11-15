@@ -17,9 +17,9 @@ export function personalAdmission(inputs: InputStore, outputs: OutputStore): Res
   return (type, init, writes) => {
     if (type.apiVersion === TOPIC_TYPE.apiVersion && type.kind === TOPIC_TYPE.kind) {
       const spec = init.spec as TopicSpec;
-      if (!spec.gate && !spec.parentRef) {
+      if (spec.id !== GATE_TOPIC_ID && !spec.parentRef) {
         const gate = inputs.resources.find<TopicSpec, TopicStatus>(TOPIC_TYPE, digest(GATE_TOPIC_ID))
-          ?? writes.create(TOPIC_TYPE, { name: digest(GATE_TOPIC_ID), spec: { id: GATE_TOPIC_ID, name: "Gate", gate: true, review: { enabled: false } }, status: { receipts: [] } });
+          ?? writes.create(TOPIC_TYPE, { name: digest(GATE_TOPIC_ID), spec: { id: GATE_TOPIC_ID, name: "Gate", review: { enabled: false } }, status: { receipts: [] } });
         return writes.create(type, { ...init, spec: { ...spec, parentRef: resourceRef(gate) } });
       }
     }

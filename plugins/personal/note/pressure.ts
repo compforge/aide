@@ -1,3 +1,4 @@
+import { isGateTopic } from "../topic/boundary.ts";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { retryOnConflict, type PluginContext, type ResourceClient } from "@compforge/aide-plugin";
@@ -22,7 +23,7 @@ const reference = (n: NoteResource) => ({ noteId: n.metadata.name, version: note
  * @link docs/personal/note.md
  */
 export async function refreshNotePressure(context: Pick<PluginContext, "resources" | "logger" | "instance">, topic: TopicResource) {
-  if (topic.spec.gate) return;
+  if (isGateTopic(topic)) return;
   const maxNotes = topic.spec.maxNotes ?? topicPolicy(context.instance.config.topic).maxNotes;
   await retryOnConflict(async () => {
     const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(topic));

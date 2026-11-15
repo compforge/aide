@@ -1,3 +1,4 @@
+import { ensureGateTopic } from "../../plugins/personal/gate/topic.ts";
 import type { Resource, ResourceClient, ResourceRef } from "@compforge/aide-plugin";
 import { resourceRef } from "../../plugins/personal/input/state.ts";
 import { readTopicRoot } from "../../plugins/personal/topic/tree.ts";
@@ -9,7 +10,7 @@ import type { PersonRef } from "../../plugins/personal/person/model.ts";
 export async function seedNotes(resources: ResourceClient, subject: Resource<unknown, unknown>, entries: readonly { id: string; text: string; createdAt?: string; updatedAt?: string; people?: PersonRef[]; nature?: NoteSpec["nature"] }[]) {
   let target = subject;
   if (["Person", "Address"].includes(subject.kind)) target = await resources.get({ ...TOPIC_TYPE, namespace: "v1", name: "note-fixture" })
-    ?? await resources.create(TOPIC_TYPE, { name: "note-fixture", spec: { id: "note-fixture" }, status: {} });
+    ?? await resources.create(TOPIC_TYPE, { name: "note-fixture", spec: { id: "note-fixture", parentRef: resourceRef(await ensureGateTopic(resources)) }, status: {} });
   const actor = target.kind === "Topic" ? (await readTopicRoot(resources, resourceRef(target)))! : target as Resource<unknown, { execution?: { id: string; startedAt: string } | null }>;
   const existing = actor.status.execution;
   const live = existing ? actor : await resources.patchStatus(actor, { execution: { id: "fixture", startedAt: new Date().toISOString() } });
