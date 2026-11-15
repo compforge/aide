@@ -148,6 +148,8 @@ Inputs 提供全局输入目录，支持按 Connector、来源类型、具体观
 
 `GET /persons/notes?id=...&uid=...&page=1&pageSize=5` 按 Note.people 查询人物相关记录，展示总数、页码及上一页/下一页，默认每页 5 条，与 Topic 相关记录一致。按更新时间倒序、资源名稳定排序，先按索引分页再解码当页正文；不受 Agent recent 窗口限制。记录首次打开 tab 时加载，刷新保留当前页；失败保留已显示内容，可重试目标页，删除导致页数减少时回到有效页。Person UID 校验拒绝旧实例请求，切换人物取消旧请求，Person 不存储记录副本。未携带 page/pageSize 的旧请求继续支持每批 20 条的 continue 游标。
 
+`GET /addresses/notes?name=...&uid=...&page=1&pageSize=5` 按 Note.addresses 查询场合相关记录，复用上述索引分页与每页 5 条的交互：首次打开 tab 加载，显示总数和页码，刷新和切换 tab 保留当前页，失败可重试目标页，切换地址取消旧请求。Address UID 校验拒绝旧实例请求；未携带 page/pageSize 的请求保留 continue 游标。记录展示保留 sensitivity、visibility 和已设置的 nature。
+
 `GET /persons` 使用同样的固定分页契约，额外返回 `pinned`。`q` 在 SQL 中按姓名筛选；普通人物先按是否已有认识排序，再按资源名稳定排序，显式 Me 根据配置身份置顶，不按名字推断。排序通过 Note 的非空 summary 索引判断是否已有认识，不在候选集合中读取 summary 正文；确定当前页和置顶项后，才读取认识预览、版本和更新时间。列表只返回 ID、UID、版本、姓名、认识预览和更新时间；完整身份、summary、recent 通过 `GET /persons?id=...&uid=...` 按需读取。点击人物不重新获取全量目录，5 秒轮询只刷新当前列表页，编辑草稿不被轮询覆盖。
 
 同名合并候选使用独立的 `name` 精确筛选和 `excludeUid` 条件分页查询，与导航当前页无关。候选列表不判断身份相同；进入确认框时重新读取双方完整身份和资源版本，继续执行原有 UID / version 校验。`POST /persons/edit` 和 `/persons/merge` 沿用同一 Personal 人物服务。打开页面不创建 Topic。

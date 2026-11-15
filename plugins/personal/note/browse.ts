@@ -7,14 +7,14 @@ import { NOTE_TYPE, noteView, type NoteResource } from "./model.ts";
  * @why Human Note lists share indexed selection independently of the agent's recent context budget.
  * @link docs/channel/web.md
  */
-export function browseNotePage(storage: ResourceStorage, uid: string | undefined, relation: "subject" | "people", query: PageQuery = {}) {
+export function browseNotePage(storage: ResourceStorage, uid: string | undefined, relation: "subject" | "people" | "addresses", query: PageQuery = {}) {
   const size = pageSize({ ...query, pageSize: query.pageSize ?? 5 }), db = storage.db;
   return storage.transaction(() => {
     if (!uid) return { ...pageBounds(0, size, query.page), items: [] };
     // Recent indexes exclude summaries, retired Notes and resources pending deletion at write time.
     const candidates = `FROM resource_ordered_indexes WHERE scope = 'personal' AND api_version = ? AND kind = 'Note'
       AND namespace = 'v1' AND index_name = ? AND index_value = ?`;
-    const args = [NOTE_TYPE.apiVersion, relation === "subject" ? "recentSubject" : "recentPeople", uid];
+    const args = [NOTE_TYPE.apiVersion, { subject: "recentSubject", people: "recentPeople", addresses: "recentAddresses" }[relation], uid];
     const total = Number(db.prepare(`SELECT count(*) AS n ${candidates}`).get(...args)!.n);
     const bounds = pageBounds(total, size, query.page);
     const rows = db.prepare(`WITH page AS MATERIALIZED (SELECT source, order_key, resource_name ${candidates}
