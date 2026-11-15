@@ -1,5 +1,6 @@
 import { HANDOFF_TYPE, handoffSummary, type HandoffSpec, type HandoffStatus } from "../../plugins/personal/handoff/model.ts";
 import { AddressRefSchema } from "../../plugins/personal/address/model.ts";
+import { browseAddressNotes } from "../../plugins/personal/address/notes.ts";
 import { browseAddresses } from "../../plugins/personal/address/browse.ts";
 import { ResourceExpired, ResourceContinueInvalid } from "@compforge/aide-plugin";
 import { ChannelSettings, ChannelSettingsChangeSchema, ChannelSettingsError } from "../channel/settings.ts";
@@ -190,6 +191,12 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
             const query = AddressListSchema.parse(Object.fromEntries(url.searchParams));
             const started = performance.now();
             listJson(response, browseAddresses(aide.addresses.resources.storage, aide.defaultAddress(), query), "addresses", started); return;
+          }
+          if (request.method === "GET" && url.pathname === "/addresses/notes" && (url.searchParams.has("page") || url.searchParams.has("pageSize"))) {
+            const query = PageSchema.extend({ name: z.string().min(1), uid: z.string().min(1), pageSize: PageSchema.shape.pageSize.default(5) }).strict().parse(Object.fromEntries(url.searchParams));
+            const started = performance.now(), page = browseAddressNotes(aide.addresses.resources, query.name, query.uid, query);
+            if (!page) { json(response, 404, { error: "地址不存在或已被替换。" }); return; }
+            listJson(response, page, "address-notes", started); return;
           }
           if (request.method === "GET" && ["/addresses/detail", "/addresses/notes"].includes(url.pathname)) {
             const query = z.object({ name: z.string().min(1), uid: z.string().min(1), continue: z.string().optional() }).strict().parse(Object.fromEntries(url.searchParams));

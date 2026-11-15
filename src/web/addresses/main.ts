@@ -2,24 +2,24 @@ import { renderNoteClassification } from "../shared/note-classification.ts";
 import type { ChannelSettingsView } from "../../channel/settings.ts";
 import './style.css';
 import { byId as $, element as node } from '../shared/dom.ts';
-import { request, errorMessage, HttpError } from '../shared/http.ts';
+import { request, errorMessage } from '../shared/http.ts';
 import { updateMarkdown } from '../shared/markdown.ts';
 import type { Addresses } from '../../../plugins/personal/address/service.ts';
 import type { AddressListView } from '../../../plugins/personal/address/browse.ts';
 import type { AddressRef } from '../../../plugins/personal/address/model.ts';
-import type { Note } from '../../../plugins/personal/note/model.ts';
+import { AddressNotes } from "./notes.ts";
 type View = ReturnType<Addresses['view']>;
 type Page = AddressListView;
 type Item = Page['items'][number];
 const items = new Map<string, Item>();
-let selected: View | undefined, noteContinue: string | undefined;
+let selected: View | undefined;
+const notes = new AddressNotes();
 let page: Page | undefined, currentPage: number | undefined, listLoading = false;
 let settings: ChannelSettingsView | undefined;
 async function loadSettings() {
   try { settings = await request<ChannelSettingsView>("/channels/config"); } catch { settings = undefined; }
   renderList();
 }
-let notesLoading = false;
 let busy = false, generation = 0, listGeneration = 0;
 const types = { group: '群聊', direct: '私聊', web: 'Web', external: '外部系统' };
 function currentRef(): AddressRef {
@@ -46,38 +46,18 @@ function render(value: View) {
     a.href = '/people?' + new URLSearchParams({ person: person.ref.name, uid: person.ref.uid }); return a;
   }));
 }
-function appendNotes(items: Note[]) {
-  for (const note of items) {
-    const card = node('article'), content = node('div', undefined, 'markdown');
-    updateMarkdown(content, note.text); card.append(content, node('small', new Date(note.updatedAt).toLocaleString(), 'muted')); renderNoteClassification(card, note); $('notes').append(card);
-  }
-}
-async function loadNotes(reset = false) {
-  if (notesLoading && !reset) return;
-  notesLoading = true;
-  const ref = currentRef(), turn = generation;
-  const query = parameters(ref); if (!reset && noteContinue) query.set('continue', noteContinue);
-  let result: { items: Note[]; continue?: string };
-  try { result = await request('/addresses/notes?' + query); }
-  catch (error) {
-    if (turn !== generation) return;
-    if (!reset && error instanceof HttpError && [400, 410].includes(error.status)) { await loadNotes(true); return; }
-    throw error;
-  } finally { if (turn === generation) notesLoading = false; }
-  if (turn !== generation) return;
-  if (reset) $('notes').replaceChildren();
-  appendNotes(result.items); noteContinue = result.continue; $('notes-more').hidden = !noteContinue;
-}
 async function select(ref: AddressRef) {
   if (busy) return;
   if (!$('editor').hidden && !confirm('放弃尚未保存的修改？')) return;
   menu.hidePopover();
+  notes.pause();
   const turn = ++generation;
   const value = await request<View>('/addresses/detail?' + parameters(ref));
   if (turn !== generation) return;
   $('notice').textContent = ''; $('editor').hidden = true; $('summary').hidden = false; render(value);
   saveLocation();
-  await loadNotes(true);
+  notes.reset(currentRef());
+  if (!$('panel-notes').hidden) notes.show();
 }
 /** @spec Paging replaces only the sidebar, preserving selected detail and unsaved summary edits. */
 async function list(requestedPage = currentPage) {
@@ -208,7 +188,7 @@ $('edit').onclick = () => { if (!selected) return; $<HTMLTextAreaElement>('text'
 $('cancel').onclick = () => { if (busy) return; $('editor').hidden = true; $('summary').hidden = false; };
 $('editor').onsubmit = async event => { event.preventDefault(); if (!selected || busy) return; if (await save('/addresses/summary', { text: $<HTMLTextAreaElement>('text').value, version: selected.summaryVersion })) { $('editor').hidden = true; $('summary').hidden = false; } };
 const tabs = ['summary', 'notes', 'people'];
-function tab(name: string) { for (const key of tabs) { const active = key === name; $('tab-' + key).setAttribute('aria-selected', String(active)); $('tab-' + key).tabIndex = active ? 0 : -1; $('panel-' + key).hidden = !active; } }
+function tab(name: string) { if (name === 'notes') notes.show(); else notes.pause(); for (const key of tabs) { const active = key === name; $('tab-' + key).setAttribute('aria-selected', String(active)); $('tab-' + key).tabIndex = active ? 0 : -1; $('panel-' + key).hidden = !active; } }
 for (const [index, name] of tabs.entries()) {
   $('tab-' + name).onclick = () => tab(name);
   $('tab-' + name).onkeydown = event => { const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : -1; if (next >= 0) { event.preventDefault(); tab(tabs[next]!); $('tab-' + tabs[next]).focus(); } };
@@ -217,7 +197,6 @@ for (const [id, delta] of [['address-previous', -1], ['address-next', 1]] as con
   $(id).onclick = () => { if (page && !busy && !listLoading) void list(page.page + delta); };
 }
 $('refresh').onclick = () => { void (async () => { if (busy || listLoading) return; await loadSettings(); await list(); if (selected && $('editor').hidden) await select(currentRef()); })().catch(report); };
-$('notes-more').onclick = () => { void loadNotes().catch(report); };
 const initialPage = Number(new URL(location.href).searchParams.get('page'));
 if (Number.isSafeInteger(initialPage) && initialPage > 0) currentPage = initialPage;
 void list().then(async () => { const q = new URLSearchParams(location.search); if (q.get('name') && q.get('uid')) await select({ apiVersion: 'aide.dev/v1alpha1', kind: 'Address', namespace: 'v1', name: q.get('name')!, uid: q.get('uid')! }); }).catch(report);

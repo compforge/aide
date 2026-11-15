@@ -104,7 +104,9 @@ assistant / tool：结合新进展回答或交接，避免重复创建工作
 ### 上下文与记忆
 
 Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-hermes-memory](https://github.com/chandra447/pi-hermes-memory)，由 Pi 的扩展加载器显式加载。
-事项认识由 Note 承载，主题、人物和工作的长期认识由各自 summary 承载，Topic tree 保存主题组织关系；Hermes 提供通用记忆与检索。职责与沉淀主线见 [Personal](README.md#从-input-到认识与成果)。
+事项认识由 Note 承载，主题、人物、场合和工作的长期认识由各自 summary 承载，Topic tree 保存主题组织关系；Hermes 提供通用记忆与检索。职责与沉淀主线见 [Personal](README.md#从-input-到认识与成果)。
+
+Chief 在同一轮 `aide:review` 中读取待整理 Note 的完整内容，通过 subject、people、addresses 判断哪些对象出现值得沉淀的长期认识，按需读取现有 summary 并调用 summarize_topic、summarize_person、summarize_address。Person 与 Address 的 summary 汇集多个领域的认识，更新保留其他领域的有效内容和用户修正，版本冲突时重新读取并合并。确认目标保存成功后，再判断来源 Note 是否需要削减或退役。整理沿用 Topic 的预算压力、认识吸收与定时 review；每轮处理当前议程内的材料，有长期认识变化时才更新对应 summary。各对象的内容职责见 [作为 summary 的 Note](note.md#作为-summary-的-note)。
 
 #### 人物认知
 

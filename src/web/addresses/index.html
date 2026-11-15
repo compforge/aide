@@ -13,7 +13,7 @@
 <div id="detail" hidden>
 <div class="detail-tabs" role="tablist" aria-label="地址内容">
 <button id="tab-summary" role="tab" aria-controls="panel-summary" aria-selected="true">认识</button>
-<button id="tab-notes" role="tab" aria-controls="panel-notes" aria-selected="false" tabindex="-1">近期记录</button>
+<button id="tab-notes" role="tab" aria-controls="panel-notes" aria-selected="false" tabindex="-1">相关记录</button>
 <button id="tab-people" role="tab" aria-controls="panel-people" aria-selected="false" tabindex="-1">参与者</button>
 </div>
 <section id="panel-summary" role="tabpanel" aria-labelledby="tab-summary">
@@ -21,6 +21,10 @@
 <div id="summary" class="markdown"></div>
 <form id="editor" hidden><textarea id="text" rows="10" maxlength="16000" aria-label="当前认识"></textarea><div class="person-actions"><button id="cancel" type="button" class="secondary">取消</button><button id="save" type="submit">保存认识</button></div></form>
 </section>
-<section id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" hidden><div id="notes"></div><button id="notes-more" class="secondary" hidden>加载更多</button></section>
+<section id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" hidden>
+<button id="notes-refresh" type="button" class="secondary">刷新记录</button>
+<nav id="note-pages" class="note-pages" aria-label="场合相关记录分页" hidden><span id="notes-page" class="muted"></span><button id="notes-previous" type="button" class="secondary">上一页</button><button id="notes-next" type="button" class="secondary">下一页</button></nav>
+<div id="notes"></div><p id="notes-notice" class="muted" role="status" aria-live="polite"></p>
+</section>
 <section id="panel-people" role="tabpanel" aria-labelledby="tab-people" hidden><p class="muted">随着消息积累认识到的参与者。</p><div id="people"></div></section>
 </div></section></main><script type="module" src="/addresses.js"></script></html>
