@@ -40,9 +40,13 @@
       </section>
       <section id="person-panel-notes" class="person-panel" role="tabpanel" aria-labelledby="person-tab-notes" tabindex="0" hidden>
         <button id="person-notes-refresh" type="button" class="secondary">刷新记录</button>
+        <nav id="person-note-pages" class="note-pages" aria-label="人物相关记录分页" hidden>
+          <span id="person-notes-page" class="muted"></span>
+          <button id="person-notes-previous" type="button" class="secondary">上一页</button>
+          <button id="person-notes-next" type="button" class="secondary">下一页</button>
+        </nav>
         <div id="person-notes"></div>
         <p id="person-notes-notice" role="status" aria-live="polite" class="muted"></p>
-        <button id="person-notes-more" type="button" class="secondary" hidden>加载更多</button>
       </section>
       <section id="person-panel-identities" class="person-panel" role="tabpanel" aria-labelledby="person-tab-identities" tabindex="0" hidden>
       <section><h3>联系地址</h3><p class="muted">可直接联系此人的地址，不按顺序排列。点击地址查看详情和禁言设置。</p><div id="person-addresses"></div></section>

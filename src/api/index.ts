@@ -19,6 +19,7 @@ import { browseTopics } from "../../plugins/personal/topic/browse.ts";
 import { browseTopicChildren } from "../../plugins/personal/topic/children.ts";
 import { NOTE_TYPE, noteView, type NoteSpec, type NoteStatus } from "../../plugins/personal/note/model.ts";
 import { GATE_TOPIC_ID, DEFAULT_TOPIC_ID } from "../../plugins/personal/topic/model.ts";
+import { browsePersonNotes } from "../../plugins/personal/person/notes.ts";
 import { browsePersons } from "../../plugins/personal/person/browse.ts";
 import { topicSummary, topicRecent, browseTopicNotes } from "./topic.ts";
 import { topicView } from "../channel/view.ts";
@@ -354,6 +355,13 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         return;
       }
       if (request.method === "GET" && url.pathname === "/persons/notes") {
+        if (url.searchParams.has("page") || url.searchParams.has("pageSize")) {
+          const query = PageSchema.extend({ id: z.string().min(1), uid: z.string().min(1), pageSize: PageSchema.shape.pageSize.default(5) }).strict().parse(Object.fromEntries(url.searchParams));
+          await aide.start();
+          const started = performance.now(), page = browsePersonNotes(aide.topics.resources, query.id, query.uid, query);
+          if (!page) { json(response, 404, { error: "人物不存在或已被替换。" }); return; }
+          listJson(response, page, "person-notes", started); return;
+        }
         const query = z.object({ id: z.string().min(1), uid: z.string().min(1), continue: z.string().optional() }).strict().parse(Object.fromEntries(url.searchParams));
         await aide.start();
         try { json(response, 200, await aide.persons.notes(query.id, query.uid, query.continue)); }

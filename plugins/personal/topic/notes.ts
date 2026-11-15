@@ -1,5 +1,5 @@
-import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
-import { NOTE_TYPE, noteView, type NoteResource } from "../note/model.ts";
+import { type PageQuery } from "../browse.ts";
+import { browseNotePage } from "../note/browse.ts";
 import type { TopicStore } from "./store.ts";
 
 /**
@@ -9,20 +9,8 @@ import type { TopicStore } from "./store.ts";
  * @case tests/topic-notes.test.ts
  */
 export function browseTopicNotes(store: TopicStore, topicId: string, query: PageQuery = {}) {
-  const size = pageSize({ ...query, pageSize: query.pageSize ?? 5 }), storage = store.resources.storage, db = storage.db;
-  return storage.transaction(() => {
+  return store.resources.storage.transaction(() => {
     const topic = store.resource(topicId);
-    if (!topic) return { ...pageBounds(0, size, query.page), items: [] };
-    // recentSubject excludes summary Notes, retired Notes and resources pending deletion at index-write time.
-    const candidates = `FROM resource_ordered_indexes WHERE scope = 'personal' AND api_version = ? AND kind = 'Note'
-      AND namespace = 'v1' AND index_name = 'recentSubject' AND index_value = ?`;
-    const args = [NOTE_TYPE.apiVersion, topic.metadata.uid];
-    const total = Number(db.prepare(`SELECT count(*) AS n ${candidates}`).get(...args)!.n);
-    const bounds = pageBounds(total, size, query.page);
-    const rows = db.prepare(`WITH page AS MATERIALIZED (SELECT source, order_key, resource_name ${candidates}
-      ORDER BY order_key DESC, resource_name DESC, source DESC LIMIT ? OFFSET ?)
-      SELECT r.data FROM page JOIN resources r ON r.key = page.source
-      ORDER BY page.order_key DESC, page.resource_name DESC, page.source DESC`).all(...args, size, (bounds.page - 1) * size);
-    return { ...bounds, items: rows.map(row => noteView(storage.decode("personal", row.data as string).object as NoteResource)) };
+    return browseNotePage(store.resources.storage, topic?.metadata.uid, "subject", query);
   });
 }
