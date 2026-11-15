@@ -29,7 +29,9 @@ subject、people 和 addresses 均有索引；recentSubject / recentPeople / rec
 
 ## 作为 summary 的 Note
 
-summary 与普通事项使用同一种 Note 载体，共用正文、关联、内容版本、分类与 maxChars 软预算；差别在于认识的视角与内容层级。普通 Note 围绕具体事项保存进展、依据、结论和未决问题；summary Note 从特定对象的视角提炼跨事项、长期有效的认识：Topic 面向主题与领域，Person 面向人物，Address 面向沟通场合。Chief 按需整理事项，并将其中有长期价值的信息沉淀到相应对象的 summary。Topic summary 保留长期背景、约束、稳定结论和可复用方法，关键事件仅保留解释当前状态或重要转折所需的摘要；Person summary 保留人物的稳定职责、观点、偏好、关系与协作方式；Address summary 保留场合的用途、讨论范围、角色分工和沟通惯例。
+summary 与普通事项使用同一种 Note 载体，共用正文、关联、内容版本、分类与 maxChars 软预算；差别在于认识的视角、内容层级与上下文使用方式。普通 Note 围绕具体事项保存进展、依据、结论和未决问题；summary Note 从特定对象的视角提炼跨事项、长期有效的认识：Topic 面向主题与领域，Person 面向人物，Address 面向沟通场合。summary Note 面向常驻上下文，提供紧凑、稳定的对象认识，具体加载范围由当前任务和上下文预算决定；普通 Note 通过近期预览和按需检索提供事项细节及其依据。
+
+Chief 按需整理事项，并将其中有长期价值的信息沉淀到相应对象的 summary。Topic summary 保留长期背景、约束、稳定结论和可复用方法，关键事件仅保留解释当前状态或重要转折所需的摘要；Person summary 保留人物的稳定职责、观点、偏好、关系与协作方式；Address summary 保留场合的用途、讨论范围、角色分工和沟通惯例。
 
 每份 summary Note 专属于 summaryOf 指向的一个对象，与 subject 一致；现有模型支持 Topic、Task、Routine、Person 和 Address。普通事项 Note 不设置 summaryOf，通过 subject、people、addresses 在相关对象的视图中展示同一份记录；这种相关性展示不改变 summary 的专属归属。对象不再保存内联 summary 字段，正文统一保存在 Note.spec.text。
 
