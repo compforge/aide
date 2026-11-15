@@ -2,7 +2,7 @@ import "./style.css";
 import type { HandoffSummary } from "../../../plugins/personal/handoff/model.ts";
 import type { Note } from "../../../plugins/personal/note/model.ts";
 import type { Approval } from "../../api/types.ts";
-import { byId } from "../shared/dom.ts";
+import { byId, element } from "../shared/dom.ts";
 import { request, errorMessage } from "../shared/http.ts";
 import { updateMarkdown } from "../shared/markdown.ts";
 import { renderNoteClassification } from "../shared/note-classification.ts";
@@ -77,7 +77,7 @@ async function evidence() {
   try {
     const note = await request<Note>("/gate/note?id=" + encodeURIComponent(noteId), { signal });
     if (signal.aborted) return;
-    updateMarkdown(body, note.text); renderNoteClassification(body, note);
+    updateMarkdown(body, note.text); body.prepend(element("h3", (note.nameMissing ? "[未命名] " : "") + (note.name ?? "未命名笔记"))); renderNoteClassification(body, note);
   } catch (error) { if (!signal.aborted) body.textContent = errorMessage(error); }
 }
 function start() {

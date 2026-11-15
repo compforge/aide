@@ -1,3 +1,4 @@
+import { isGateTopic } from "../plugins/personal/topic/boundary.ts";
 import jsonPatch from "fast-json-patch";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -91,7 +92,7 @@ test("merged inputs share repository Topics while PR baselines and other Forge r
   };
   await route();
   const topics = await f.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-  assert.equal(topics.filter(t => !t.spec.gate).length, 3);
+  assert.equal(topics.filter(t => !isGateTopic(t)).length, 3);
   const shared = topics.find(topic => topic.spec.topicKey === 'forge:["gitlab.test","org/repo"]')!;
   assert.equal(shared.spec.name, "org/repo");
   assert.ok(topics.some(topic => topic.spec.topicKey === 'forge:["gitlab.test","org/other"]'));

@@ -1,6 +1,6 @@
 import { isGateInput } from "./gate/input.ts";
-import { migrateGateTree } from "./gate/topic.ts";
-import { isDomainRoot, isProcessingRoot } from "./topic/boundary.ts";
+import { ensureGateTopic } from "./gate/topic.ts";
+import { isGateTopic, isRootTopic, isProcessingRoot } from "./topic/boundary.ts";
 import { MailSender } from "./stream/sender.ts";
 import { Addresses } from "./address/service.ts";
 import { addressTools } from "./address/tools.ts";
@@ -105,7 +105,7 @@ export class Personal {
     if (scope.pluginInstanceId !== "personal" || ref?.kind !== TOPIC_TYPE.kind || ref.apiVersion !== TOPIC_TYPE.apiVersion || !ref.uid) throw new Error("Chief requires a Topic resource scope");
     return async (options) => {
       const initial = this.store.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, ref.name, ref.namespace);
-      if (initial.spec.gate || initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Chief Topic is missing or replaced");
+      if (isGateTopic(initial) || initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Chief Topic is missing or replaced");
       const topicId = initial.spec.id;
       const active = () => {
         const c = this.topics.resource(topicId);
@@ -170,7 +170,7 @@ export class Personal {
     if (scope.pluginInstanceId !== "personal" || ref?.kind !== ROUTE_TYPE.kind || ref.apiVersion !== ROUTE_TYPE.apiVersion || !ref.uid) throw new Error("Route requires a Route resource scope");
     return async options => {
       const initial = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ref.name, ref.namespace);
-      if (initial.spec.gate || initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Route resource is missing or replaced");
+      if (initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Route resource is missing or replaced");
       const active = () => {
         const route = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ref.name, ref.namespace);
         if (route.metadata.uid !== initial.metadata.uid || !route.status.execution) throw new Error("Route execution is not active");
@@ -196,7 +196,7 @@ export class Personal {
           const topics = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
           const destinations = [...new Set(args.topicUids)].map(uid => {
             const c = topics.find(c => c.metadata.uid === uid && !c.metadata.deletionTimestamp);
-            if (!c || !isDomainRoot(c)) throw new Error(`Root Topic no longer exists: ${uid}`);
+            if (!c || !isRootTopic(c)) throw new Error(`Root Topic no longer exists: ${uid}`);
             return { name: c.metadata.name, uid };
           });
           if (!destinations.length) destinations.push(await defaultDestination(context));
@@ -378,8 +378,7 @@ export class Personal {
   }
 
   private async startOnce(): Promise<void> {
-    const migrated = await migrateGateTree(this.store.client);
-    if (migrated) this.log.info({ roots: migrated }, "Attached existing domain roots to Gate");
+    await ensureGateTopic(this.store.client);
     this.mailSender.recover();
     await this.recoverInterrupted();
     await this.core.start();

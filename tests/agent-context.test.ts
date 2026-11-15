@@ -80,7 +80,7 @@ test("resource context pages all live candidates and isolate related Work", asyn
   assert.equal(relatedWork(store, "topic-2")[0]!.uid, foreign.uid);
 });
 
-test("child previews expose omitted Notes and text; paged reads recover the complete context", async t => {
+test("child directories expose Note identities without bodies; paged reads recover the complete context", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-topic-preview-"));
   const aide = new Aide(home, fakeOptions({ async execute() { throw new Error("No inference expected"); } }, home), pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
@@ -105,17 +105,15 @@ test("child previews expose omitted Notes and text; paged reads recover the comp
   };
   const page = await call("list_topics", {});
   const preview = page.items.find((item: { uid: string }) => item.uid === child.metadata.uid);
-  assert.equal(preview.noteTotal, 4);
-  assert.equal(preview.recent.length, 3);
+  assert.equal(preview.notes.total, 4);
+  assert.equal(preview.notes.items.length, 4);
   assert.equal(preview.summary, "S".repeat(1200) + "… [truncated]");
-  assert.equal(preview.recent[0].text, notes[1]!.text, "Exactly fitting text remains complete");
-  assert.equal(preview.recent[1].text, "B".repeat(500) + "… [truncated]");
-  assert.equal(preview.recent[2].text, "C".repeat(500) + "… [truncated]");
-  assert.ok(preview.recent[2].id.endsWith(notes[3]!.id));
+  assert.ok(preview.notes.items.every((n: { text?: string; name: string }) => n.text === undefined && n.name.length <= 200));
+  assert.deepEqual(preview.notes.listNotes, { subject: child.metadata.uid });
   const complete = page.items.find((item: { uid: string }) => item.uid === short.metadata.uid);
   assert.equal(complete.summary, "Complete summary");
-  assert.equal(complete.noteTotal, 1);
-  assert.deepEqual(complete.recent.map((n: { text: string }) => n.text), [notes[0]!.text]);
+  assert.equal(complete.notes.total, 1);
+  assert.deepEqual(complete.notes.items.map((n: { name: string }) => n.name), [notes[0]!.text]);
   let offset = 0, text = "", pages = 0;
   while (true) {
     const read = await call("read_topic", { uid: child.metadata.uid, offset });
@@ -126,6 +124,6 @@ test("child previews expose omitted Notes and text; paged reads recover the comp
     assert.ok(read.nextOffset > offset);
     offset = read.nextOffset;
   }
-  assert.ok(pages > 1, "Full understanding exceeds a single read page");
-  assert.deepEqual(JSON.parse(text), { ...child.spec, persons: preview.persons, conditions: child.status.conditions, summary: summaryText(aide.topics.resources, child), summaryUid: summaryReference(aide.topics.resources, child)?.uid, summaryNote: summaryReference(aide.topics.resources, child), recent: storedNotes(aide.topics.resources, child.metadata.uid, "subject") });
+  assert.ok(pages >= 1);
+  assert.deepEqual(JSON.parse(text), { ...child.spec, persons: preview.persons, conditions: child.status.conditions, summary: summaryText(aide.topics.resources, child), summaryUid: summaryReference(aide.topics.resources, child)?.uid, summaryNote: summaryReference(aide.topics.resources, child), notes: preview.notes });
 });

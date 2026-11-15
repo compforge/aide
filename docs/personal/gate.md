@@ -4,7 +4,7 @@ Gate Topic / Agent 代表 Aide 的全局信息域和行动范围，目前由 Me 
 
 ## 树与责任边界
 
-Gate 是唯一 `id=gate`、`spec.gate=true`、无 `parentRef` 的全局根。领域 root（含 Default）的 `parentRef` 指向 Gate；领域内的子 Topic 结构保持不变。系统创建领域 root 时补齐 Gate 父引用，启动时迁移旧的无父领域 root，保留 UID、Note、Work、session 和处理回执。
+Gate、领域 root 与子 Topic 表达同一棵 Topic tree 中的结构位置。Gate 是唯一无 `parentRef` 的 Topic，全局单例使用内置 `id=gate` 定位。`isGateTopic(topic)` 判断是否为 Gate，`isRootTopic(topic)` 判断是否为 Gate 的直接子 Topic；业务代码统一使用这两个方法。领域 root（含 Default）的 `parentRef` 指向 Gate；领域内的子 Topic 结构保持不变。首次启动时创建内置 Gate，后续复用其 UID；创建领域 root 时将 parentRef 指向该 Gate。
 
 物理树表达全局信息范围，执行范围止于各领域 root。每个领域 root 配套自己的 Chief，处理本领域及后代；Gate 的处理队列只消费 Gate Input。Route、Weave、领域导航、维护和回收使用“领域 root”语义。Weave 可以在 Gate 下归组多个领域 root，知识吸收止于领域 root。
 
@@ -22,7 +22,7 @@ Gate 使用独立 `agents/gate/`、`gate` Harness、提示词、工具及 `gate:
 
 ## 查询与交办
 
-每次请求加载 Me、当前接纳的 Input 和有界交办背景，按需检索相关领域，不常驻整棵树的正文。查询通常按“Topic → summary → 近期 Note / Work → 原始 Input”展开。引用 Note 保留 UID、版本和分类，预览截断时补读全文。
+每次请求加载 Me、当前接纳的 Input 和有界交办背景，按需检索相关领域，不常驻整棵树的正文。查询通常按“Topic → summary 与 Note 目录 → read_note / Work → 原始 Input”展开。引用 Note 保留 UID、版本和分类，预览截断时补读全文。
 
 | 角色与工具 | 职责 |
 | --- | --- |

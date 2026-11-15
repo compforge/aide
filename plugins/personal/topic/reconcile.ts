@@ -1,4 +1,4 @@
-import { isProcessingRoot, isGateParent } from "./boundary.ts";
+import { isGateTopic, isProcessingRoot, isGateParent } from "./boundary.ts";
 import { reconcileGate } from "../gate/reconcile.ts";
 import { dueNotePressure, recordNotePressure } from "../note/pressure.ts";
 import { readyBusinessInputs } from "../input/scheduling.ts";
@@ -83,7 +83,7 @@ export async function reconcileTopic(context: PluginContext, execution: Reconcil
     const retry = await submitPending(context, execution, c);
     if (retry) return retry;
   }
-  if (c.spec.gate) return;
+  if (isGateTopic(c)) return;
   await ensureCapacityInputs(context, c);
   const result = await collectTopic(context, c);
   return { ...result, requeueAfterMs: Math.min(result?.requeueAfterMs ?? Infinity, topicPolicy(context.instance.config.topic).trigger.intervalSeconds * 1000) };
@@ -101,7 +101,7 @@ export async function reconcileTopic(context: PluginContext, execution: Reconcil
  * @link docs/personal/topic.md#topic-定时回顾
  */
 export async function reconcileChief(context: PluginContext, execution: ReconcileContext, initial: Readonly<TopicResource>, policy: TopicPolicy = topicPolicy(context.instance.config.topic)) {
-  if (initial.spec.gate) return reconcileGate(context, execution, initial, policy);
+  if (isGateTopic(initial)) return reconcileGate(context, execution, initial, policy);
   if (initial.metadata.deletionTimestamp) { await releaseTopicAgent(context, execution, initial); return; }
   if (initial.status.execution) {
     await finalizeExecution(context, initial, initial.status.execution.id);

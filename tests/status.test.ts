@@ -1,3 +1,4 @@
+import { fixtureGateRef } from "./summary-fixture.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import jsonPatch from "fast-json-patch";
 import assert from "node:assert/strict";
@@ -28,7 +29,7 @@ function fixture(t: TestContext) {
   store.storage.register("personal", definitions);
   const resources = createResourceClient(store);
   const topic = async (name: string, parent?: TopicResource) => resources.create<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, { name,
-    spec: { id: name, ...(parent ? { parentRef: resourceRef(parent) } : {}) }, status: { receipts: [] } });
+    spec: { id: name, parentRef: parent ? resourceRef(parent) : fixtureGateRef(store) }, status: { receipts: [] } });
   return { store, resources, topic };
 }
 
@@ -157,5 +158,5 @@ test("Domain schemas reject the former Work state bag and do not read old-versio
   f.store.storage.register("personal", [{ type: oldType, schema: { spec: { parse: (v: unknown) => v }, status: { parse: (v: unknown) => v } } }]);
   const old = await f.resources.create(oldType, { name: "old-only", spec: { id: "old-only" }, status: {} });
   assert.equal(await f.resources.get({ ...TOPIC_TYPE, name: old.metadata.name, namespace: "v1" }), undefined);
-  assert.equal((await f.resources.list(TOPIC_TYPE)).length, 1);
+  assert.equal((await f.resources.list(TOPIC_TYPE)).length, 2, "Gate and the domain root share the current Topic type");
 });

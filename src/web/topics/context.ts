@@ -69,7 +69,7 @@ export function createTopicContextPanel(topicId: string | null, signal: AbortSig
       time.dateTime = entry.updatedAt;
       const content = element("div", undefined, "markdown");
       updateMarkdown(content, entry.text);
-      item.append(time, content);
+      item.append(element("h3", (entry.nameMissing ? "[未命名] " : "") + (entry.name ?? "未命名笔记")), time, content);
       renderNoteClassification(item, entry);
       recent.append(item);
     }

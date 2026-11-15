@@ -1,3 +1,4 @@
+import { fixtureGateRef } from "./summary-fixture.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
 import { committedStatus } from "./fixtures/resource-write.ts";
 import { workObservation, workDueAt } from "../plugins/personal/status.ts";
@@ -29,7 +30,7 @@ async function fixture(t: TestContext, kind: "task" | "routine" = "task") {
   const store = new PluginResourceStore({ home, pluginInstanceId: "personal" });
   store.storage.register("personal", definitions);
   const resources = createResourceClient(store);
-  const topic = await resources.create(TOPIC_TYPE, { name: digest("me"), spec: { id: "me" }, status: {} });
+  const topic = await resources.create(TOPIC_TYPE, { name: digest("me"), spec: { id: "me", parentRef: fixtureGateRef(store) }, status: {} });
   const work = newWork("me", { kind, title: "Follow up", instruction: "Check evidence", trigger: kind === "routine" ? { cron: "* * * * *", timezone: "UTC", event: null } : null });
   const { id, topicId, title, instruction, revision, kind: _kind, trigger: _trigger, ...status } = work;
   const original = await resources.create<WorkSpec, WorkAgentStatus>(workType(kind), { name: id, spec: { title, instruction, paused: false, ...(kind === "routine" ? { trigger: work.trigger! } : { initialInputId: "fixture-initial" }) }, status: { ...workObservation(work, 1), topic: resourceRef(topic) } });

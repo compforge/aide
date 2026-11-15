@@ -1,4 +1,4 @@
-import { isGateParent } from "./boundary.ts";
+import { isGateTopic, isGateParent } from "./boundary.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { PluginContext, ResourceClient, Watch } from "@compforge/aide-plugin";
 import { patchStatus } from "../status.ts";
@@ -57,7 +57,7 @@ export function summaryWatch(): Watch {
 export function registerTopicObservations(context: PluginContext) {
   context.controllers.register({ name: "summary", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [summaryWatch()],
     async reconcile(_execution, topic: TopicResource) {
-      if (topic.spec.gate || topic.metadata.deletionTimestamp) return;
+      if (isGateTopic(topic) || topic.metadata.deletionTimestamp) return;
       let updated;
       try { updated = await refreshSummaryConditions(context.resources, topic); }
       catch (error) {

@@ -1,3 +1,5 @@
+import { ensureGateTopic } from "../gate/topic.ts";
+import { resourceRef } from "../input/state.ts";
 import type { ResourceClient } from "@compforge/aide-plugin";
 import { digest } from "../chief-model.ts";
 import { DEFAULT_TOPIC_ID, TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
@@ -14,7 +16,7 @@ export async function ensureDefaultTopic(resources: ResourceClient): Promise<Top
   if (current) return current;
   try {
     return await resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, {
-      name, spec: { id: DEFAULT_TOPIC_ID, name: "Default", default: true }, status: { receipts: [] },
+      name, spec: { parentRef: resourceRef(await ensureGateTopic(resources)), id: DEFAULT_TOPIC_ID, name: "Default", default: true }, status: { receipts: [] },
     });
   } catch (error) {
     if (!String(error).includes("resource already exists")) throw error;

@@ -169,6 +169,10 @@ test("Work summary and Notes use content versions and enforce the bound subject"
   const original = await createWithSummary(f.resources, ROUTINE_TYPE, { name: "work", spec: { title: "Monitor", instruction: "Check", paused: false, trigger: { cron: null, event: "tick", timezone: "UTC" } },
     status: { topic: resourceRef(f.root), summary: "", execution: { id: "work-live", startedAt: new Date().toISOString() } } }) as WorkResource;
   const tools = workContextTools("routine", f.resources, () => original, log);
+  const contextNote = await f.upsert({ name: "Root evidence", text: "Relevant domain evidence" }, "root-evidence");
+  const readResult = await tools.find(t => t.name === "read_note")!.execute("read-root", { noteId: contextNote.noteId }, undefined, undefined, {} as never);
+  assert.match(JSON.stringify(readResult), /Relevant domain evidence/);
+  await assert.rejects(tools.find(t => t.name === "upsert_note")!.execute("write-root", { noteId: contextNote.noteId, version: contextNote.version, text: "Wrong owner" }, undefined, undefined, {} as never), /another resource|own|scope|subject/i);
   await f.resources.patchStatus(original, { nextTriggerAt: new Date().toISOString() });
   await tools.find(t => t.name === "summarize_routine")!.execute("summary", { version: contentVersion(original), summary: "Stable" }, undefined, undefined, {} as never);
   const tool = tools.find(t => t.name === "upsert_note")!;
@@ -271,4 +275,38 @@ test("Chief upsert_note preserves existing placement and accepts topicId only on
   await assert.rejects(f.upsert({ noteId: edited.noteId, version: edited.version, topicId: "notes", text: "Move implicitly" }, "bad-move"), /move_note/);
   await f.aide.topics.ensure("unrelated");
   await assert.rejects(f.upsert({ topicId: "unrelated", text: "Outside the tree" }, "outside"), /outside this root/);
+});
+
+
+test("mutable Note names preserve identity and body citations; current directories refresh independently of body budgets", async t => {
+  const f = await setup(t);
+  const { noteDirectory } = await import("../plugins/personal/note/directory.ts");
+  const { noteTextVersion } = await import("../plugins/personal/note/model.ts");
+  const { listNotes } = await import("../plugins/personal/note/query.ts");
+  const { retireNote } = await import("../plugins/personal/note/service.ts");
+  const directory = () => noteDirectory(f.aide.personal.store.resources.storage, f.root.metadata.uid);
+  const old = await f.upsert({ text: "\nLegacy label\nDetails" }, "legacy-name");
+  assert.equal((await readNote(f.resources, old.noteId)).name, "Legacy label");
+  assert.equal(directory().items.find(n => n.id === old.noteId)!.nameMissing, true);
+  const labeled = await f.upsert({ noteId: old.noteId, version: old.version, name: "Legacy matter" }, "label-legacy");
+  assert.equal(labeled.noteId, old.noteId);
+  assert.equal(directory().items.find(n => n.id === old.noteId)!.nameMissing, undefined);
+  const first = await f.upsert({ name: "Deployment investigation", nature: "episodic", text: "Evidence ".repeat(1700) }, "named");
+  const before = await f.resources.get<import("../plugins/personal/note/model.ts").NoteSpec, import("../plugins/personal/note/model.ts").NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: first.noteId });
+  const renamed = await f.upsert({ noteId: first.noteId, version: first.version, name: "Deployment recovery" }, "rename");
+  const after = await f.resources.get<import("../plugins/personal/note/model.ts").NoteSpec, import("../plugins/personal/note/model.ts").NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: first.noteId });
+  assert.equal(directory().items.find(n => n.id === first.noteId)!.nameMissing, undefined);
+  assert.equal(renamed.noteId, first.noteId); assert.equal(renamed.uid, first.uid);
+  assert.notEqual(renamed.version, first.version);
+  assert.equal(noteTextVersion(before!), noteTextVersion(after!));
+  assert.equal((await listNotes(f.resources, { q: "Deployment recovery" })).items[0]!.id, first.noteId);
+  const second = await f.upsert({ name: "Separate large note", text: "Other evidence ".repeat(1000) }, "large");
+  const current = directory();
+  assert.equal(current.total, 3); assert.equal(current.items.length, 3);
+  assert.equal(current.items.find(n => n.id === first.noteId)!.name, "Deployment recovery");
+  assert.ok(current.items.every(n => !("text" in n)));
+  await retireNote(f.resources, f.read(), { noteId: second.noteId, version: second.version, reason: "No longer useful" });
+  assert.equal(directory().total, 2);
+  assert.ok(!directory().items.some(n => n.id === second.noteId));
+  await assert.rejects(f.upsert({ noteId: first.noteId, version: first.version, name: "Stale" }, "stale-name"), /version conflict/);
 });

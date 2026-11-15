@@ -1,3 +1,4 @@
+import { fixtureGateRef } from "./summary-fixture.ts";
 import { digest } from "../plugins/personal/chief-model.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { patchStatus } from "../plugins/personal/status.ts";
@@ -173,7 +174,7 @@ test("Transaction checks detect changed intermediate ancestry and expired Chief 
     const resources: ResourceClient = { ...f.resources, async commit(writes) {
       if (race === "ancestor") {
         const { parentRef, ...spec } = branch.spec;
-        await f.resources.replace(branch, spec, branch.status);
+        await f.resources.replace(branch, { ...spec, parentRef: fixtureGateRef(f.aide.topics.resources) }, branch.status);
       } else await f.resources.patchStatus(f.root(), { execution: { id: "replacement", startedAt: new Date().toISOString() } });
       return f.resources.commit(writes);
     } };

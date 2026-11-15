@@ -5,7 +5,7 @@ import { noteDescription, noteFields } from "../context-tools.ts";
 export function chiefNoteTools(upsert?: (input: TopicNoteUpdate, callId: string) => Promise<unknown>, beforeMutation?: () => void, read?: (id: string) => Promise<unknown>): ChiefToolDefinition[] {
   if (!upsert) return [];
   const { subject, ...fields } = noteFields;
-  const reads: ChiefToolDefinition[] = read ? [{ name: "read_note", inputOrigins: INPUT_ORIGINS, label: "Read note", description: "Read one complete independent Note, including its content version and subject. Use this when recent or background text was truncated.",
+  const reads: ChiefToolDefinition[] = read ? [{ name: "read_note", inputOrigins: INPUT_ORIGINS, label: "Read note", description: "Read one complete independent Note, including its content version and subject. Select a Note by its directory name, then read its complete body by stable noteId before relying on its details or editing it.",
     parameters: Type.Object({ noteId: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
     async execute(_id, args) { return { content: [{ type: "text", text: JSON.stringify(await read((args as { noteId: string }).noteId)) }], details: {} }; },
   }] : [];

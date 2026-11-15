@@ -1,3 +1,4 @@
+import { isGateTopic } from "./boundary.ts";
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 import { topicPolicy } from "./config.ts";
@@ -17,7 +18,7 @@ export async function releaseTopicAgent(context: PluginContext, execution: Recon
  */
 export async function collectTopic(context: PluginContext, topic: TopicResource, execution?: ReconcileContext) {
   const delay = { requeueAfterMs: 60_000 };
-  if (topic.spec.gate) return delay; // Gate keeps its conversation identity across idle periods.
+  if (isGateTopic(topic)) return delay; // Gate keeps its conversation identity across idle periods.
   if (topic.status.execution) return delay;
   const remaining = Date.parse(topic.status.lastInputAt ?? topic.metadata.creationTimestamp) + topicPolicy(context.instance.config.topic).idleMs - Date.now();
   if (remaining > 0) return { requeueAfterMs: Math.min(remaining, delay.requeueAfterMs) };

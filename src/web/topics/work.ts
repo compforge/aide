@@ -87,7 +87,7 @@ export function createWorkPanel(topicId: string, onChange: () => Promise<void>, 
       const latest = work.recent.at(-1);
       if (work.lastReport) detail.append(element('p', '最近办理：' + work.lastReport.text));
       if (latest) {
-        const entry = element('div'); entry.append(element('p', '近期事项：' + latest.text));
+        const entry = element('div'); entry.append(element('p', (latest.name ?? '近期事项') + '：' + latest.text));
         renderNoteClassification(entry, latest); detail.append(entry);
       }
       node.append(detail); list.append(node);

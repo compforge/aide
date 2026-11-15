@@ -350,7 +350,7 @@ Route、Chief、Weave 的列表在确定范围、排序和 offset 后，逐条�
 
 assess_input 保存单次研判回执并原子交接 Work。summarize_topic 使用内容 version 修订长期认识，absorbed 使用直接子 Topic 的 understandingVersion；提交时校验 summary 旧值、当前执行与真实归属，并在事务内查询子 Note 版本。upsert_note 默认当前 Topic，可指定子树中的 subject，通过 people 关联人物；不同 Note 不互相锁住。完整规则见 [Note](note.md)。
 
-list_topics 提供用于定位的预览：摘要和 Note 文本被截断时标记 `… [truncated]`，`noteTotal` 包含未展示的 Note。依赖不完整内容做判断或确认 absorbed 版本前，使用 read_topic 补读；`nextOffset` 非空时继续读取，为空表示全文结束。
+list_topics 提供摘要预览和普通 Note 名称目录，`notes.total` 表示活跃普通 Note 总数。read_topic 返回对象认识与目录，`nextOffset` 非空时继续读取；Note 正文通过 read_note 按 ID 获取，目录以外的发现使用 list_notes。确认 absorbed 版本前读取相关的完整证据。
 
 maxChars 默认 4000，是普通 Note 与 summary Note 共用的篇幅软预算；单篇存储上限仍为 16000。maxNotes 默认 10，超过直属活跃普通 Note 数量或单篇篇幅预算时，按 [Note 整理](note.md#数量与篇幅驱动的整理) 安排 Chief。contextChars 默认 48000。近期依据仍受统一数量和字符预算约束。详情见[配置](../configuration.md#topic-消费策略)。
 

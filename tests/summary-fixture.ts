@@ -1,3 +1,6 @@
+import { ensureGateTopic } from "../plugins/personal/gate/topic.ts";
+import { TOPIC_TYPE, GATE_TOPIC_ID } from "../plugins/personal/topic/model.ts";
+import { digest } from "../plugins/personal/chief-model.ts";
 import { NoteDefinition } from "../plugins/personal/note/definition.ts";
 import type { Resource, ResourceClient, ResourceType } from "@compforge/aide-plugin";
 import type { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
@@ -13,7 +16,9 @@ export async function patchSummary(client: ResourceClient, resource: any, patch:
 }
 export async function createWithSummary<S = any, T = any>(client: ResourceClient, type: ResourceType, init: any): Promise<Resource<S, T>> {
   const { summary, ...status } = init.status;
-  const resource = await client.create(type, { ...init, status });
+  const spec = type.kind === TOPIC_TYPE.kind && init.spec.id !== GATE_TOPIC_ID && !init.spec.parentRef
+    ? { ...init.spec, parentRef: resourceRef(await ensureGateTopic(client)) } : init.spec;
+  const resource = await client.create(type, { ...init, spec, status });
   return await writeSummary(client, resource as any, { text: summary }) as Resource<S, T>;
 }
 export function seedSummaryPatch(store: PluginResourceStore, type: ResourceType, name: string, patch: any) {
@@ -36,6 +41,14 @@ export function seedSummaryPatch(store: PluginResourceStore, type: ResourceType,
 }
 export function createWithSummarySync(store: PluginResourceStore, init: any) {
   const { summary, ...status } = init.status;
-  const resource = store.create({ ...init, status });
+  const spec = init.type.kind === TOPIC_TYPE.kind && init.spec.id !== GATE_TOPIC_ID && !init.spec.parentRef
+    ? { ...init.spec, parentRef: fixtureGateRef(store) } : init.spec;
+  const resource = store.create({ ...init, spec, status });
   return seedSummaryPatch(store, init.type, resource.metadata.name, { summary: init.status.summary });
+}
+
+export function fixtureGateRef(store: PluginResourceStore) {
+  const gate = store.find(TOPIC_TYPE, digest(GATE_TOPIC_ID)) ?? store.create({ type: TOPIC_TYPE, name: digest(GATE_TOPIC_ID),
+    spec: { id: GATE_TOPIC_ID, name: "Gate", review: { enabled: false } }, status: { receipts: [] } });
+  return resourceRef(gate);
 }

@@ -1,3 +1,4 @@
+import { fixtureGateRef } from "./summary-fixture.ts";
 import { collectResources } from "./fixtures/resource-gc.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { createReviewInput } from "../plugins/personal/topic/review.ts";
@@ -82,7 +83,7 @@ test("move_note rechecks ancestor changes in the write transaction and supports 
   const initial = await f.note({ text: "A continuing matter" }, "start");
   const moved = await moveNote(f.resources, f.read(), { ...initial, subject: resourceRef(routine), reason: "Delegated" });
   const client: ResourceClient = { ...f.resources, async replace(resource, spec, status) {
-    await f.resources.replace(child, { id: "child" }, child.status);
+    await f.resources.replace(child, { id: "child", parentRef: fixtureGateRef(f.aide.topics.resources) }, child.status);
     return f.resources.replace(resource, spec, status);
   } };
   await assert.rejects(moveNote(client, f.read(), { ...moved, subject: resourceRef(child), reason: "Scope changed" }), /outside/);

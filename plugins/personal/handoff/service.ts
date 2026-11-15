@@ -1,5 +1,5 @@
 import { isGateInput } from "../gate/input.ts";
-import { isDomainRoot } from "../topic/boundary.ts";
+import { isGateTopic, isRootTopic } from "../topic/boundary.ts";
 import { z } from "zod";
 import type { Logger } from "pino";
 import type { Resource, ResourceCommit } from "@compforge/aide-plugin";
@@ -32,7 +32,7 @@ export class Handoffs {
   readFor(actor: Actor, id: string): Handoff {
     const handoff = this.read(id), input = this.store.topics.inputStore.get(handoff.status.latestInputId);
     const domain = input?.status.topic ?? handoff.status.topic;
-    const allowed = actor.kind === "Topic" ? (actor as TopicResource).spec.gate ? handoff.spec.gate.uid === actor.metadata.uid
+    const allowed = actor.kind === "Topic" ? isGateTopic(actor as TopicResource) ? handoff.spec.gate.uid === actor.metadata.uid
       : domain && this.store.topics.scope(actor.metadata.uid).some(t => t.metadata.uid === domain.uid)
       : input ? !!input.status.handle?.[actor.metadata.uid] : handoff.status.works.some(w => w.uid === actor.metadata.uid);
     if (!allowed) throw new Error("Handoff is outside this owner's scope");
@@ -43,7 +43,7 @@ export class Handoffs {
     return { ...page, items: page.items.map(handoffSummary) };
   }
   private source(gate: TopicResource, inputId: string) {
-    if (!gate.spec.gate || !gate.status.execution) throw new Error("Active Gate execution required");
+    if (!isGateTopic(gate) || !gate.status.execution) throw new Error("Active Gate execution required");
     const input = this.store.topics.inputStore.get(inputId);
     if (!input || input.metadata.deletionTimestamp || input.status.topic?.uid !== gate.metadata.uid
       || !isGateInput(input.spec))
@@ -69,7 +69,7 @@ export class Handoffs {
   async delegate(gate: TopicResource, raw: unknown) {
     const args = DelegateSchema.parse(raw), source = this.source(gate, args.inputId);
     const topic = args.topicUid ? this.store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, { matchIndex: { name: "uid", value: args.topicUid } })[0] : undefined;
-    if (args.topicUid && (!topic || topic.metadata.deletionTimestamp || !isDomainRoot(topic))) throw new Error("Choose an available root Topic");
+    if (args.topicUid && (!topic || topic.metadata.deletionTimestamp || !isRootTopic(topic))) throw new Error("Choose an available root Topic");
     const id = digest(["handoff", source.metadata.uid, topic?.metadata.uid ?? "route"]);
     const existing = this.store.resources.find<HandoffSpec, HandoffStatus>(HANDOFF_TYPE, id);
     if (existing) return this.read(id);
@@ -96,7 +96,7 @@ export class Handoffs {
     const inputId = digest([args.id, source.metadata.uid]);
     if (this.store.topics.inputStore.get(inputId) || this.store.topics.inputStore.receipt(inputId)) return handoff;
     const topic = handoff.status.topic ? this.store.topics.byRef(handoff.status.topic) : undefined;
-    if (handoff.status.topic && (!topic || topic.metadata.deletionTimestamp || topic.spec.gate)) throw new Error("Handoff domain is unavailable");
+    if (handoff.status.topic && (!topic || topic.metadata.deletionTimestamp || isGateTopic(topic))) throw new Error("Handoff domain is unavailable");
     const input = this.input(inputId, source, args.request, source.spec.source ?? handoff.spec.replyTo, topic); input.spec.handoff.id = args.id;
     await commitStatus(this.store.client, [{ operation: "patchStatus", resource: gate, patch: {} },
       { operation: "patchStatus", resource: handoff, patch: { ...this.reply(source), works: [], latestInputId: inputId, request: args.request, sequence: handoff.status.sequence + 1,
@@ -112,7 +112,7 @@ export class Handoffs {
     const domain = input?.status.topic ?? handoff.status.topic;
     const attached = actor.kind === "Topic" ? domain && this.store.topics.scope(actor.metadata.uid).some(t => t.metadata.uid === domain.uid)
       : input ? !!input.status.handle?.[actor.metadata.uid] : handoff.status.works.some(w => w.uid === actor.metadata.uid);
-    if (!attached || (actor.kind === "Topic" && (actor as TopicResource).spec.gate)) throw new Error("Handoff report is outside this owner's scope");
+    if (!attached || (actor.kind === "Topic" && isGateTopic(actor as TopicResource))) throw new Error("Handoff report is outside this owner's scope");
     const reportKey = digest([actor.metadata.uid, actor.status.execution.id, callId]);
     if (handoff.status.reportKey === reportKey) return handoff;
     if (["completed", "failed"].includes(handoff.status.phase)) throw new Error("Completed handoff needs a new user follow-up before another report");
@@ -123,7 +123,7 @@ export class Handoffs {
     ];
     if (args.coordinate) {
       const gate = this.store.topics.byRef(handoff.spec.gate);
-      if (!gate?.spec.gate) throw new Error("Gate is unavailable");
+      if (!gate || !isGateTopic(gate)) throw new Error("Gate is unavailable");
       writes.push({ operation: "create", type: INPUT_TYPE, name: digest(["handoff-coordinate", reportKey]),
         spec: { origin: "chief", originId: "personal.handoff", topicId: gate.spec.id,
           text: `Domain requests coordination for handoff ${args.id}: ${args.report}. Read the handoff and current evidence. This is not new user authority; do not create or forward another request automatically.` },

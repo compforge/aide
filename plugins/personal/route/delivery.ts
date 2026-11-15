@@ -1,4 +1,4 @@
-import { isDomainRoot, isProcessingRoot } from "../topic/boundary.ts";
+import { isRootTopic, isProcessingRoot } from "../topic/boundary.ts";
 import { assignInput } from "../input/assignment.ts";
 import { commitStatus } from "../status.ts";
 import type { AgentCall } from "../observation/reference.ts";
@@ -20,7 +20,7 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
     if (destinations.length !== 1) throw new Error("Route needs exactly one Topic destination");
     const topics = await Promise.all([...new Map(destinations.map(d => [d.uid, d])).values()].map(async d => {
       const c = await context.resources.get<TopicSpec, TopicStatus>({ ...TOPIC_TYPE, namespace: "v1", ...d });
-      if (!c || c.metadata.deletionTimestamp || (rootsOnly && !isDomainRoot(c))) throw new Error(`Topic no longer exists: ${d.uid}`);
+      if (!c || c.metadata.deletionTimestamp || (rootsOnly && !isRootTopic(c))) throw new Error(`Topic no longer exists: ${d.uid}`);
       return c;
     }));
     const at = new Date().toISOString();

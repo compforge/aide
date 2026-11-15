@@ -1,3 +1,4 @@
+import { noteDirectory } from "../note/directory.ts";
 import { isRequirementAddress } from "../../../connectors/requirements/address.ts";
 import { deliveryEndpoint } from "./locator.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
@@ -80,6 +81,9 @@ export class Addresses {
   }
   ref(target: AddressTarget, people: Iterable<PersonRef> = []) {
     return target.kind === "Address" ? addressRef(this.read(AddressRefSchema.parse(target))) : addressRef(this.observe(target, people));
+  }
+  noteDirectory(ref: AddressRef) {
+    return noteDirectory(this.resources.storage, this.read(ref).metadata.uid, "addresses");
   }
   view(ref: AddressRef) {
     const r = this.read(ref);

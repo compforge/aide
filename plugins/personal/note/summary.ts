@@ -8,7 +8,7 @@ import { resourceRef } from "../input/state.ts";
 import { contentVersion } from "../context-write.ts";
 import type { ResourceContext } from "../context.ts";
 
-export interface SummaryUpdate extends MaterialDisclosure { pruned?: NoteStatus["pruned"]; nature?: NoteSpec["nature"]; maxChars?: number; text?: string; people?: Iterable<PersonRef>; addresses?: Iterable<AddressRef> }
+export interface SummaryUpdate extends MaterialDisclosure { name?: string; pruned?: NoteStatus["pruned"]; nature?: NoteSpec["nature"]; maxChars?: number; text?: string; people?: Iterable<PersonRef>; addresses?: Iterable<AddressRef> }
 export type SummaryResource = Resource<unknown, ResourceContext>;
 const summaryName = (resource: SummaryResource) => `summary-${resource.metadata.uid}`;
 type Reader = Pick<ResourceValidationContext, "page">;
@@ -64,7 +64,7 @@ export async function prepareSummary(resources: ResourceClient, owner: SummaryRe
   if (note.metadata.deletionTimestamp || note.spec.subject.uid !== owner.metadata.uid) throw new Error("Summary Note owner changed");
   const people = incomingPeople ?? note.spec.people;
   const visibility = update.visibility ?? note.spec.visibility ?? "people";
-  const spec = NoteSpecSchema.parse({ ...note.spec, summaryOf: resourceRef(owner), text, people,
+  const spec = NoteSpecSchema.parse({ ...note.spec, ...(update.name !== undefined ? { name: update.name } : {}), summaryOf: resourceRef(owner), text, people,
     ...(update.nature !== undefined ? { nature: update.nature } : {}),
     ...(update.maxChars !== undefined ? { maxChars: update.maxChars } : !note.spec.summaryOf && note.spec.maxChars === undefined ? { maxChars: noteMaxChars({}) } : {}), addresses: update.addresses === undefined ? note.spec.addresses : addressRefs(update.addresses),
     sensitivity: update.sensitivity ?? note.spec.sensitivity ?? "L3", visibility });

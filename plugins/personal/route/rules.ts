@@ -1,5 +1,5 @@
 import { isGateInput } from "../gate/input.ts";
-import { isDomainRoot } from "../topic/boundary.ts";
+import { isGateTopic, isRootTopic } from "../topic/boundary.ts";
 import { ensureGateTopic } from "../gate/topic.ts";
 import { ensureDefaultTopic } from "../topic/default.ts";
 import { digest } from "../chief-model.ts";
@@ -30,7 +30,7 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
     await deliver(context, input, [topic.metadata], "Source topic key");
     return true;
   }
-  const topics = (await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE)).filter(c => !c.metadata.deletionTimestamp && !c.spec.gate);
+  const topics = (await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE)).filter(c => !c.metadata.deletionTimestamp && !isGateTopic(c));
   const destinations = new Map<string, Destination>();
   if (input.spec.topicId) {
     const address = input.spec.source && await context.resources.get<import("../address/model.ts").AddressSpec, import("../address/model.ts").AddressStatus>(input.spec.source);
@@ -54,7 +54,7 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
     for (const c of topics) if (preceding?.status.topic?.uid === c.metadata.uid) { destinations.set(c.metadata.uid, c.metadata); break; }
   }
   if (!destinations.size) {
-    if (topics.some(c => !c.spec.default && isDomainRoot(c))) return false;
+    if (topics.some(c => !c.spec.default && isRootTopic(c))) return false;
     await deliver(context, input, [await defaultDestination(context)], "No non-Default Topic candidates");
     return true;
   }
