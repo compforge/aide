@@ -79,6 +79,8 @@ Host 向 handler 传入 call.signal，Connector关闭或期限到达时取消。
 
 停用配置在重启后生效。注册表卸载先停止发现并取消等待、活动调用，再调用实现的 close；重复关闭共享同一清理过程。启动装配失败也会关闭已创建的Connector。Connector 的原始调用参数不进入扩展调用诊断账本，账本记录Connector、方法、执行关联和结果。
 
+普通成功调用（包括 identity）记为 DEBUG；总耗时达到 5 秒的成功调用记为 WARN；失败（含期限超时和队列满）记为 ERROR，主动取消记为 DEBUG。调用日志记录 kind、name、method、timeoutMs，以及包含排队的 elapsedMs、queueMs 和 executionMs；失败还保留 queued/running 阶段、活动与等待数量、取消/超时标记及错误 cause 链。日志不记录调用参数或返回结果，提供方负责安全提取错误信息。
+
 ## 验证
 
 connector-registry 测试覆盖字符串 kind 发现、方法表校验、引用绑定、共享容量、排队过期与关闭；connector-packages 测试覆盖本地/npm 包装配、非法 kind/handlers 诊断、配置与凭证隔离、失败清理及回滚，以及真实 Runner 中的新 Kind 和外部 Forge→Source→Input→Chief 链路。测试使用外部实现替身，不证明具体内部平台 API 的可用性。
