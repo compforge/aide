@@ -14,6 +14,9 @@ export const inputPrinter: ResourcePrinter<InputSpec, InputStatus> = {
       `Origin: ${spec.origin}/${spec.originId}`,
       `Received: ${metadata.creationTimestamp}`,
     ];
+    if (spec.batch) lines.push(`Batch members: ${spec.batch.members.map(m => m.name).join(", ")}\nOldest received: ${spec.batch.oldestAt}\nRead and assess every original member separately; this envelope is completed from member receipts.`);
+    if (status.batch) lines.push(`Scheduling batch: ${status.batch.name}`);
+    if (status.promotedAt) lines.push(`Promoted: ${status.promotedAt}`);
     if (status.topic) lines.push(`Material Topic: ${status.topic.uid}`);
     if (status.assess?.topic) lines.push(`Processing Topic: ${status.assess.topic.uid}`);
     if (spec.handoff) lines.push(`Handoff: ${JSON.stringify(spec.handoff)}\nDomain owns this request. Reply with say(respondToHandoffId=handoff.id); report_handoff records progress independently. Preserve original user evidence and authorization.`);

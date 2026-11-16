@@ -273,6 +273,9 @@ Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖�
 plugins:
   personal:
     topic:
+      secretary:
+        count: 10
+        maxWaitSeconds: 600
       deferred:
         count: 10
         maxWaitSeconds: 600
@@ -290,7 +293,7 @@ plugins:
 
 `trigger` 只配置定时协调机制；`review` 配置 Reconcile 的业务检查策略。Chief Harness 只配置模型和能力包，不接受业务调度字段。`intervalSeconds`、`idleSeconds` 和 `maxIdleSeconds` 均为 1–2147483 的整数秒；`factor` 大于 1，上限不小于基础等待。
 
-定时唤醒不会直接调用模型。Reconcile 在回顾到期后检查 deferred 输入、待吸收的子主题认识及材料/子节点整理压力；需要判断时生成已绑定 root 的维护 Input，无事可做时只记录检查时间并增加退避次数。默认配置的空检查或无进展回顾依次等待 15、30、60、120 分钟，之后保持 120 分钟；期间的 Reconcile 唤醒间隔仍为 60 秒。
+定时唤醒不会直接调用模型。Secretary 按 secretary / deferred 的数量和等待阈值提级积压；回顾检查待吸收的子主题认识及材料/子节点整理压力；需要判断时生成已绑定 root 的维护 Input，无事可做时只记录检查时间并增加退避次数。默认配置的空检查或无进展回顾依次等待 15、30、60、120 分钟，之后保持 120 分钟；期间的 Reconcile 唤醒间隔仍为 60 秒。
 
 业务 Input 优先于维护创建和执行；维护创建遇到资源容量不足时推迟，已持久化业务仍可处理。正常业务 Input 直接复用，Immediate / Normal 与结构、子 summary 变化不等待回顾退避。Deferred 达到 count 条或最老一条等待 maxWaitSeconds 后按 Normal 处理，独立于 review 开关和退避。新业务输入重置退避且连续到达不推迟已安排的机会。内置回执不清零退避；成功回顾过的材料未变化时跳过模型，完成业务处理或有实质进展才重置次数。执行完成或中断恢复以完成时间重新计时，不自动重放已有未知效果。
 

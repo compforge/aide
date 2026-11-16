@@ -25,6 +25,7 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
     if (!c || c.metadata.uid !== owner.metadata.uid || c.metadata.deletionTimestamp || c.status.execution?.id !== executionId) throw new Error("Chief execution is no longer active");
     const input = await resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: args.inputId });
     if (!input) throw new Error("Input is unavailable");
+    if (input.spec.batch) throw new Error("Assess original batch members; the envelope is settled from their receipts");
     const topics = await topicScope(resources, resourceRef(c));
     const topicUids = new Set(topics.map(t => t.metadata.uid));
     if (input.status.assess?.executionId !== executionId && !belongsToTopic(input, resourceRef(c), topicUids)) throw new Error("Input does not belong to this Topic subtree");

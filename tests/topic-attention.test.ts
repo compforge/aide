@@ -38,8 +38,8 @@ test("Input attention has three string values and source-specific defaults", () 
   }
 });
 
-/** @case Below-threshold Deferred attachment to roots or children waits; another input may include the backlog. */
-for (const target of ["root", "child"]) test(`Deferred ${target} inputs wait and can join a normally activated Chief`, async t => {
+/** @case Below-threshold Deferred waits for Secretary even when normal business activates Chief. */
+for (const target of ["root", "child"]) test(`Deferred ${target} inputs wait independently of a normally activated Chief`, async t => {
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
   const { aide, client, submit, prompts } = setup(t, { chief: async () => { await gate; return "Handled"; } });
   t.after(() => release());
@@ -57,8 +57,8 @@ for (const target of ["root", "child"]) test(`Deferred ${target} inputs wait and
   assert.equal(early.status.assess!.executionId, undefined);
   assert.equal(prompts.length, 0);
   await submit("normal", "root", InputAttention.Normal); await until(() => prompts.length === 1);
-  assert.match(prompts[0]!, /fact early/);
-  assert.ok(prompts[0]!.indexOf("fact normal") < prompts[0]!.indexOf("fact early"));
+  assert.doesNotMatch(prompts[0]!, /fact early/);
+  assert.match(prompts[0]!, /fact normal/);
   await submit("late", target);
   await until(() => !!aide.topics.inputStore.get("late")?.status.route?.completedAt);
   await Bun.sleep(100);
@@ -66,7 +66,8 @@ for (const target of ["root", "child"]) test(`Deferred ${target} inputs wait and
   assert.equal(aide.topics.resource("root")!.status.execution!.admissionRevision, 0);
   release(); await aide.settled();
   assert.equal(prompts.length, 1, "Late Deferred must not force another turn");
-  for (const id of ["early", "normal"]) assert.ok(aide.topics.inputStore.get(id)!.status.assess?.completedAt);
+  assert.ok(aide.topics.inputStore.get("normal")!.status.assess?.completedAt);
+  assert.equal(aide.topics.inputStore.get("early")!.status.assess?.executionId, undefined);
   assert.equal(aide.topics.inputStore.get("late")!.status.assess!.completedAt, undefined);
 });
 
@@ -89,13 +90,12 @@ test("Deferred backlog survives restart with review disabled and timer reviews r
         { ...c.status, reviewCheckedAt: null, idleSince: new Date(Date.now() - 901_000).toISOString() });
       // Simulate the existing timer's reconcile, including when only its status deadline changed.
       await restarted.runtime.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1", resourceApiVersion: c.apiVersion,
-        resourceKind: c.kind, resourceId: c.metadata.name, controllerName: "agent" });
+        resourceKind: c.kind, resourceId: c.metadata.name, controllerName: "secretary" });
       await restarted.settled();
       assert.equal(restarted.topics.pending(root.metadata.uid).length, remaining);
-      assert.match(prompts.at(-1)!, /"kind":"input"/);
-      assert.match(prompts.at(-1)!, /aide:review/);
+      assert.equal(prompts.length, 0);
     }
-    assert.equal(prompts.length, 1, "unchanged material does not create another review");
+    assert.equal(prompts.length, 0, "young Deferred does not create review work");
     assert.ok(restarted.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").every(i => i.status.assess!.completedAt));
     assert.ok(restarted.topics.inputStore.list().filter(i => i.spec.origin === "source").every(i => !i.status.assess!.executionId));
   } finally { await restarted.close(); }

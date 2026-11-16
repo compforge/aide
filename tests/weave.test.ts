@@ -1,3 +1,4 @@
+import { reconcileSecretary } from "../plugins/personal/topic/secretary.ts";
 import { isRootTopic } from "../plugins/personal/topic/boundary.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
 import { summaryText } from "../plugins/personal/note/summary.ts";
@@ -82,6 +83,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
       await assessInput(f.resources, f.refresh(b), "root-chief", { inputId: "second", summary: "Follow up" });
       return { state: "success", value: { result: { stopReason: "end_turn" } } };
     } } };
+    await reconcileSecretary(f.context, f.refresh(b));
     await reconcileChief(f.context, rootExecution, f.refresh(b));
     await assessInput(f.resources, f.refresh(a), "old-chief", { inputId: "first", summary: "Old Chief finished naturally" });
     const current = f.refresh(a);
@@ -238,6 +240,7 @@ test("A quiet changed child creates a review Input for root synthesis and can th
       absorbed: [{ uid: a.metadata.uid, version: understandingVersion(f.refresh(a)) }] }, 4000);
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
   } } };
+  await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 1);
   assert.ok(f.aide.topics.inputStore.list().every(i => i.spec.origin === "aide:review"));
@@ -246,11 +249,12 @@ test("A quiet changed child creates a review Input for root synthesis and can th
   assert.ok(f.aide.topics.resource(a.spec.id), "silence retains the Topic until capacity or explicit deletion");
   await f.resources.delete(TOPIC_TYPE, a.metadata.name, "v1", { uid: a.metadata.uid, resourceVersion: f.refresh(a).metadata.resourceVersion });
   assert.equal(f.aide.topics.resource(a.spec.id), undefined);
+  await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 1);
 });
 
-test("Root Chief admits a bounded backlog with urgent Input first and independent receipts", async t => {
+test("Root Chief admits urgent and observed business as separate bounded tasks with independent receipts", async t => {
   const f = fixture(t);
   for (let i = 0; i < 10; i++) await f.input(`batch-${i}`, "batch");
   const root = f.aide.topics.byKey("batch")!;
@@ -261,8 +265,8 @@ test("Root Chief admits a bounded backlog with urgent Input first and independen
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
     prompts++;
     const activation = JSON.parse(args.prompt.split("Activation: ")[1].split("\n")[0]);
-    assert.equal(activation.inputs.length, 10);
-    assert.equal(activation.inputs[0].inputId, "urgent");
+    assert.equal(activation.inputs.length, prompts === 1 ? 1 : 10);
+    if (prompts === 1) assert.equal(activation.inputs[0].inputId, "urgent");
     for (const item of activation.inputs) {
       const fact = f.aide.topics.inputStore.get(item.inputId)!;
       assert.equal(fact.status.assess?.executionId, execution.executionId);
@@ -272,8 +276,11 @@ test("Root Chief admits a bounded backlog with urgent Input first and independen
   } } };
   await reconcileChief(f.context, execution, f.refresh(root));
   assert.equal(prompts, 1);
-  assert.equal(f.aide.topics.pending(root.metadata.uid).length, 1);
+  assert.equal(f.aide.topics.pending(root.metadata.uid).length, 10);
   assert.ok(f.aide.topics.pending(root.metadata.uid).every(i => !i.status.assess!.executionId));
+  await reconcileChief(f.context, execution, f.refresh(root));
+  assert.equal(prompts, 2);
+  assert.equal(f.aide.topics.pending(root.metadata.uid).length, 0);
 });
 
 
@@ -290,11 +297,14 @@ test("Unfinished synthesis retains failed review Inputs and backs off without re
     prompts++;
     throw newHarnessError("harness_execution_failed", "unavailable");
   } } };
+  await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
+  await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 1);
   assert.equal(f.aide.topics.resource(root.id)!.status.absorbAttempts, 1);
   await f.resources.patchStatus(f.aide.topics.resource(root.id)!, { nextAbsorbAt: "2000-01-01T00:00:00.000Z" });
+  await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 2);
   assert.equal(f.aide.topics.resource(root.id)!.status.absorbAttempts, 2);

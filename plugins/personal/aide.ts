@@ -1,3 +1,4 @@
+import { expandInputs } from "./input/batch.ts";
 import { isGateInput } from "./gate/input.ts";
 import { ensureGateTopic } from "./gate/topic.ts";
 import { isGateTopic, isRootTopic, isProcessingRoot } from "./topic/boundary.ts";
@@ -136,7 +137,7 @@ export class Personal {
         read: () => {
           const c = active();
           return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "aide:review",
-            inputs: this.topics.inputStore.query("assessExecution", c.status.execution!.id).map(i => ({
+            inputs: this.topics.inputStore.query("assessExecution", c.status.execution!.id).filter(i => !i.spec.batch).map(i => ({
               id: i.metadata.name, deliveryId: i.status.assess?.deliveryId ?? `input:${i.metadata.uid}`, initial: !i.status.assess?.deliveryId && i.status.assess?.startedAt === c.status.execution!.startedAt,
               origin: i.spec.origin, immediate: immediate(i.spec), text: inputPreview(i, Math.floor(topicPolicy(this.options.topic).contextChars / 8)),
             })) };
@@ -292,7 +293,7 @@ export class Personal {
       if (ids[0] !== args.inputId) throw new Error("Chief batch inputId must identify its first Input");
       const inputs = ids.map(id => this.topics.inputStore.get(id));
       if (inputs.some(i => !i || !eligible(i, topic))) return { accepted: false };
-      const batch = inputs as NonNullable<typeof inputs[number]>[];
+      const batch = await expandInputs(resources, inputs as NonNullable<typeof inputs[number]>[]);
       const input = batch[0]!;
       if (batch.some(i => isInternalInput(i.spec)) && batch.length !== 1) throw new Error("Maintenance admits exactly one Input");
       if (args.operation === "steer" && batch.some(i => !immediate(i.spec))) throw new Error("Only Immediate Inputs may steer Chief");
@@ -312,7 +313,7 @@ export class Personal {
         if (latest) await invalidateAssignment({ resources }, latest);
         return { accepted: false, reason: "admission_conflict" };
       } if (n < 8 && /version conflict/.test(String(error))) continue; throw error; }
-      this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid, inputIds: ids,
+      this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid, inputIds: batch.map(i => i.metadata.name),
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
       const budget = topicPolicy(this.options.topic).contextChars;
       const prompt = `New Inputs:\n${JSON.stringify({ inputId: args.inputId, inputIds: ids })}\n${batch.map(i => inputPreview(i, Math.floor((budget - 2000) / batch.length))).join("\n\n")}\nAssess each original Input separately with the tools for its origin; leave unfinished prior tasks pending.`;

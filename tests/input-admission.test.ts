@@ -1,3 +1,5 @@
+import { prepareInputs } from "../plugins/personal/input/batch.ts";
+import { topicPolicy } from "../plugins/personal/topic/config.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
 import { committedStatus } from "./fixtures/resource-write.ts";
 import { ROUTE_TYPE, ROUTE_NAME } from "../plugins/personal/route/model.ts";
@@ -118,7 +120,7 @@ test("Grouping and interrupted prompt keep admission global; Deferred claims wai
   await runInput(f.context, f.execution("a", async () => {
     const latest = f.current(a);
     await f.resources.replace(latest, { ...latest.spec, parentRef: resourceRef(b) }, latest.status);
-    assert.deepEqual((await nextInputs(f.resources, f.current(b), 8)).map(i => i.metadata.name), ["deferred"]);
+    assert.deepEqual((await nextInputs(f.resources, f.current(b), 8)).map(i => i.metadata.name), [], "Unprepared Deferred remains assigned, but not ready");
     assert.ok(f.aide.topics.inputs("b").some(i => i.metadata.name === "fact"));
     throw new Error("connection lost after dispatch");
   }), f.current(a), "chief", "fact", "fact");
@@ -278,6 +280,7 @@ test("Ten deferred Inputs activate one bounded business batch before full-quota 
   const f = fixture(t), root = await f.aide.topics.ensure("a");
   for (let i = 0; i < 10; i++) await f.input(`batch-${i}`, [root], InputAttention.Deferred);
   f.aide.topics.inputStore.storage.configure({ kinds: { "aide.dev/Input": { maxCount: 10 } } });
+  await prepareInputs(f.context, f.current(root), topicPolicy());
   await reconcileChief(f.context, f.execution("batch"), f.current(root), (await import("../plugins/personal/topic/config.ts")).topicPolicy({ maxUnfiledInput: 1 }));
   assert.equal(f.prompts.length, 1); assert.equal(f.aide.topics.inputStore.list().length, 10);
   assert.doesNotMatch(f.prompts[0]!.prompt, /aide:triage/);
@@ -297,8 +300,9 @@ test("Deferred deadline uses oldest creation, independently of review, and queri
   const resources = { ...f.resources, list: async () => { throw new Error("Selection must not list a whole tree"); },
     page: <S, T>(type: import("@compforge/aide-plugin").ResourceType, options: import("@compforge/aide-plugin").ResourcePageOptions) => { assert.ok(options.limit <= 10); return f.resources.page<S, T>(type, options); } };
   assert.equal((await readyBusinessInputs(resources, f.current(root), topicPolicy(), now + 599999)).inputs.length, 0);
-  const ready = await readyBusinessInputs(resources, f.current(root), topicPolicy(), now + 600000);
-  assert.equal(ready.reason, "age"); assert.equal(ready.inputs[0]!.metadata.name, "oldest");
+  await prepareInputs(f.context, f.current(root), topicPolicy(), now + 600000);
+  const ready = await readyBusinessInputs(resources, f.current(root));
+  assert.equal(ready.inputs[0]!.spec.batch!.members[0]!.name, "oldest");
 });
 
 for (const outcome of ["accepted", "rejected", "uncertain"] as const) test(`Deferred followUp batch ${outcome} keeps individual atomic receipts`, async t => {
@@ -314,12 +318,13 @@ for (const outcome of ["accepted", "rejected", "uncertain"] as const) test(`Defe
     return { state: "success", value: { outcome, reason: outcome === "rejected" ? "unsupported" : undefined } };
   });
   const execution = { verbs: { action: async (_: string, args: unknown) => ({ state: "success", value: await f.aide.personal.submitTopic(intake(root), args) }) } } as unknown as ReconcileContext;
+  await prepareInputs(f.context, f.current(root), topicPolicy());
   const submitted = submitPending(f.context, execution, f.current(root));
   if (outcome === "uncertain") await assert.rejects(submitted, /result unknown/); else await submitted;
   assert.equal(deliveries.length, 1); assert.equal(deliveries[0].operation, "followUp");
   const inputs = f.aide.topics.inputStore.list();
   for (const input of inputs) {
-    assert.equal(input.spec.attention, InputAttention.Deferred);
+    assert.equal(input.spec.attention, input.spec.batch ? InputAttention.Normal : InputAttention.Deferred);
     assert.equal(input.status.assess!.executionId, outcome === "rejected" ? undefined : "a");
     if (outcome === "uncertain") assert.ok(input.status.assess!.errorAt);
     if (outcome === "accepted") assert.equal(input.status.assess!.deliveryId, deliveries[0].messageId);
@@ -334,17 +339,20 @@ test("A running Chief admits one outstanding deferred batch and resumes after it
   const deliveries: any[] = [];
   mockRunning(f, async args => { deliveries.push(args); return { state: "success", value: { outcome: "accepted" } }; });
   const execution = { verbs: { action: async (_: string, args: unknown) => ({ state: "success", value: await f.aide.personal.submitTopic(intake(root), args) }) } } as unknown as ReconcileContext;
+  await prepareInputs(f.context, f.current(root), topicPolicy());
+  await prepareInputs(f.context, f.current(root), topicPolicy());
   await submitPending(f.context, execution, f.current(root));
   await submitPending(f.context, execution, f.current(root));
   assert.equal(deliveries.length, 1);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.executionId).length, 10);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.executionId).length, 11);
   await f.input("urgent-during-batch", [root], InputAttention.Immediate);
   await submitPending(f.context, execution, f.current(root));
   assert.equal(deliveries.length, 2); assert.equal(deliveries[1].operation, "steer");
   for (let i = 0; i < 10; i++) await assessInput(f.resources, f.current(root), "a", {
     inputId: `bounded-${String(i).padStart(2, "0")}`, summary: "Handled",
   });
+  await prepareInputs(f.context, f.current(root), topicPolicy());
   await submitPending(f.context, execution, f.current(root));
   assert.equal(deliveries.length, 3); assert.equal(deliveries[2].operation, "followUp");
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.executionId && !i.status.assess.completedAt).length, 11);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.executionId && !i.status.assess.completedAt).length, 12);
 });

@@ -1,5 +1,7 @@
 import { isProcessingRoot } from "./topic/boundary.ts";
 import { inputExpired } from "./input/retention.ts";
+import { expandInputs, settleBatch } from "./input/batch.ts";
+import { preparedInputs } from "./input/scheduling.ts";
 import { readyBusinessInputs } from "./input/scheduling.ts";
 import { topicPolicy } from "./topic/config.ts";
 import { asHarnessError } from "@compforge/aide-plugin";
@@ -22,7 +24,7 @@ const attentionOrder = { [InputAttention.Immediate]: 0, [InputAttention.Normal]:
 export const canActivate = (input: InputSpec, owner: Pick<LoopResource, "kind">) =>
   owner.kind !== "Topic" || inputAttention(input) !== InputAttention.Deferred;
 export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
-  if (input.metadata.deletionTimestamp || inputExpired(input)) return false;
+  if ((owner.kind === "Topic" && input.status.batch) || input.metadata.deletionTimestamp || inputExpired(input)) return false;
   if (owner.kind === "Topic") return isProcessingRoot(owner as import("./topic/model.ts").TopicResource)
     && input.status.assess?.topic?.uid === owner.metadata.uid && !!input.status.assess && !assessmentFinished(input.status.assess) && !input.status.assess.executionId;
   const receipt = attemptOf(input, resourceRef(owner));
@@ -32,23 +34,7 @@ export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
 }
 /** @spec Due retries compete by original arrival, independently of new input selection; a failed parent cannot starve. */
 export async function nextInputs(resources: ResourceClient, owner: Readonly<LoopResource>, limit: number, businessOnly = false) {
-  if (owner.kind === "Topic") {
-    const selected: Input[] = [];
-    const queues = businessOnly ? [InputAttention.Immediate, InputAttention.Normal, InputAttention.Deferred]
-      : [InputAttention.Immediate, InputAttention.Normal, "aide:triage", "aide:organize", "aide:review", InputAttention.Deferred];
-    for (const queue of queues) {
-      const page = await resources.page<InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE,
-        { namespace: owner.metadata.namespace, matchIndex: { name: "assessReadyAttention", value: JSON.stringify([owner.metadata.uid, queue]) }, limit: Math.min(1000, limit - selected.length) });
-      const items = page.items.filter(i => eligible(i, owner));
-      if (queue.startsWith("aide:")) {
-        if (selected.some(i => canActivate(i.spec, owner))) continue;
-        if (items.length) return items.slice(0, 1);
-      }
-      selected.push(...items);
-      if (selected.length >= limit) break;
-    }
-    return selected;
-  }
+  if (owner.kind === "Topic") return preparedInputs(resources, owner as import("./topic/model.ts").TopicResource, limit, businessOnly);
   const inputs = await pendingInputs(resources, resourceRef(owner));
   return inputs.filter(i => eligible(i, owner)).sort((a, b) =>
     (owner.kind === "Route" ? 0 : attentionOrder[inputAttention(a.spec)] - attentionOrder[inputAttention(b.spec)])
@@ -86,7 +72,7 @@ export async function submitPending(context: PluginContext, execution: Reconcile
   const batch = owner.kind === "Topic" ? (await nextInputs(context.resources, owner, 8)).filter(i => isInternalInput(i.spec))
     : await pendingInputs(context.resources, resourceRef(owner));
   for (const input of batch) {
-    if (!eligible(input, owner) || !canActivate(input.spec, owner)) continue;
+    if (!eligible(input, owner) || (!input.status.promotedAt && !canActivate(input.spec, owner))) continue;
     const result = await execution.verbs.action<{ accepted: boolean; reason?: string }>(owner.kind === "Topic" ? "submit_topic" : "submit_input", { inputId: input.metadata.name, operation: immediate(input.spec) ? "steer" : "followUp" });
     if (result.state === "failure") throw new Error(`Agent Input admission failed: ${result.error ?? "unknown error"}`);
     if (result.state === "success" && !result.value.accepted && ["not_running", "admission_conflict"].includes(result.value.reason ?? "")) retry = true;
@@ -103,13 +89,19 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   const inputs = await Promise.all(inputIds.map(id => context.resources.get<InputSpec, import("./input/model.ts").InputStatus>(inputRef(id))));
 
   if (inputs.some(input => !input || !eligible(input, current))) return;
+  if (current.kind === "Topic") {
+    const expanded = await expandInputs(context.resources, inputs as Input[]);
+    inputs.splice(0, inputs.length, ...expanded);
+    if (expanded.length > 20) throw new Error("Agent admission batch exceeds 20 Inputs");
+    inputIds.splice(0, inputIds.length, ...expanded.map(i => i.metadata.name));
+  }
   if (current.kind === "Topic" && inputs.some(input => input && isInternalInput(input.spec))
     && inputs.length !== 1) throw new Error("Chief maintenance admits exactly one Input origin");
   const startedAt = new Date().toISOString();
   try {
     await commitStatus(context.resources, [
       { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, ...(inputs[0] ? { inputOrigin: inputs[0].spec.origin } : {}), admissionRevision: 0, observedGeneration: current.metadata.generation },
-        ...(current.kind === "Topic" ? { ...(inputs[0]?.spec.origin === "aide:review" ? { notifiedWeaveRevision: (owner.status as import("./topic/model.ts").TopicStatus).weaveRevision ?? 0 } : {}), lastError: null } : {}) } },
+        ...(current.kind === "Topic" ? { lastError: null } : {}) } },
       ...inputs.map(input => ({ operation: "patchStatus" as const, resource: input!, patch: attemptPatch(input!, resourceRef(current), {
         executionId: execution.executionId, agent: undefined, startedAt, lastError: undefined, errorAt: undefined, retryable: undefined, nextAttemptAt: undefined,
         ...(current.kind === "Route" ? { attempts: (input!.status.route?.attempts ?? 0) + 1 } : {}) }) })),
@@ -138,7 +130,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
     for (const id of current.kind === "Topic" ? [] : inputIds) await changeAttempt(context.resources, id, resourceRef(current), receipt =>
       receipt?.executionId === execution.executionId && !receipt.completedAt ? { agent } : {});
     if (current.kind === "Topic" && inputs.some(input => input?.spec.origin === "channel" && immediate(input.spec))) {
-      const stream = await execution.verbs.action<{ streaming: boolean }>("begin_output_stream", { inputIds });
+      const stream = await execution.verbs.action<{ streaming: boolean }>("begin_output_stream", { inputIds: inputs.filter(i => !i!.spec.batch).map(i => i!.metadata.name) });
       if (stream.state !== "success") throw new Error("Could not establish Chief output stream");
       streaming = stream.value.streaming;
       if (streaming) prompt += "\nA live Output is already bound to this Immediate Input. Your agent events are written to its Stream. Before finishing, call cite_output for all Notes used by this reply; external new facts need a classified Note first. Write the reply directly in assistant text; do not call say for this same reply. Use say only for a separately intended communication. Do not emit an internal final acknowledgement.";
@@ -197,6 +189,10 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
     if (!latest || latest.metadata.uid !== owner.metadata.uid || latest.status.execution?.id !== executionId) return;
     const released = compactionFailed && failure.agent?.sessionId && latest.status.agent?.harness === failure.agent.harness
       && latest.status.agent.sessionId === failure.agent.sessionId ? latest.status.agent : undefined;
+    if (latest.kind === "Topic") {
+      const batches = await context.resources.list<InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessExecution", value: executionId } });
+      for (const batch of batches.filter(i => i.spec.batch)) await settleBatch(context.resources, batch);
+    }
     const unfinished = latest.kind === "Topic"
       ? await context.resources.list<import("./input/model.ts").InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessExecution", value: executionId } })
       : (await pendingInputs(context.resources, resourceRef(latest))).filter(i => attemptOf(i, resourceRef(latest))?.executionId === executionId);
