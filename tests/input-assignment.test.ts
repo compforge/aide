@@ -60,7 +60,7 @@ test("Mounted Input recovers assignment independently; root pending lookup never
     async page(type, options) { assert.equal(type.kind, "Input"); queries++; return f.resources.page(type, options); },
   };
   assert.deepEqual((await nextInputs(resources, f.read(f.root), 8)).map(i => i.metadata.name), ["mounted"]);
-  assert.ok(queries <= 6);
+  assert.ok(queries <= 7, "Only bounded Input queues, including promotion and active batches");
 });
 
 test("An ancestor move redistributes pending Inputs while preserving an old execution and its completion", async t => {

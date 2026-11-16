@@ -172,7 +172,7 @@ test("pressure review request tolerates unrelated Topic writes and commits its c
   assert.ok(f.read().status.reviewCheckedAt);
 });
 
-for (const race of ["parent", "execution", "disabled", "schedule-failure"] as const)
+for (const race of ["parent", "disabled", "schedule-failure"] as const)
 test(`review request rolls back on ${race} at commit`, async t => {
   const f = await setup(t);
   await f.resources.patchStatus(f.read(), { execution: null });
@@ -180,11 +180,10 @@ test(`review request rolls back on ${race} at commit`, async t => {
   const agenda = await maintenanceAgenda(f.resources, []);
   const resources: ResourceClient = { ...f.resources, async commit(writes) {
     if (race === "parent") await f.resources.replace(f.read(), { ...f.read().spec, parentRef: resourceRef(parent) }, f.read().status);
-    if (race === "execution") await f.resources.patchStatus(f.read(), { execution: { id: "other", startedAt: new Date().toISOString() } });
     if (race === "disabled") await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
     return f.resources.commit(race === "schedule-failure" ? [...writes, { operation: "patchStatus", resource: f.read(), patch: { unknown: true } }] : writes);
   } };
-  await assert.rejects(createReviewInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review"), race === "schedule-failure" ? /unknown|Unrecognized/ : /idle enabled root/);
+  await assert.rejects(createReviewInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review"), race === "schedule-failure" ? /unknown|Unrecognized/ : /eligible root/);
   assert.equal(f.aide.topics.inputStore.list().length, 0);
   assert.equal(f.read().status.reviewCheckedAt ?? null, null);
   assert.equal(f.read().status.nextAbsorbAt, undefined);

@@ -1345,11 +1345,11 @@ test("Weave queues a review Input after busy Chief business without mixing tools
   assert.equal(fixture.requests.length, 1, "maintenance must wait for business");
   release(); await aide.settled();
   assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Topic structure changed/);
-  assert.equal(aide.invocations().filter(i => i.topicId === "parent").length, 2);
+  assert.equal(aide.invocations().filter(i => i.topicId === "parent").length, 1);
   assert.equal(aide.topics.resource("parent")!.status.notifiedWeaveRevision, 1);
   assert.ok(aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!.status.assess?.completedAt);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
-  assert.equal([...state.harnessInputs.values()].filter(i => i.delivery === "followUp").length, 0);
+  assert.equal([...state.harnessInputs.values()].filter(i => i.delivery === "followUp").length, 1);
   assert.ok(aide.topics.inputStore.get("first")!.status.assess?.executionId);
 });
 

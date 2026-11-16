@@ -158,11 +158,11 @@ test("Real Runner groups deferred observations by canonical environment and rest
   await client.replace(topic, { ...topic.spec, review: { enabled: true } },
     { ...topic.status, reviewCheckedAt: null, idleSince: new Date(Date.now() - 901_000).toISOString() });
   await scope.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1", resourceApiVersion: topic.apiVersion,
-    resourceKind: topic.kind, resourceId: topic.metadata.name, controllerName: "agent" });
+    resourceKind: topic.kind, resourceId: topic.metadata.name, controllerName: "secretary" });
   await aide.settled();
   assert.equal(aide.topics.inputStore.get(input.metadata.name)!.status.assess!.completedAt, undefined);
-  assert.ok(aide.topics.inputStore.list().some(i => i.spec.origin === "aide:review" && i.status.assess?.completedAt));
-  assert.match(prompts.at(-1)!, /aide:review/);
+  assert.equal(aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").length, 0, "Deferred observations wait for Secretary, not review inference");
+  assert.ok(prompts.every(prompt => !prompt.includes("aide:review")));
   assert.doesNotMatch(prompts.at(-1)!, /"before"|"after"/);
   assert.equal(aide.outputs().filter((message) => message.topicId !== "other").length, 0, "Source Topics do not inherit a reply address");
   assert.equal(aide.works().length, 0);
@@ -173,7 +173,7 @@ test("Real Runner groups deferred observations by canonical environment and rest
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   await aide.start(); await aide.settled();
   assert.equal(aide.personal.topics.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 3);
-  assert.equal(prompts.length, 2, "Channel and observation each call Chief once");
+  assert.equal(prompts.length, 1, "Channel runs once; young observations remain deferred across restart");
 });
 
 const pod = (uid: string, restarts = 0, imageId = "sha256:a") => ({ name: `api-${uid}`, uid, phase: "Running", ready: true, terminating: false,

@@ -4,7 +4,7 @@ import type { ResourceRef } from "@compforge/aide-plugin";
 export interface InputReceipt { inputId: string; at: string }
 
 /**
- * @spec Deferred Inputs wait until their root backlog reaches the count or age threshold, then enter Chief as normal followUp work.
+ * @spec Secretary packs Deferred Inputs at the count or age threshold into Normal batch envelopes.
  * A Chief handling business Inputs may assess related Deferred material; internal maintenance does not consume business receipts.
  * @link docs/personal/input.md#内容身份与调度
  */
@@ -26,6 +26,9 @@ export type InputRelation = "sent" | "received" | "observed";
 
 export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha6", kind: "Input" } as const;
 export interface InputSpec extends MaterialDisclosure {
+  /** A Secretary-created scheduling envelope; original members remain authoritative evidence. */
+  batch?: { members: Array<ResourceRef & { uid: string }>; oldestAt: string };
+  maintenance?: import("../topic/maintenance-plan.ts").MaintenancePlan;
   /** Producer-owned event key, stable across retries and intake paths; opaque to Personal. */
   inputKey?: string;
   /** Explicit delegated request; communication address and original user evidence stay independent of domain ownership. */
@@ -96,6 +99,10 @@ export interface Handling extends Assessment {
   request: import("../model.ts").WorkInputRequest;
 }
 export interface InputStatus {
+  batch?: ResourceRef & { uid: string };
+  /** Promotion affects queue order, never tool authority or permission to steer. */
+  promotedAt?: string;
+  preparationSettledAt?: string;
   /** Resolved policy; Host computes release eligibility atomically with each receipt write. */
   retention?: { successSeconds: number; errorSeconds: number };
   conditions?: import("../conditions.ts").Condition[];

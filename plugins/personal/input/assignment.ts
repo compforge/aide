@@ -1,7 +1,7 @@
 import { isProcessingRoot } from "../topic/boundary.ts";
 import { reconcileInputRetention } from "./retention.ts";
 import { retryOnConflict, type PluginContext, type ResourceValidationContext, type Watch } from "@compforge/aide-plugin";
-import { INPUT_TYPE } from "./model.ts";
+import { INPUT_TYPE, assessmentFinished } from "./model.ts";
 import { resourceRef, type Input } from "./state.ts";
 import { patchStatus } from "../status.ts";
 import { readTopicRoot } from "../topic/tree.ts";
@@ -15,7 +15,7 @@ export async function assignInput(context: Pick<PluginContext, "resources" | "lo
   return retryOnConflict(async () => {
     const current = await context.resources.get<Input["spec"], Input["status"]>(resourceRef(input));
     if (!current) return;
-    if (current.metadata.deletionTimestamp || !current.status.topic || !current.status.assess || current.status.assess.completedAt || current.status.assess.executionId) return;
+    if (current.status.batch || current.metadata.deletionTimestamp || !current.status.topic || !current.status.assess || current.status.assess.completedAt || current.status.assess.executionId) return;
     const root = await readTopicRoot(context.resources, current.status.topic);
     if (!root || current.status.assess?.topic?.uid === root.metadata.uid) return;
     await patchStatus(context.resources, current, { assess: { ...current.status.assess, topic: resourceRef(root) } });
@@ -49,17 +49,31 @@ export function guardAssessment(previous: Input, current: Input, context: Resour
     throw new Error("Input admission requires the assigned Chief execution");
 }
 
+/** @spec Missing/cancelled envelopes release only unclaimed members; admitted work never replays. */
+export async function repairBatchMember(context: Pick<PluginContext, "resources" | "logger">, input: Input) {
+  const current = await context.resources.get<Input["spec"], Input["status"]>(resourceRef(input));
+  if (!current?.status.batch || current.status.assess?.executionId || assessmentFinished(current.status.assess)) return;
+  const batch = await context.resources.get<Input["spec"], Input["status"]>(current.status.batch);
+  if (batch && !batch.metadata.deletionTimestamp && !assessmentFinished(batch.status.assess)) return;
+  await patchStatus(context.resources, current, { batch: undefined, assess: { ...current.status.assess, topic: undefined } });
+  context.logger.info("Secretary delegation released", { attributes: { inputId: current.metadata.name, batchUid: current.status.batch.uid } });
+}
+
 export function registerInputs(context: PluginContext) {
-  const changed: Watch = { resourceType: INPUT_TYPE, handler: { create: async () => [], delete: async () => [], update: async ({ oldObject, newObject }) => {
+  const members = (input: Input) => (input.spec.batch?.members ?? []).map(ref => ({ name: ref.name, namespace: ref.namespace }));
+  const changed: Watch = { resourceType: INPUT_TYPE, handler: { create: async () => [], delete: async ({ object }) => members(object as Input), update: async ({ oldObject, newObject }) => {
     const a = oldObject as Input, b = newObject as Input;
-    return (a.status.topic?.uid !== b.status.topic?.uid || (!!a.status.assess?.topic && !b.status.assess?.topic)) ? [{ name: b.metadata.name, namespace: b.metadata.namespace }] : [];
+    return [...(a.status.topic?.uid !== b.status.topic?.uid || a.status.batch?.uid !== b.status.batch?.uid || (!!a.status.assess?.topic && !b.status.assess?.topic)
+      ? [{ name: b.metadata.name, namespace: b.metadata.namespace }] : []),
+      ...(b.metadata.deletionTimestamp || assessmentFinished(b.status.assess) ? members(b) : [])];
   } } };
   context.controllers.register({ resourceType: INPUT_TYPE, maxConcurrency: 4, watches: [changed],
-    reconcile: async (_execution, input: Input) => { await assignInput(context, input); await reconcileInputRetention(context, input); } });
+    reconcile: async (_execution, input: Input) => { await repairBatchMember(context, input); await assignInput(context, input); await reconcileInputRetention(context, input); } });
 }
 
 /** Invalidation is durable; the Input Watch and Topic repair both rebuild missing assignments. */
 export async function invalidateAssignment(context: Pick<PluginContext, "resources">, input: Input) {
+  if (input.status.batch) return;
   if (!input.status.assess?.topic || input.status.assess.executionId || input.status.assess.completedAt) return;
   const { topic: _, ...assess } = input.status.assess;
   await patchStatus(context.resources, input, { assess });
