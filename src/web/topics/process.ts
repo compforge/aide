@@ -13,6 +13,8 @@ export function executionDuration(block: TopicBlock) {
 
 /**
  * @spec A single reader-selected execution owns the pane. New replies never switch selection or reset expanded steps.
+ * @spec Selecting another message updates its context even when both messages share an execution; polling preserves that context.
+ * @case tests/topic-message-details.test.ts
  * @spec Process requests are lazy, incarnation-bound and cancelled on close, navigation or pause; stale responses cannot replace another selection.
  * @link docs/channel/web.md#实时进展与历史
  */
@@ -42,7 +44,7 @@ export function createProcessPane(topicId: string | null, signal: AbortSignal) {
     const executions = view.blocks.filter(b => b.type === "execution" && b.group_id === selected?.id);
     const running = executions.some(b => b.status === "running" || b.status === "queued") || view.meta.activity?.id === selected?.id;
     const question = view.blocks.find(b => b.type === "input" && b.group_id === selected?.id);
-    if (question) subtitle.textContent = replyPreview(question.content);
+    if (!selected?.title && question) subtitle.textContent = replyPreview(question.content);
     status.textContent = executions.length ? executions.map(b => `${b.label ?? "执行"} · ${executionLabel(b.status)}${executionDuration(b)}`).join("；")
       : running ? "正在准备执行记录…" : "执行详情未保留（可能已重启或超出保留范围），正文仍可阅读。";
     const answers = view.blocks.filter(b => b.type === "message");
@@ -88,8 +90,13 @@ export function createProcessPane(topicId: string | null, signal: AbortSignal) {
     }
   }
   function open(id: string, uid: string, text: string, trigger?: HTMLElement) {
-    if (selected?.id === id && selected.uid === uid) { closeButton.focus(); return; }
-    stop(); selected = { id, uid, title: text }; returnFocus = trigger;
+    returnFocus = trigger;
+    if (selected?.id === id && selected.uid === uid) {
+      selected.title = text;
+      subtitle.textContent = replyPreview(text) || "本次执行";
+      closeButton.focus(); return;
+    }
+    stop(); selected = { id, uid, title: text };
     nodes.clear(); body.replaceChildren(); body.scrollTop = 0;
     pane.hidden = false; layout.classList.add("process-open"); subtitle.textContent = replyPreview(text) || "本次执行";
     status.textContent = "加载执行过程…";
