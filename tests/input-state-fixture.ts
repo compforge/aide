@@ -1,12 +1,12 @@
+import type { TopicPolicy } from "../plugins/personal/topic/config.ts";
 import { INPUT_TYPE } from "../plugins/personal/input/model.ts";
 import type { ResourceClient } from "@compforge/aide-plugin";
 import { assessInput } from "../plugins/personal/topic/assess.ts";
 import type { TopicResource } from "../plugins/personal/topic/model.ts";
 import { deliver, type RoutingInput } from "../plugins/personal/route/delivery.ts";
-export async function assessAll(resources: ResourceClient, c: TopicResource, executionId: string, args: { inputIds: string[]; summary: string }) {
+export async function assessAll(resources: ResourceClient, c: TopicResource, executionId: string, args: { inputIds: string[]; summary: string }, policy?: TopicPolicy) {
   for (const inputId of args.inputIds) {
-    const input = await resources.get<import("../plugins/personal/input/model.ts").InputSpec, import("../plugins/personal/input/model.ts").InputStatus>({ ...INPUT_TYPE, name: inputId, namespace: "v1" });
-    if (!input?.spec.batch) await assessInput(resources, c, executionId, { inputId, summary: args.summary });
+    await assessInput(resources, c, executionId, { inputId, summary: args.summary }, undefined, policy);
   }
 }
 export async function routeTo(resources: ResourceClient, target: { name: string; uid: string }, input: RoutingInput) {

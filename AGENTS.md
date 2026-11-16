@@ -6,6 +6,12 @@ Aide 是小型、自托管的 personal agent，将持续到来的信息转化为
 
 项目有两个目标：做好 personal agent，并积累可复用的 TypeScript controller-runtime 底座。Personal 是底座的首个应用与验证场景，领域模型留在插件，通用资源、查询和调度能力沉淀到底座。按绿地视角开发，不建设账号权限中心或多实例平台。业务判断放在 Personal 与 Chief Agent；修改通用机制前先说明具体需求和现有能力缺口。
 
+Aide 是多角色并行系统：Input 经多个角色转换、加工和处理，贡献到 Output 或 Note 中。角色的本质是 Reconciler；Agent 为角色提供智能化执行能力，对外属于 Reconciler 的内部细节。角色通过资源事实协作，完成以持久化结果为准。
+
+典型流转是：Channel／Source 形成 Input → Route 确定 Topic 归属 → Chief 接纳并处理。Deferred 分支先由 [Secretary](docs/personal/secretary.md) 整理成 Batch，再交给 Chief；Secretary 生成的内部维护 Input 直接绑定目标 Topic。Chief 可以直接更新 Note、产生 Output，也可以通过 Input 的 Work 请求交给 Task／Routine 持续办理；这些角色产生的 Output 再进入披露与投递流程。一条 Input 可以贡献到多个产物，多条 Input 也可以共同形成一个 Note 或 Output。
+
+Gate 承接 Me 的全局输入并按需交办领域 Chief；Weave 调整 Topic 之间的组织关系，影响后续处理归属。各角色并行协调自身资源，按分支参与处理；Input 的 route／assess／handle 分别保留路由、研判和办理事实，处理完成、工作目标达成与 Output 送达各有自己的回执。
+
 ## 代码地图
 
 ```text
@@ -67,6 +73,7 @@ plugins/personal/
     reconcile.ts           # 合并后分批迁移 Address 参与者与标准删除生命周期
     relation.ts            # 输入与 Me 的关系
     messages.ts            # Connector 消息贡献人物事实
+  batch/                   # 独立 Batch CRD、成员归组、接纳与生命周期
   input/                   # Input 定义、幂等接收、分页检索、保留策略与 Printer
   output/                  # Output 定义、投递状态、action、展示投影与 Printer
   observation/             # Input JobView、原生调用引用与业务证据关联
@@ -139,16 +146,16 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 - Gate 是全局信息域与行动范围，暂由 Me 与 Aide 独享，仅双方单聊进入。Gate 是唯一无 parentRef 的 Topic，统一通过 isGateTopic 判断；其直接子 Topic 是独立领域 root，统一通过 isRootTopic 判断；Gate Agent 与 Chief 独立。Gate 跨域读取并交办给领域 Chief，领域承担执行及知识沉淀；原单聊地址承接回复，Gate 汇集对话与交办连续性。Gate 不参与领域 Route 候选、Weave、知识维护与回收，不新建自己的 Work。见 [Gate](docs/personal/gate.md)。
 - Aide 是 Me 的独立助理；Gate / Chief / Route / Weave / Task / Routine 是助理内部角色。外部交流不是自动委托，凭证不决定身份；摘要、归并和工作交接保留作者、确认状态与授权范围。身份契约见 [Kernel](docs/kernel.md#助理定位与身份边界)。
-- 底座提供 TypeScript controller-runtime，服务 Plugin Operator；Personal 拥有 Input、Note、Output、Person、Topic、Task、Routine 与业务判断。通用资源和调度不能导入 Personal，应用装配负责安装定义、通信 action 和投递器。
+- 底座提供 TypeScript controller-runtime，服务 Plugin Operator；Personal 拥有 Input、Batch、Note、Output、Person、Topic、Task、Routine 与业务判断。通用资源和调度不能导入 Personal，应用装配负责安装定义、通信 action 和投递器。
 - 修改资源更新、并发、条件写入或协调机制时，先核对 [Resource 更新契约](docs/plugin/resource.md#更新操作与并发) 与 Kubernetes / controller-runtime；通用能力缺口优先在底座解决，再接入业务调用方。明确当前实现与设计目标，不用上层逐点重试或独立版本体系替代缺失的写入语义。
 - Host / Runner 不互相导入实现。Runner 经 ResourceClient、Connector API 与 Verb 请求宿主能力，不持有 Store、凭证客户端或 Harness SDK。共享协议放在 src/protocol，公共插件契约放在 packages/plugin。
 - 每种 CRD 在所属 plugin package 下有独立目录，模型、Reconcile 和专属辅助代码就近组织；跨资源协作留在插件层。ResourceDefinition 集中声明 Schema、校验、Printer、索引与保留策略；所有写入在存储事务内校验，提交后通知 Watch。
 - 资源身份按插件实例与 namespace 组织，引用固定 UID。同一 Controller 对同一资源串行；主资源纯 status 更新不自动唤醒自身，协作方显式声明 Watch。依赖其它资源的容量资格通过 retention.canEvict 在实际淘汰事务内重查。资源所有者决定能否释放，Host 写入只检查容量并通知独立 GC；GC 对合格 owner tree 原子请求删除，再沿 Controller / finalize 生命周期释放容量。
 - Operator 通过 Harness interface / verb 操作原生 agent loop，恢复参数由 Operator 自己保存。Personal 的 status.agent 只是调用参数；Harness verb 不读写 CRD。原生持久化、历史与恢复属于 Harness，实时投影和诊断日志不承担恢复。
-- Secretary 是 Topic 上独立的确定性 Reconcile，不调用 Agent；按数量/等待时间准备批次和内部维护 Input，Chief 负责接纳与执行。批次引用原始 Input，成员退出独立调度但保留逐条研判及办理回执。
+- Secretary 是 Topic 上独立的确定性 Reconcile，不调用 Agent；按数量/等待时间准备批次和内部维护 Input，Chief 负责接纳与执行。Batch 是独立 CRD，成员关系只保存在 Input.status.batchId；Chief 接纳独立 Input 或 Batch，成员集合在归组后固定，当前仅包含 Deferred；Chief 只写 Batch 执行回执，Input Reconcile 投影成员研判结果，Work 办理回执保持独立。职责见 [Secretary](docs/personal/secretary.md)，批次契约见 [Batch](docs/personal/batch.md)。
 - Route、Chief、Task、Routine、Weave Agent 只由各自对应的 Reconcile 触发，包括 prompt、steer 与 followUp；协作组件和 Agent 工具通过资源变化协作，不直接触发其它角色。
 - Input、Task、Routine 通过 status.topic 保存唯一且可调整的材料 Topic UID 引用；Input.assess.topic 保存未领取待办的最终一致负责人缓存，领取后保留实际执行归属，Input.assess 保存全局唯一研判及 Chief 接纳 executionId，自动 prompt / steer / followUp 在提交前通过资源事务竞争接纳；Topic 保存 Chief 执行与原生会话。Route 保存首次路由回执，Chief 在树内整理归属，Weave 只改变父子关系。
-- 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。可能已有外部副作用的中断先核对，不自动重放。
+- 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。Chief 未提交终态结果的 Input／Batch 在执行释放后重试，已有终态结果保持不变；Work 的副作用恢复由其自身契约负责。
 - Channel / Source 通过绑定 Definition 的入口形成 Input，正文保存事实，证据留在 observation。路由统一归 Route，Default Topic 由系统按需创建并维护，只兜底，不提供手动切换；Input.status 的 route / assess / handle 是处理事实，消费者按索引查询。
 - Person 保存人物身份与认识，联系地址由 scoped identities 和 Address locators 查询推导，不保存 spec.addresses；已配置 Lark Channel 的人物单聊首次发现允许发言，后续发现保留禁言。Me 是可选标记，与访问凭证独立。Input.sender / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。
 - 长期认识保存在 summaryOf 指向 Topic、Task、Routine、Person 的 Note 中，对象不保存 summary 字段；summaryRevision 仅为派生内容指纹。summaryOf 按对象 UID 索引且唯一；目标对象存在时保护该 Note，目标实际移除后按普通容量回收，同名重建不算原对象。独立 Note 按稳定 ID 保存具体事项的当前认识，spec.name 是可维护的名称；Prompt 注入普通 Note 目录，正文按 read_note 读取，subject 关联 Topic/Work、people 关联人物，recent 仅作查询投影，完整发现走 list_notes，事项归位走 move_note；nature 区分 episodic / semantic / procedural，普通与 summary 共用 maxChars 软预算。Topic 的 maxNotes 与超长 Note 驱动 review 整理，先确认目标写入，再 prune_note 来源或 retire_note 整篇；退役不改正文/引用，保留的 Stream 固定其证据生命周期；两者独立写入，办理报告只确认业务状态与 Input 回执。结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。

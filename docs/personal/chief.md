@@ -14,7 +14,7 @@ Chief 没有独立 CRD；持久状态由 [Topic.spec/status](topic.md#crd) 承�
 
 ### 与 Reconciler 的协作
 
-Chief Agent 负责判断，Personal Route 负责话题归位。Topic 的接收 Controller 与 agent Controller 分别通知新材料和调用 Chief；assess_input 确认消费，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
+Chief Agent 负责判断，Personal Route 负责话题归位。Topic 的接收 Controller 与 agent Controller 分别通知新材料和调用 Chief；assess_input 确认独立 Input，assess_batch 确认整批任务，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
 
 所有 Topic 共用 Chief 配置。Personal 的 chiefSession 工厂根据调用 scope 的 ResourceRef 校验 Topic UID，装配限定该会话范围的 WorkService 与工具。工具每次执行都重新确认当前 execution，不捕获过期 verbs。
 
@@ -33,7 +33,7 @@ Chief Agent 负责判断，Personal Route 负责话题归位。Topic 的接收 C
 | aide:triage | 创建 child、迁移 Input/Work/Note；只完成本轮维护 Input |
 | aide:organize | 创建或移动 Topic、维护 Topic summary；只完成本轮维护 Input |
 
-同一批次可以包含工具能力相同的业务 Input；维护 Input 独立接纳，不与业务取工具并集。业务 Input 优先于内部维护，Immediate 可通过 steer 在下一次安全模型请求边界接入；已经开始的模型调用或工具不会被瞬间撤销。运行中仅 Immediate 使用 steer，其他可投递 Input 始终使用 followUp，业务和内部维护遵循同一规则；工具范围在 Pi 实际取出 followUp 开始处理时切换，排队本身不会打断当前任务。FollowUp 每次取一条，不同 origin 不合并工具列表。被业务打断且未确认的维护 Input 在正常收尾后回到待办；失败与未知结果仍保留错误，不自动重放。
+同一批次可以包含工具能力相同的业务 Input；维护 Input 独立接纳，不与业务取工具并集。业务 Input 优先于内部维护，Immediate 可通过 steer 在下一次安全模型请求边界接入；已经开始的模型调用或工具不会被瞬间撤销。运行中仅 Immediate 使用 steer，其他可投递 Input 始终使用 followUp，业务和内部维护遵循同一规则；工具范围在 Pi 实际取出 followUp 开始处理时切换，排队本身不会打断当前任务。FollowUp 每次取一条，不同 origin 不合并工具列表。未确认完成的 Input 在执行结束后释放占用，记录可重试错误，等待角色 trigger 间隔后继续；已有终态结果保持不变。
 
 Pi 的 `setActiveToolsByName` 替换可用工具，Chief 在首轮 prompt 前初始化，在后续模型轮次准备时更新。Pi 负责生成下一请求的工具声明；当前任务指令通过不持久化的 context projection 注入，原生历史继续共享。日志记录 executionId、origin、Input IDs、实际工具名与数量。
 
@@ -63,7 +63,8 @@ Chief 注册以下业务工具，并按上述 Input 范围向每次模型请求�
 - read_input 按页读取会话关联的 Input 原文与证据，补足大输入的预览。
 - say 产生独立 Output；答复是新的 Input，不挂起 Harness 等待。
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
-- assess_input 原子保存单条 Input 的简短研判回执，并建立 Work handle；不改写 Topic.summary / recent，不值得通知的观察可以静默完成。
+- assess_batch 完成一个固定成员的 Deferred Batch，成员研判回执由 Input Reconcile 投影；可按原成员身份交办 Work，不能把整批完成等同于 Work 完成。
+- assess_input 原子保存独立 Input 的简短研判回执，并建立 Work handle；不改写 Topic.summary / recent，不值得通知的观察可以静默完成。
 - list_notes 查询 recent 之外仍保留的具体事项；move_note 在责任树内调整事项归属，保留内容与年龄；超出数量或篇幅软预算时使用 upsert_note 整合信息，确认目标保存后用 prune_note 削减来源，或用 retire_note 退役无独立价值的整篇 Note。
 - summarize_topic 只修订长期有效、低频变化的认识；只确认子版本时可省略 summary。upsert_note 独立维护近期事项，以同一 noteId 连接多次输入的进展，不要求改写 summary。
 

@@ -36,6 +36,12 @@ Topic tree 本身也是认知的一部分。同样一组发布信息，财务负
 
 认知服务于实际成果：回答问题、推进工作、帮助决策或及时提醒。Output 专指已经决定向外表达的内容；工作进展和认识更新各自保存，可以静默发生。多条 Input 可以汇聚成一条 Output，一条 Input 也可能在持续跟进中促成多次 Output。效果取决于判断是否有依据、工作是否推进、重要变化是否被识别，以及用户是否减少重复背景和无效关注。
 
+## 角色与协作
+
+Aide 是一个多角色并行系统。Input 经多个角色转换、加工和处理，贡献到 Output 或 Note 中；这些贡献可以是内容的一部分，并不要求一条 Input 对应一个产物。
+
+角色的本质是 Reconciler，通过资源事实协作。Agent 为角色提供智能化执行能力，对外属于 Reconciler 的内部细节。[Secretary](secretary.md) 确定性地准备输入，Chief Reconciler 借助 Agent 完成判断并提交结果。Chief 写入 Input／Batch 的终态结果后，该项处理完成；没有写成终态的条目由后续 Chief 重新处理。后续周期任务新建 Input，Batch 成员同步属于结果投影。
+
 ## 对象与主流程
 
 Personal 的业务主线是：
@@ -51,6 +57,8 @@ Weave 作用于 Topic 之间的关系：把值得共同理解的主题组织到�
 | 对象 | 承担的职责 | 详细设计 |
 | --- | --- | --- |
 | Input | 收到的内容、来源证据与处理痕迹 | [输入](input.md) |
+| Secretary | 确定性整理待办，准备业务批次与内部维护请求 | [秘书](secretary.md) |
+| Batch | Secretary 安排的一组待办及其接纳、完成生命周期 | [批次](batch.md) |
 | Note | 近期事项认识与长期稳定认识的统一载体，以稳定 ID 承接后续变化 | [认识笔记](note.md) |
 | Weave | 组织相关主题，促进跨来源知识融合，收敛独立处理上下文 | [Weave](weave.md)、[主题树](topic.md) |
 | Route | 为输入选择一个话题，无合适归属时使用 Default | [路由](route.md) |

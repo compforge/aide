@@ -1,5 +1,4 @@
-import { MaintenancePlanSchema } from "../topic/maintenance-plan.ts";
-import { validateBatch, validateBatchUpdate } from "./batch.ts";
+import { validateMembership, memberCanEvict } from "../batch/membership.ts";
 import { InputPolicySchema } from "./config.ts";
 import { inputExpiry, inputHardExpiry, inputPressure } from "./retention.ts";
 import { InputClassificationFields } from "../disclosure.ts";
@@ -8,8 +7,7 @@ import { obsoleteReplies, replyIdentity } from "../address/reply.ts";
 import { validateReviewRequest } from "../topic/review.ts";
 import { PersonRefSchema } from "../person/model.ts";
 import { ConditionsSchema } from "../conditions.ts";
-import { AgentStatusSchema } from "../session.ts";
-import { AgentCallSchema } from "../observation/reference.ts";
+import { AttemptSchema, AssessmentSchema } from "./assessment.ts";
 import { WorkInputRequestSchema } from "../model.ts";
 import { ResourceRefSchema, OrganizationSchema } from "../topic/ref.ts";
 import { guardAssessment } from "./assignment.ts";
@@ -22,11 +20,7 @@ import { AddressRefSchema } from "../address/model.ts";
 import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { inputPrinter } from "./printer.ts";
 import { EvidenceRefSchema } from "../handoff/model.ts";
-const BatchRefSchema = z.object({ apiVersion: z.literal(INPUT_TYPE.apiVersion), kind: z.literal(INPUT_TYPE.kind),
-  namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict();
 export const InputSpecSchema = z.object({ ...InputClassificationFields, inputKey: z.string().min(1).max(2000).optional(), source: AddressRefSchema.optional(), replyToMessageId: z.string().optional(), topicKey: z.string().min(1).max(500).optional(), topicId: z.string().min(1).optional(), origin: z.enum(INPUT_ORIGINS),
-  batch: z.object({ members: z.array(BatchRefSchema).min(1).max(10), oldestAt: z.iso.datetime() }).strict().optional(),
-  maintenance: MaintenancePlanSchema.optional(),
   handoff: z.object({ id: z.string().min(1), gate: ResourceRefSchema, sourceInput: EvidenceRefSchema, replyTo: AddressRefSchema }).strict().optional(),
   topicName: z.string().trim().min(1).max(80).optional(),
   originId: z.string().min(1), relation: z.enum(["sent", "received", "observed"]).optional(),
@@ -37,63 +31,59 @@ export const InputSpecSchema = z.object({ ...InputClassificationFields, inputKey
   observation: z.record(z.string(), z.unknown()).optional() }).strict();
 
 const ref = z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict();
-const attempt = z.object({ agent: AgentStatusSchema.optional(), completedBy: AgentCallSchema.optional(), executionId: z.string().optional(), deliveryId: z.string().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(), lastError: z.string().optional(), errorAt: z.iso.datetime().optional(), retryable: z.boolean().optional() }).strict();
-const assessment = attempt.extend({ result: z.object({ summary: z.string(), disposition: z.enum(["completed", "cancelled", "rejected"]).optional() }).strict().optional() });
 /**
- * @spec Internal request deduplication covers queued and running assessments, excluding recorded failures.
- * @why A failed assessment keeps its admission receipt without blocking a later independent maintenance Input.
+ * @spec Internal request deduplication covers queued, running and retryable assessments.
+ * @why An unfinished request retries in place; later maintenance starts a new Input after a terminal result.
  * @link docs/personal/topic.md#树内整理与维护优先级
  * @case tests/topic-review.test.ts
  */
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
-  type: INPUT_TYPE,
+  type: INPUT_TYPE, indexVersion: 2,
   schema: { spec: InputSpecSchema, status: z.object({
-    batch: BatchRefSchema.optional(), promotedAt: z.iso.datetime().optional(), preparationSettledAt: z.iso.datetime().optional(),
+    batchId: z.string().min(1).optional(), batchAt: z.iso.datetime().optional(),
     retention: InputPolicySchema.shape.retention.optional(), conditions: ConditionsSchema, topic: ResourceRefSchema.optional(), organization: OrganizationSchema.optional(),
-    route: attempt.extend({ nextAttemptAt: z.string().optional(), attempts: z.number().int().nonnegative().optional(),
+    route: AttemptSchema.extend({ nextAttemptAt: z.string().optional(), attempts: z.number().int().nonnegative().optional(),
       result: z.object({ topics: z.array(ref), reason: z.string() }).strict().optional() }).optional(),
-    assess: assessment.extend({ topic: ResourceRefSchema.optional() }).optional(),
-    handle: z.record(z.string(), assessment.extend({ resource: ref, assignedAt: z.string(), appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
-  }).strict() },
+    assess: AssessmentSchema.extend({ topic: ResourceRefSchema.optional() }).optional(),
+    handle: z.record(z.string(), AssessmentSchema.extend({ resource: ref, assignedAt: z.string(), appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
+  }).strict().refine(s => !!s.batchId === !!s.batchAt, { message: "batchId and batchAt must be set or cleared together" }) },
   validator: { create(current, context) {
-    validateBatch(current, context);
+    if (current.status.batchId) throw new Error("Assign Batch membership after Input creation");
     if (isInternalInput(current.spec) && current.spec.originId === "personal.topic") validateReviewRequest(current, context);
     if (isInternalInput(current.spec) && current.status.topic && !assessmentFinished(current.status.assess)
       && context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "internalPending", value: JSON.stringify([current.status.topic.uid, current.spec.origin]) } })
         .some(i => i.metadata.uid !== current.metadata.uid)) throw new ResourceVersionConflict("Topic already has this internal Input pending");
   }, update(previous, current, context) {
-    validateBatchUpdate(previous, current, context);
+    validateMembership(previous, current, context);
     if (assessmentFinished(previous.status.assess) && !equalResourceValue({ ...previous.status.assess, topic: undefined }, { ...current.status.assess, topic: undefined })) throw new Error(previous.status.assess?.lastError ? "Input assessment has failed; submit a new Input" : "Input assessment is already completed");
-    if (previous.status.assess?.lastError && !previous.status.assess.completedAt
+    if (previous.status.assess?.lastError && !previous.status.assess.retryable && !previous.status.assess.completedAt
       && Object.keys(current.status.handle ?? {}).some(uid => !previous.status.handle?.[uid]))
       throw new Error("Failed Input cannot be assigned to new Work");
     guardInputTopic(previous, current, context);
     if (previous.status.topic && previous.status.topic.uid !== current.status.topic?.uid
       && current.status.assess && !current.status.assess.executionId && !current.status.assess.completedAt && current.status.assess.topic)
       throw new Error("Moving pending Input requires invalidating processing assignment");
-    guardAssessment(previous, current, context);
+    if (!current.status.batchId) guardAssessment(previous, current, context);
     if (previous.status.assess?.executionId && current.status.assess?.executionId
       && previous.status.assess.executionId !== current.status.assess.executionId) throw new Error("Input is already admitted to a Chief execution");
     if (!equalResourceValue(previous.spec, current.spec) && !(channelPromotion(previous.spec, current.spec) && equalResourceValue(previous.status, current.status))) throw new Error("Input content is immutable except Channel promotion of the same platform message");
     if (previous.status.route?.completedAt && !equalResourceValue(previous.status.route.result, current.status.route?.result)) throw new Error("Input routing receipt is immutable");
-  } },
+  }, delete(current, context) { if (!memberCanEvict(current, context)) throw new Error("Finish or cancel Batch before deleting a member"); } },
   printer: inputPrinter,
   indexes: {
-    batchActive: r => (r.spec.batch || r.status.promotedAt) && r.status.assess?.executionId && !assessmentFinished(r.status.assess) && r.status.assess.topic ? [r.status.assess.topic.uid] : [],
-    batchOpen: r => r.spec.batch && !r.metadata.deletionTimestamp && !assessmentFinished(r.status.assess) && r.status.assess?.topic ? [r.status.assess.topic.uid] : [],
-    maintenanceOutcome: r => r.spec.maintenance && assessmentFinished(r.status.assess) && !r.status.preparationSettledAt && r.spec.originRef?.uid ? [r.spec.originRef.uid] : [],
+    batch: r => r.status.batchId ? [r.status.batchId] : [],
     obsoleteReply: r => obsoleteReplies(r.spec),
     message: r => { const identity = replyIdentity(r); return identity ? [identity.key] : []; },
     address: r => r.spec.source ? [r.spec.source.uid] : [],
     assessActive: r => r.status.topic && r.status.assess?.executionId && !assessmentFinished(r.status.assess) ? [r.status.topic.uid] : [],
     topic: r => r.status.topic ? [r.status.topic.uid] : [],
-    assignmentPending: r => !r.status.batch && !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.executionId && !assessmentFinished(r.status.assess) ? [r.status.topic.uid] : [],
-    unassigned: r => !r.status.batch && !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.topic && !r.status.assess.executionId && !assessmentFinished(r.status.assess) ? [r.status.topic.uid] : [],
-    unfiled: r => !r.metadata.deletionTimestamp && !isInternalInput(r.spec) && !r.spec.batch && !r.spec.topicKey && r.status.topic ? [r.status.topic.uid] : [],
+    assignmentPending: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.executionId && !assessmentFinished(r.status.assess) ? [r.status.topic.uid] : [],
+    unassigned: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.topic && !r.status.assess.executionId && !assessmentFinished(r.status.assess) ? [r.status.topic.uid] : [],
+    unfiled: r => !r.metadata.deletionTimestamp && !isInternalInput(r.spec) && !r.spec.topicKey && r.status.topic ? [r.status.topic.uid] : [],
     internalPending: r => !r.metadata.deletionTimestamp && isInternalInput(r.spec) && r.status.topic && !assessmentFinished(r.status.assess)
       ? [JSON.stringify([r.status.topic.uid, r.spec.origin])] : [],
-    assignedPending: r => !r.status.batch && !r.metadata.deletionTimestamp && r.status.assess?.topic && !assessmentFinished(r.status.assess) ? [r.status.assess.topic.uid] : [],
-    assessReadyAttention: r => !r.status.batch && !r.metadata.deletionTimestamp && r.status.assess?.topic
+    assignedPending: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.assess?.topic && !assessmentFinished(r.status.assess) ? [r.status.assess.topic.uid] : [],
+    assessReadyAttention: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.assess?.topic
       && !assessmentFinished(r.status.assess) && !r.status.assess.executionId
       ? [JSON.stringify([r.status.assess.topic.uid, inputQueue(r.spec)])] : [],
     routePending: r => r.metadata.deletionTimestamp || r.status.route?.completedAt ? [] : ["pending"],
@@ -103,22 +93,15 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
     handlePending: r => r.metadata.deletionTimestamp ? [] : Object.entries(r.status.handle ?? {}).filter(([, s]) => !s.completedAt).map(([uid]) => uid),
   },
   orderedIndexes: {
-    secretaryPending: r => !r.status.batch && !r.spec.batch && !r.status.promotedAt && !r.metadata.deletionTimestamp && r.status.assess?.topic
+    secretaryPending: r => r.spec.attention === InputAttention.Deferred && !isInternalInput(r.spec) && !r.spec.handoff && !r.status.batchId && !r.metadata.deletionTimestamp && r.status.assess?.topic
       && !assessmentFinished(r.status.assess) && !r.status.assess.executionId
       ? [{ value: r.status.assess.topic.uid, order: r.metadata.creationTimestamp }] : [],
-    promotedReady: r => r.status.promotedAt && !r.status.batch && !r.metadata.deletionTimestamp && r.status.assess?.topic
-      && !assessmentFinished(r.status.assess) && !r.status.assess.executionId
-      ? [{ value: r.status.assess.topic.uid, order: r.spec.batch?.oldestAt ?? r.metadata.creationTimestamp }] : [],
-    assessReadyArrival: r => !r.status.batch && !r.metadata.deletionTimestamp && r.status.assess?.topic
+    assessReadyArrival: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.assess?.topic
       && !assessmentFinished(r.status.assess) && !r.status.assess.executionId
       ? [{ value: JSON.stringify([r.status.assess.topic.uid, inputQueue(r.spec)]), order: r.metadata.creationTimestamp }] : [],
     topicActivity: r => !r.metadata.deletionTimestamp && r.status.topic
     ? [{ value: r.status.topic.uid, order: r.metadata.creationTimestamp }] : [] },
   retention: { collectOnRelease: true, expiresAt: inputHardExpiry, pressure: inputPressure,
-    releasedAt: r => r.status.retention ? inputExpiry(r.status, r.status.retention) : undefined, references: r => r.spec.batch?.members.map(m => m.uid) ?? [],
-    canEvict: (r, context) => {
-      if (!r.status.batch || Date.parse(inputHardExpiry(r)) <= Date.now()) return true;
-      const batch = context.get<InputSpec, InputStatus>(INPUT_TYPE, r.status.batch.uid);
-      return !batch || !!batch.metadata.deletionTimestamp || assessmentFinished(batch.status.assess);
-    } },
+    releasedAt: r => r.status.retention ? inputExpiry(r.status, r.status.retention) : undefined,
+    references: r => r.status.batchId ? [r.status.batchId] : [], canEvict: memberCanEvict },
 };

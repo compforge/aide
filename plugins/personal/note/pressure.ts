@@ -68,19 +68,3 @@ export async function dueNotePressure(resources: ResourceClient, root: TopicReso
   }
   return result;
 }
-
-/** @spec Persist retry delay before inference; acknowledge only the exact snapshots actually presented, never later arrivals. */
-export async function recordNotePressure(resources: ResourceClient, topics: readonly NotePressureTopic[], cooldownSeconds: number, completedExecutionId?: string) {
-  for (const entry of topics) await retryOnConflict(async () => {
-    const current = (await resources.page<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, { limit: 1, matchIndex: { name: "uid", value: entry.uid } })).items[0];
-    if (!current || current.metadata.deletionTimestamp || !current.status.notePressure) return;
-    const p = current.status.notePressure;
-    const reduced = completedExecutionId && (await resources.page(NOTE_TYPE, { limit: 1,
-      matchIndex: { name: "reducedSubject", value: JSON.stringify([entry.uid, completedExecutionId]) } })).items.length > 0;
-    const patch = completedExecutionId ? reduced
-      ? { attempts: 0, nextAt: new Date(Date.now() + cooldownSeconds * 1000).toISOString() }
-      : { reviewedVersion: entry.pressure.version }
-      : { attempts: Math.min(5, p.attempts + 1), nextAt: new Date(Date.now() + Math.max(cooldownSeconds, Math.min(900, cooldownSeconds * 2 ** p.attempts)) * 1000).toISOString() };
-    await resources.patchStatus(current, { notePressure: { ...p, ...patch } }, { resourceVersion: current.metadata.resourceVersion });
-  });
-}

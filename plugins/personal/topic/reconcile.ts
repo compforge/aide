@@ -11,9 +11,10 @@ import { collectTopic, releaseTopicAgent } from "./lifecycle.ts";
 import { assignmentWatch, resourceRef } from "../input/state.ts";
 import type { PluginContext, ReconcileContext, Watch } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource } from "./model.ts";
-import { expandInputs } from "../input/batch.ts";
+import { preparedIntake } from "./scheduling.ts";
+import { batchWatch } from "../batch/reconcile.ts";
 import { inputPreview } from "../input/prompt.ts";
-import { finalizeExecution, nextInputs, runInput, submitPending } from "../loop.ts";
+import { finalizeExecution, runInput, submitPending } from "../loop.ts";
 import { topicPolicy, type TopicPolicy } from "./config.ts";
 
 const instructions = `Handle the activated Input using only the tools available for its origin. Keep the current task separate from background evidence and earlier unfinished tasks.
@@ -61,11 +62,11 @@ function materialWatch(): Watch {
 export function registerTopics(context: PluginContext): void {
   registerTopicObservations(context);
   const policy = topicPolicy(context.instance.config.topic);
-  context.controllers.register({ resourceType: TOPIC_TYPE, maxConcurrency: 1, watches: [notePressureWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
+  context.controllers.register({ resourceType: TOPIC_TYPE, maxConcurrency: 1, watches: [batchWatch(true), notePressureWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
     reconcile: (execution, c: Readonly<TopicResource>) => reconcileTopic(context, execution, c) });
-  context.controllers.register({ name: "secretary", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [notePressureWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
+  context.controllers.register({ name: "secretary", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [batchWatch(), notePressureWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
     reconcile: (_execution, c: Readonly<TopicResource>) => reconcileSecretary(context, c, policy) });
-  context.controllers.register({ name: "agent", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [notePressureWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
+  context.controllers.register({ name: "agent", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [batchWatch(), notePressureWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
     reconcile: (execution, c: Readonly<TopicResource>) => reconcileChief(context, execution, c, policy) });
 }
 
@@ -97,17 +98,16 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     return { requeueAfterMs: 1 };
   }
   if (!isProcessingRoot(initial)) { await releaseTopicAgent(context, execution, initial); return; }
-  const inputs = await nextInputs(context.resources, initial, 10), input = inputs[0];
+  const { inputs, batch } = await preparedIntake(context.resources, initial, false, policy.trigger.intervalSeconds * 1000), input = inputs[0];
   if (!input) {
     const result = await collectTopic(context, initial, execution);
     return { ...result, requeueAfterMs: Math.min(result?.requeueAfterMs ?? Infinity, policy.trigger.intervalSeconds * 1000) };
   }
-  const expanded = await expandInputs(context.resources, inputs);
-  const prompt = `${instructions}\nActivation: ${JSON.stringify({ kind: "input", topicId: initial.spec.id,
-    inputId: input.metadata.name, inputIds: expanded.map(i => i.metadata.name), inputs: expanded.map(i => ({ inputId: i.metadata.name,
-      description: inputPreview(i, Math.floor((policy.contextChars - 3000) / expanded.length)) })), at: new Date().toISOString() })}\nRead full evidence with read_input. Assess original Inputs separately; batch envelopes are settled from member receipts.`;
+  const prompt = `${instructions}\nActivation: ${JSON.stringify({ kind: batch ? "batch" : "input", batchId: batch?.metadata.uid, topicId: initial.spec.id,
+    inputId: input.metadata.name, inputIds: inputs.map(i => i.metadata.name), inputs: inputs.map(i => ({ inputId: i.metadata.name,
+      description: inputPreview(i, Math.floor((policy.contextChars - 3000) / inputs.length)) })), at: new Date().toISOString() })}\nRead full evidence with read_input. ${batch ? "Complete this Batch with assess_batch; do not assess its members separately." : "Assess each Input separately."}`;
   await runInput(context, execution.withContext({ topicId: initial.spec.id, inputId: input.metadata.name,
     inputIds: inputs.map(i => i.metadata.name) }), initial, "chief", boundedPrompt(prompt, policy.contextChars),
-    input.metadata.name, inputs.map(i => i.metadata.name));
+    input.metadata.name, inputs.map(i => i.metadata.name), batch);
   return { requeueAfterMs: 1 };
 }

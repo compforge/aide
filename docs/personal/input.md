@@ -25,7 +25,6 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 | inputKey | 可选的 producer 事件身份字符串，用于跨入口去重 |
 | topicId、topicKey | TopicLocator 提供的精确 Topic ID 或稳定来源关联键 |
 | topicName | 来源提供的初始名称建议；不参与匹配，不覆盖既有 Topic 名称 |
-| batch / maintenance | 可选的批次成员引用 / 内部 review 的准备快照；不改变 origin |
 | attention | InputAttention 字符串枚举：immediate、normal、deferred，表达注意力调度需求 |
 
 字段的完整类型与必选性见 [InputSpec](../../plugins/personal/input/model.ts)。人物、地址、话题线索和调度分别回答不同问题；紧迫性、来源和 relation 都不自动授予执行权限或要求外发。
@@ -42,7 +41,7 @@ Chief 可从这些证据维护 Note 的相关人物；Topic 的近期人物继�
 
 ### Status
 
-`status.topic` 由 Route 首次绑定、Chief 在合法树范围内调整；`organization` 保存最近一次移动的依据。`route` 保留首次路由结果和重试进度；`assess` 保存唯一研判和 Chief 接纳；`handle` 按 Work UID 保存请求、应用与办理回执。status.batch 保存调度委托，promotedAt 保存提级事实，preparationSettledAt 保存 Secretary 已处理维护回执的水位。Input 不拥有独立会话或顶层 summary/recent。
+`status.topic` 由 Route 首次绑定、Chief 在合法树范围内调整；`organization` 保存最近一次移动的依据。`route` 保留首次路由结果和重试进度；`assess` 保存唯一研判和 Chief 接纳；`handle` 按 Work UID 保存请求、应用与办理回执。`status.batchId` 保存所属 Batch 的 UID，`status.batchAt` 保存加入当前批次的时间。Input 不拥有批次成员列表、独立会话或顶层 summary/recent。
 
 | 条件 | 含义与维护者 |
 | --- | --- |
@@ -54,7 +53,7 @@ Chief 可从这些证据维护 Note 的相关人物；Topic 的近期人物继�
 
 ## 处理组件的协作
 
-Input Reconcile 负责确定研判分派、修复孤立批次委托和解析保留策略；Secretary Reconcile 整理待办，两者都不启动 Agent；Route、Topic、Task、Routine 的 Reconciler 观察并处理属于自己的阶段。Agent 通过各角色工具提交判断。
+Input Reconcile 负责确定研判分派、投影 Batch 结果和解析保留策略；Secretary Reconcile 整理待办，两者都不启动 Agent；Route、Topic、Task、Routine 的 Reconciler 观察并处理属于自己的阶段。Agent 通过各角色工具提交判断。
 
 ### 内容、身份与调度
 
@@ -64,17 +63,9 @@ Immediate 在 Chief 空闲时启动处理，运行中通过 steer 加入；Norma
 
 ### Secretary 聚合与提级
 
-Secretary 像整理工作日程的秘书，持续把待处理事实编排成 Chief 可接纳的待办。所有未接纳 Input 都参与数量或年龄检查，默认达到 10 条或等待 600 秒即提级。Deferred 使用兼容配置 `topic.deferred`，其它 Input 使用 `topic.secretary`。Immediate 始终优先；其后是按原始等待时间排序的提级待办、Normal、triage、organize、review。内部维护因等待过久而提高顺序，仍通过 followUp，不获得 steer 或业务工具权限。
+[Secretary](secretary.md) 独立于 Chief 检查 Deferred 积压，按数量或最早等待时间创建独立 Batch。归组后成员固定，不再参与独立调度；后到输入留待下一批。Batch 作为 Normal 调度项进入 Chief，成员的 origin、attention 与授权依据保持原样。
 
-来源、originId、原 attention、材料 Topic、Address、sender、分类及授权上下文一致的业务 Input 可以形成 Batch。`spec.batch.members` 固定原始 Input 的 UID 和名称，`oldestAt` 保留最早创建时间；Batch 沿用来源，Deferred 的 Batch attention 为 Normal，Immediate 保持 Immediate。每个 Batch 至多 10 条，不嵌套；内部维护和显式 handoff 保持独立 Input，通过 `status.promotedAt` 提级。
-
-Batch 创建与原始成员的 `status.batch` 委托在同一事务提交。成员退出独立待办、分派和 Secretary 候选索引，原文、来源及各自 assess / handle 回执仍保留。执行边界展开成员并原子领取；Chief 逐条确认原始 Input，Batch 根据成员回执机械收尾，不接受模型直接确认。部分成功不会重放，缺失或过期不能算成功。未领取时成员归属或来源变化会取消旧 Batch、释放剩余成员再准备；丢失的 envelope 由 Input Reconcile 修复。
-
-Chief 运行中同时只接纳一个未完成的普通 Batch，Immediate 保留及时进入的通道。批次准备不占 Chief execution；上下文按共享字符预算展示原始证据，其余通过 read_input 读取。容量满而无法分配 envelope 时，Secretary 直接提级原始待办并记录原因，使业务仍能排空。原始创建时间在重启、重组和重试后不重置。
-
-Channel / Source 经绑定的入口提交 Input，稳定身份用于传输去重；接收回执只证明持久化成功。Source 先保存 Input，再推进观察水位。原始消息满足提交条件时，即使可选上下文读取失败仍可接收，具体证据与权限见对应接入文档。
-
-系统内置 Input 使用 `origin: aide:review / aide:triage / aide:organize`，分别表示静默回顾、材料分理和子节点组织；originId 为 personal.topic，originRef 指向需要处理的 Topic。text 说明目的、范围和要求，observation 保存触发证据；review 的 spec.maintenance 保存准备时的材料、结构与 Note 压力版本，供 Secretary 根据完成回执确认进度。它们不刷新业务活跃时间、不计入业务材料容量，也不增加外发授权。详见 [Topic 内置请求](topic.md#树内整理与维护优先级)。
+Normal、Immediate、内部维护和显式 handoff 保持独立 Input。Batch 的执行事实先保存在自身 status，Input Reconcile 再将终态投影到成员 assess；Chief 不逐条领取和确认成员。批次准备、并发接纳与保留规则见 [Batch](batch.md)。
 
 ### 路由、研判与办理
 
@@ -86,7 +77,7 @@ Channel / Source 经绑定的入口提交 Input，稳定身份用于传输去重
 
 route_input 在同一事务写入 route 结果和一条空 assess；assess_input 在同一事务完成研判并建立必要的 handle。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 只有一个当前材料 Topic 和一个研判负责人，保存一份研判；多个 Work 仍按各自 UID 独立确认。
 
-未完成可能是尚未接纳、运行或路由退避。接纳记录不等于完成；原生调用结束也不代替工具回执。Route 分类失败可以按输入退避重试，Work 可能已经产生副作用，需核对后继续；Chief 执行失败记录在 Topic，未确认完成的 Input.assess 记录 lastError/errorAt 后成为失败终态，保留接纳标记与异常；普通消息和 review 等内置 Input 遵循同一规则。失败记录退出 Chief 待办集合，不能由后续执行补成成功或重新接纳；如需再次交办，创建新的 Input。原 session 的恢复或重建不改变旧 Input 的失败结果。详细策略分别归 [Route](route.md)、[Topic](topic.md)、[Task](task.md) 与 [Routine](routine.md)。
+未完成可能是尚未接纳、运行或等待重试。Chief Reconciler 成功写入 Input／Batch 的终态结果即完成该项处理，Agent 调用结束不代替结果。执行失败、中断或结果写入失败时，释放执行占用并记录 lastError/errorAt、retryable；按角色 trigger.intervalSeconds 等待后重新处理原条目。已持久化的终态结果不被后续执行错误覆盖。周期性维护在上一条完成后新建 Input。Route 与 Work 的恢复仍遵循各自契约。
 
 ### 研判与办理
 
@@ -106,11 +97,11 @@ Input 由 Route 确定初始 Topic，Chief 可在树内调整当前归属。明�
 
 root Chief 直接通过 `assessReadyAttention` 按 status.assess.topic、来源优先级与 attention 分页查询未接纳待办，不遍历责任树。`status.topic` 仍供材料检索、归集和容量判断；`assessPending` 保留直属材料待办索引，`assignedPending` 查询分派给某个 Chief 的待办；两者均排除完成和失败终态。
 
-初始 prompt、steer 和 followUp 在发送前，用同一资源事务检查当前 Topic 的版本与 execution，并写入 `Input.status.assess.executionId`、`startedAt`。executionId 指向实际 Chief 执行，不是接收 Reconcile 的执行。竞争失败者重读后忽略已接纳的 Input；初始批次有冲突时整批回滚，下一轮重新选择剩余 Input 并生成 prompt。接纳之后仍可被其它 Topic 的 Chief 主动读取为材料，但不会再次自动提交。Deferred 在被选入已激活 Chief 的批次之前不占接纳标记，主动读取也不占标记；直接完成研判则阻止后续自动提交。
+独立 Input 的初始 prompt、steer 和 followUp 在发送前，用同一资源事务检查当前 Topic 的版本与 execution，并写入 `Input.status.assess.executionId`、`startedAt`。executionId 指向实际 Chief 执行，不是接收 Reconcile 的执行。竞争失败者重读后忽略已接纳的 Input；初始批次有冲突时整批回滚，下一轮重新选择剩余 Input 并生成 prompt。接纳之后仍可被其它 Topic 的 Chief 主动读取为材料，但不会再次自动提交。Deferred 归组前不占接纳标记，主动读取也不占标记；独立研判完成会阻止随后归组。归组后只由 Batch 接纳和完成，成员不能独立研判。
 
-明确未接收的 steer / followUp 可以撤回本次接纳；撤回前再次检查 executionId 与未完成状态。超时、断连和进程中断保留标记及异常，不自动重放。接纳与外部调用不是同一个事务，因此保证的是至多一次自动提交，不保证必达：标记成功后、发送前崩溃也需要核对。`assessExecution` 让执行结束或重启恢复按执行 ID 找到未完成 Input，归组后也能留下异常证据。
+明确未接收的 steer / followUp 可以撤回本次接纳。超时或断连仍保留当前执行占用和可重试错误，避免在同一执行内重复投递；执行结束或重启恢复时，按 `assessExecution` 找到未完成 Input 并释放占用。Batch 使用自己的 execution 索引执行同样恢复，固定成员不变。接纳与外部调用不是同一事务，允许未完成条目重试；完成依据是持久化终态结果。
 
-原生会话引用 `agent` 用于观测，去重只依赖 executionId。`completedBy` 记录成功确认完成的工具调用；失败终态不接受后续执行补写完成回执。Web / Lark 展示优先关联完成工具的 executionId，未记录完成工具时才回退到接纳 executionId。接纳、研判完成、Work 完成和 Output 送达是独立事实。版本边界见 [Resource](../plugin/resource.md#api-版本与演进)。
+原生会话引用 `agent` 用于观测，运行中去重依赖 executionId，跨执行完成去重依赖终态结果。`completedBy` 记录成功确认完成的工具调用；失败终态不接受后续执行补写完成回执。Web / Lark 展示优先关联完成工具的 executionId，未记录完成工具时才回退到接纳 executionId。接纳、研判完成、Work 完成和 Output 送达是独立事实。版本边界见 [Resource](../plugin/resource.md#api-版本与演进)。
 
 `tests/input-admission.test.ts` 覆盖跨 root 竞争、初始 prompt 与 followUp 竞争、批次重选、明确拒绝、未知结果保留、重启恢复和归组后按树查询材料。
 
@@ -188,4 +179,4 @@ GC 不仅在满额时工作：到期 Input 在周期检查中进入标准删除�
 | 仍达到 highWatermark，默认 95% | 有 errorAt 的记录，按错误时间从早到晚 |
 | 仍达到容量上限 100% | 其它 Input，按创建时间从早到晚 |
 
-活跃 Batch 的成员通过引用及 canEvict 保护免受压力回收，原始硬到期仍有效；Batch 终态后恢复普通保留策略。后两档其它记录允许丢弃尚未完成的处理记录；这是保存容量优先的保留策略，不表示业务已经完成。硬到期或压力丢弃不被入向保留引用无限延长，Source 只能在独立的去重窗口内依赖接收回执，窗口外不承诺永久去重。进入 deleting 后立即从待办索引移除，不再自动接纳；原生执行不会因记录回收而重放。实际删除仍由资源生命周期完成，只有物理移除才释放准入额度。通用机制见 [Resource GC](../plugin/resource.md#gc)。
+Batch 未终结或成员未回填时，由 canEvict 阻止删除与回收；Secretary 会取消过期的未接纳 Batch。Batch 终态且成员回填后恢复普通保留策略。后两档其它记录允许丢弃尚未完成的处理记录；这是保存容量优先的保留策略，不表示业务已经完成。硬到期或压力丢弃不被入向保留引用无限延长，Source 只能在独立的去重窗口内依赖接收回执，窗口外不承诺永久去重。进入 deleting 后立即从待办索引移除，不再自动接纳；原生执行不会因记录回收而重放。实际删除仍由资源生命周期完成，只有物理移除才释放准入额度。通用机制见 [Resource GC](../plugin/resource.md#gc)。

@@ -66,15 +66,18 @@ test("Normal arrivals follow up without repeating old prompt material or deletin
   assert.deepEqual(aide.topics.get("me")!.pendingInputIds, []);
 });
 
-test("Model end_turn leaves unreviewed material without automatically resending it", async t => {
+test("Model end_turn leaves unreviewed material retryable across restart", async t => {
   let calls = 0;
   const { aide, submit, root, options } = setup(t, { complete: false, async chief() { calls++; return "I handled it"; } });
   await aide.topics.ensure("me"); await aide.start(); await submit("unacknowledged"); await aide.settled();
   assert.equal(calls, 1); assert.equal(aide.topics.input("unacknowledged", "me")!.consumption.phase, undefined);
-  assert.ok(aide.topics.inputStore.get("unacknowledged")!.status.assess?.executionId);
+  const pending = aide.topics.inputStore.get("unacknowledged")!;
+  assert.equal(pending.status.assess?.executionId, undefined);
+  assert.equal(pending.status.assess?.retryable, true);
+  await aide.runtime.plugins.resourceClient("personal").patchStatus(pending, { assess: { ...pending.status.assess, errorAt: new Date(Date.now() - 61_000).toISOString() } });
   await aide.close();
   const restarted = new Aide(root, options, pino({ level: "silent" }));
-  try { await restarted.start(); await restarted.settled(); assert.equal(calls, 1); }
+  try { await restarted.start(); await restarted.settled(); assert.equal(calls, 2); }
   finally { await restarted.close(); }
 });
 
@@ -127,7 +130,7 @@ for (const kind of ["Topic", "Route"] as const) for (const failure of ["write fa
 
     await reconcile("next-call");
     assert.equal(calls, 2);
-    assert.equal(attemptOf(aide.topics.inputStore.get("first")!, resourceRef(resource))?.executionId, "attempted");
+    assert.equal(attemptOf(aide.topics.inputStore.get("first")!, resourceRef(resource))?.executionId, kind === "Topic" ? undefined : "attempted");
   });
 }
 

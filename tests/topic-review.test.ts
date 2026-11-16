@@ -60,7 +60,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
       if (fail) throw newHarnessError("harness_execution_failed", "provider disconnected");
       await hooks.beforeAssess?.();
       const admitted = aide.topics.inputStore.list().filter(i => i.status.assess?.executionId === executionId && !i.status.assess?.completedAt);
-      if (!hooks.skipAssessment) await assessAll(resources, read(), executionId, { inputIds: admitted.map(i => i.metadata.name), summary: "Nothing needs action" });
+      if (!hooks.skipAssessment) await assessAll(resources, read(), executionId, { inputIds: admitted.map(i => i.metadata.name), summary: "Nothing needs action" }, config.topic);
       await hooks.afterAssess?.();
       return { state: "success", value: { result: { stopReason: "end_turn" } } };
     } } } as unknown as ReconcileContext;
@@ -281,9 +281,9 @@ test("A later execution failure preserves already completed Input receipts", asy
   assert.match(f.read().status.lastError!, /failed after acknowledgement/);
 });
 
-// @case Failed internal requests retain their receipts without blocking independent future maintenance.
+// @case Unfinished maintenance retries its existing Input without consuming Deferred business.
 for (const mode of ["failure", "missing_receipt"] as const)
-test(`${mode} review preserves deferred business and permits the next maintenance request`, async t => {
+test(`${mode} review preserves deferred business and retries the same maintenance request`, async t => {
   const f = await fixture(t);
   await f.input("old-deferred"); await unabsorbedChild(f); await f.due();
   f.hooks.skipAssessment = mode === "missing_receipt";
@@ -296,24 +296,26 @@ test(`${mode} review preserves deferred business and permits the next maintenanc
   for (const name of ["assessPending", "assignedPending", "assessActive"]) {
     const pending = await f.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
       matchIndex: { name, value: f.read().metadata.uid }, limit: 10 });
-    assert.deepEqual(pending.items.map(i => i.metadata.name), name === "assessActive" ? [] : ["old-deferred"], `${name} excludes failed review and preserves business`);
+    assert.deepEqual(pending.items.map(i => i.metadata.name).sort(), name === "assessActive" ? [] : ["old-deferred", failed.metadata.name].sort(), `${name} retains retryable review and business`);
   }
   await f.input("new-deferred");
   await f.run();
   assert.equal(f.calls.length, 1, "failure still observes the review cooldown");
   f.hooks.skipAssessment = false;
+  await f.resources.patchStatus(failed, { assess: { ...failed.status.assess, errorAt: new Date(Date.now() - 61_000).toISOString() } });
   await f.due(); await f.run();
-  assert.equal(f.calls.length, 2, "a failed review cannot occupy the next maintenance slot");
+  assert.equal(f.calls.length, 2, "the unfinished review retries after its cooldown");
   const reviews = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review");
-  assert.equal(reviews.length, 2);
-  assert.ok(reviews.find(i => i.metadata.uid !== failed.metadata.uid)!.status.assess?.completedAt);
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0]!.metadata.uid, failed.metadata.uid);
+  assert.ok(reviews[0]!.status.assess?.completedAt);
   assert.equal(f.aide.topics.inputStore.get("new-deferred")!.status.assess?.executionId, undefined);
-  assert.deepEqual(f.aide.topics.inputStore.get(failed.metadata.name)!.status, failed.status);
+  assert.equal(f.aide.topics.inputStore.get(failed.metadata.name)!.status.assess?.lastError, undefined);
   assert.deepEqual(f.aide.topics.inputStore.get("old-deferred")!.status, old.status, "failed business Input is not replayed");
 });
 
 for (const origin of ["aide:review", "aide:triage", "aide:organize"] as const)
-test(`${origin} deduplicates queued and active requests but releases an interrupted request`, async t => {
+test(`${origin} deduplicates queued, active and retryable requests until completion`, async t => {
   const f = await fixture(t);
   const topic = f.read(), agenda = await maintenanceAgenda(f.resources, [topic]);
   const due = "2026-11-01T00:00:00.000Z", later = "2026-11-02T00:00:00.000Z";
@@ -330,9 +332,9 @@ test(`${origin} deduplicates queued and active requests but releases an interrup
   assert.match(failed.status.assess!.lastError!, /interrupted/);
   const pending = await f.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
     matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
-  assert.equal(pending.items.length, 0);
+  assert.equal(pending.items.length, 1);
   const next = await createReviewInput(f.context, f.read(), later, agenda, origin);
-  assert.notEqual(next.metadata.uid, first.metadata.uid);
+  assert.equal(next.metadata.uid, first.metadata.uid);
   assert.deepEqual(f.aide.topics.inputStore.get(first.metadata.name)!.status, failed.status);
 });
 
@@ -446,13 +448,14 @@ test("A persisted pressure request waits for business without duplicate maintena
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 1);
 });
 
-test("Failed capacity execution retains its claim while waiting business is processed next", async t => {
+test("Failed capacity execution waits to retry while new business is processed next", async t => {
   const f = await fixture(t);
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
   await f.run();
   await f.run({ maxUnfiledInput: 1 }, true);
   const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!;
-  assert.ok(request.status.assess?.executionId);
+  assert.equal(request.status.assess?.executionId, undefined);
+  assert.equal(request.status.assess?.retryable, true);
   await f.input("later", InputAttention.Normal);
   await f.run();
   assert.ok(f.aide.topics.inputStore.get("later")!.status.assess?.completedAt);
@@ -469,7 +472,7 @@ test("Chief activation keeps its character and admission budgets with large pend
   }
   await f.run({ contextChars: 4096 });
   assert.ok(f.calls[0]!.prompt.length <= 4096);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => !i.spec.batch && i.status.assess?.completedAt).length, 10);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.completedAt).length, 10);
 });
 
 async function unabsorbedChild(f: Awaited<ReturnType<typeof fixture>>) {
@@ -519,7 +522,7 @@ test("Unchanged summary maintenance skips inference without creating a one milli
 test("Completed absorption is progress even without a summary edit", async t => {
   const f = await fixture(t), child = await unabsorbedChild(f);
   await f.resources.patchStatus(f.read(), { idleReviewCount: 3 });
-  f.hooks.afterAssess = async () => {
+  f.hooks.beforeAssess = async () => {
     await f.resources.patchStatus(f.read(), { absorbed: { [child.metadata.uid]: understandingVersion(child) } });
   };
   await f.due(); await f.run();
@@ -527,11 +530,11 @@ test("Completed absorption is progress even without a summary edit", async t => 
   assert.equal(f.read().status.absorbAttempts, 0);
 });
 
-test("Material arriving during review remains eligible and the internal receipt cannot hide it", async t => {
+test("Material arriving after review completion remains eligible for a new Input", async t => {
   const f = await fixture(t), child = await unabsorbedChild(f);
   f.hooks.afterAssess = async () => { await patchSummary(f.resources, child, { summary: "Changed while Chief was running" }); };
   await f.due(); await f.run();
-  assert.equal(f.read().status.idleReviewCount, 0);
+  assert.equal(f.read().status.idleReviewCount, 1, "completion reflects only material seen before its transaction");
   f.hooks.afterAssess = undefined;
   await f.resources.patchStatus(f.read(), { nextAbsorbAt: past() });
   await f.run();
@@ -692,4 +695,16 @@ test("periodic review can revise child Notes without feedback while summary chan
   await patchSummary(f.resources, child, { summary: "New lasting understanding" });
   await f.run();
   assert.equal(f.calls.length, 2, "changed child summary still initiates understanding maintenance");
+});
+
+test("Business arriving after a maintenance receipt resets review backoff", async t => {
+  const f = await fixture(t); await unabsorbedChild(f);
+  await f.resources.patchStatus(f.read(), { idleReviewCount: 3 });
+  f.hooks.afterAssess = async () => {
+    assert.equal(f.read().status.idleReviewCount, 4);
+    await f.input("after-review", InputAttention.Normal);
+  };
+  await f.due(); await f.run();
+  assert.equal(f.read().status.idleReviewCount, 0);
+  assert.equal(f.aide.topics.inputStore.get("after-review")!.status.assess?.completedAt, undefined);
 });

@@ -57,10 +57,10 @@ test("Mounted Input recovers assignment independently; root pending lookup never
   const resources: ResourceClient = { ...f.resources,
     list: async () => { throw new Error("No unbounded lists"); },
     get: async () => { throw new Error("No Topic discovery"); },
-    async page(type, options) { assert.equal(type.kind, "Input"); queries++; return f.resources.page(type, options); },
+    async page(type, options) { assert.ok(["Input", "Batch"].includes(type.kind)); queries++; return f.resources.page(type, options); },
   };
   assert.deepEqual((await nextInputs(resources, f.read(f.root), 8)).map(i => i.metadata.name), ["mounted"]);
-  assert.ok(queries <= 7, "Only bounded Input queues, including promotion and active batches");
+  assert.ok(queries <= 8, "Only bounded Input queues, including promotion and active batches");
 });
 
 test("An ancestor move redistributes pending Inputs while preserving an old execution and its completion", async t => {
@@ -93,7 +93,8 @@ test("Transaction rejects a stale assignee even before the topology watcher upda
   await assignInput(f.context, f.aide.topics.inputStore.get("pending")!);
   await runInput(f.context, f.execution("current"), f.read(f.other), "chief", "current", fact.metadata.name);
   assert.equal(f.prompts.length, 1);
-  assert.equal(f.aide.topics.inputStore.get("pending")!.status.assess!.executionId, "current");
+  assert.equal(f.aide.topics.inputStore.get("pending")!.status.assess!.executionId, undefined);
+  assert.equal(f.aide.topics.inputStore.get("pending")!.status.assess!.retryable, true);
 });
 
 test("Missing assignment triggers only the Input watch and is repaired even when that notification is lost", async t => {
@@ -101,7 +102,7 @@ test("Missing assignment triggers only the Input watch and is repaired even when
   await reconcileAssignments(f.context, f.read(f.child));
   const registrations: Parameters<PluginContext["controllers"]["register"]>[0][] = [];
   registerInputs({ ...f.context, controllers: { register: c => { registrations.push(c); } } } as PluginContext);
-  assert.equal(registrations[0]!.watches!.length, 1);
+  assert.deepEqual(registrations[0]!.watches!.map(w => w.resourceType.kind), ["Input", "Batch"]);
   await invalidateAssignment(f.context, f.aide.topics.inputStore.get("deep")!);
   const after = f.aide.topics.inputStore.get("deep")!;
   assert.equal(after.status.assess!.topic, undefined);

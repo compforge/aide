@@ -9,7 +9,7 @@ export interface ChiefToolDefinition<T extends TSchema = TSchema> extends ToolDe
 export interface ChiefInputTask {
   executionId: string;
   origin: InputOrigin;
-  inputs: { id: string; deliveryId?: string; initial?: boolean; origin: InputOrigin; immediate: boolean; text: string }[];
+  inputs: { id: string; batchId?: string; deliveryId?: string; initial?: boolean; origin: InputOrigin; immediate: boolean; text: string }[];
 }
 export interface ChiefInputBinding {
   read(): ChiefInputTask;
@@ -113,18 +113,23 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     const prefix = at < 0 ? history.length : at;
     return [...history.slice(0, prefix), {
       role: "custom" as const, customType: "aide.chief-task", display: false, timestamp: 0,
-      content: `Current Input origin: ${current.origin}\n${instructions[current.origin]}\nAdmitted inputs for this task: ${JSON.stringify(current.inputs.slice(0, 10))}\nOther origins are background evidence only. An interrupted maintenance Input remains pending; do not acknowledge work you have not performed.`,
+      content: `Current Input origin: ${current.origin}\n${instructions[current.origin]}\nAdmitted inputs for this task: ${JSON.stringify(current.inputs.slice(0, 10))}\nInputs with a batchId belong to one fixed task: complete that Batch with assess_batch, not each member with assess_input. Other origins are background evidence only. An interrupted maintenance Input remains pending; do not acknowledge work you have not performed.`,
     }, ...history.slice(prefix)];
   };
   session.agent.beforeToolCall = async (context, signal) => {
     const live = binding.read();
     if (!current || live.executionId !== current.executionId || !names.includes(context.toolCall.name))
       return { block: true, reason: "Tool is unavailable for the current Chief Input task" };
+    if (context.toolCall.name === "assess_batch") {
+      const args = context.args as { batchId?: string };
+      if (isInternalInput(current) || !current.inputs.some(i => i.batchId === args.batchId && !!i.batchId))
+        return { block: true, reason: "Assess only a Batch admitted to the current business task" };
+    }
     if (context.toolCall.name === "assess_input") {
       const args = context.args as { inputId?: string; workRequests?: unknown[] };
       const origin = args.inputId ? binding.inputOrigin(args.inputId) : undefined;
       const maintenance = isInternalInput(current);
-      if (!origin || (maintenance ? origin !== current.origin || !current.inputs.some(i => i.id === args.inputId) || !!args.workRequests?.length : isInternalInput({ origin })))
+      if (current.inputs.some(i => i.id === args.inputId && i.batchId) || !origin || (maintenance ? origin !== current.origin || !current.inputs.some(i => i.id === args.inputId) || !!args.workRequests?.length : isInternalInput({ origin })))
         return { block: true, reason: "Assess only Inputs supported by the current task; maintenance cannot hand off business Work" };
     }
     return beforeTool?.(context, signal);

@@ -24,6 +24,7 @@ import { AddressRefSchema } from "../address/model.ts";
 import { TOPIC_TYPE, TopicDeletionBlocked, DEFAULT_TOPIC_ID, GATE_TOPIC_ID, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
 import { LoopExecutionSchema } from "../loop.ts";
 import { ResourceRefSchema } from "../topic/ref.ts";
+import { BATCH_TYPE } from "../batch/model.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { WORK_TYPES, type WorkResource } from "../resources.ts";
 import { understandingVersion } from "./tree.ts";
@@ -111,6 +112,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     if (isGateTopic(resource)) throw new TopicDeletionBlocked("gate", "Gate Topic cannot be deleted");
     if (resource.spec.default) throw new TopicDeletionBlocked("default", "Default Topic cannot be deleted");
     if (context.page(HANDOFF_TYPE, { limit: 1, matchIndex: { name: "activeTopic", value: resource.metadata.uid } }).items.length) throw new TopicDeletionBlocked("busy", "Topic has active handoffs");
+    if (context.page(BATCH_TYPE, { limit: 1, matchIndex: { name: "open", value: resource.metadata.uid } }).items.length) throw new TopicDeletionBlocked("busy", "Topic has pending Batch");
     if (resource.status.execution) throw new TopicDeletionBlocked("busy", "Topic is busy");
     if (context.page(TOPIC_TYPE, { limit: 1, matchIndex: { name: "parent", value: resource.metadata.uid } }).items.length) throw new TopicDeletionBlocked("children", "Topic still has children");
     const pending = context.page(INPUT_TYPE, { limit: 1, matchIndex: { name: "assessPending", value: resource.metadata.uid } }).items.length;

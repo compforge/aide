@@ -9,7 +9,16 @@ import { retryOnConflict, type ResourceValidationContext, type PluginContext } f
 import { TOPIC_TYPE, type TopicResource, type TopicStatus } from "./model.ts";
 import type { TopicReviewPolicy } from "./config.ts";
 import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
-import type { MaintenancePlan } from "./maintenance-plan.ts";
+import { reviewEvidence } from "./review-evidence.ts";
+import type { NotePressureTopic } from "../note/pressure.ts";
+
+/** Transient preparation used to build task text and atomically reserve cooldowns. */
+export interface ReviewPreparation {
+  materialVersion: string;
+  weaveRevision: number;
+  absorption: { uid: string; parentUid: string; version: string }[];
+  notePressure: NotePressureTopic[];
+}
 import { inputRef, resourceRef } from "../input/state.ts";
 import { digest } from "../chief-model.ts";
 
@@ -67,7 +76,7 @@ export function idleReviewSchedule(topic: Readonly<TopicResource>, config: Topic
  * @link docs/personal/topic.md#树内整理与维护优先级
  */
 export async function createReviewInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: "aide:review" | "aide:triage" | "aide:organize" = "aide:review", trigger: "idle" | "understanding" | "note_pressure" = "idle", preparation?: { plan: MaintenancePlan; instructions: string; cooldownSeconds: number }) {
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: "aide:review" | "aide:triage" | "aide:organize" = "aide:review", trigger: "idle" | "understanding" | "note_pressure" = "idle", preparation?: { plan: ReviewPreparation; instructions: string; cooldownSeconds: number }) {
   const target = resourceRef(topic);
   const maintenance = preparation?.plan, instructions = preparation?.instructions ?? "";
   const input = await retryOnConflict(async () => {
@@ -81,8 +90,10 @@ export async function createReviewInput(context: Pick<PluginContext, "resources"
     const spec: InputSpec = {
       origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
       text: `${origin === "aide:triage" ? "Triage this Topic's direct unfiled Inputs and Work. Inspect business Inputs as evidence only; file completed materials into coherent children, creating a child when needed. Never replay admitted or completed assessments." : origin === "aide:organize" ? "Organize this Topic's direct children. Establish meaningful intermediate groups or detach independent subtrees; do not split merely to satisfy a count." : "Review current understanding, unresolved questions and relevant Work; update summaries only when useful."} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; do not communicate or hand off business Work. Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
-      ...(maintenance ? { maintenance } : {}),
-      observation: { dueAt, triggeredAt: at, facts: agenda, trigger },
+      observation: { dueAt, triggeredAt: at, facts: agenda, trigger, ...(maintenance ? { review: {
+        materialVersion: maintenance.materialVersion, weaveRevision: maintenance.weaveRevision,
+        pressure: maintenance.notePressure.map(({ uid, pressure }) => ({ uid, version: pressure.version })),
+      } } : {}) },
     };
     const status: InputStatus = { topic: target,
       route: { completedAt: at, result: { topics: [target], reason: `Built-in ${origin} request for this Topic` } }, assess: {} };
@@ -123,6 +134,7 @@ export async function createReviewInput(context: Pick<PluginContext, "resources"
  * @case tests/note-knowledge.test.ts
  */
 export function validateReviewRequest(input: { spec: InputSpec; status: InputStatus }, context: ResourceValidationContext) {
+  reviewEvidence(input.spec);
   const topic = requireTopic(input.status.topic, context);
   if (input.spec.originRef?.uid !== topic.metadata.uid) throw new Error("Internal Input target changed");
   if (input.spec.origin === "aide:review" && (!isRootTopic(topic) || (!topicReview(topic.spec.review).enabled && !["understanding", "note_pressure"].includes(String(input.spec.observation?.trigger)))))

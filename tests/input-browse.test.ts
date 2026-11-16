@@ -270,3 +270,14 @@ test("Timeline and chat distinguish provider waits from Person delivery policy a
     assert.equal(topicView(aide, "waiting").blocks.find(b => b.id === `message:${reason}`)!.label, "投递失败");
   }
 });
+
+test("Retryable Chief errors remain pending in list and detail", t => {
+  const { aide, store } = setup(t);
+  store.submit("test", "retryable-assess", observation(1), { ...finished(),
+    assess: { lastError: "Result write failed", errorAt: new Date().toISOString(), retryable: true } });
+  assert.deepEqual(browseInputs(store, { state: "pending" }).items.map(i => i.input.metadata.name), ["retryable-assess"]);
+  assert.equal(browseInputs(store, { state: "failed" }).total, 0);
+  const detail = inputDetail(aide, "retryable-assess")!;
+  assert.ok(detail.timeline.some(e => e.stage === "assess" && e.status === "pending"));
+  assert.ok(!detail.timeline.some(e => e.stage === "assess" && e.status === "failed"));
+});

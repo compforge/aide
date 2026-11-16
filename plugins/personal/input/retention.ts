@@ -15,7 +15,7 @@ export function terminalAttempts(status: InputStatus): Attempt[] | undefined {
   return attempts as Attempt[];
 }
 const defaults = inputPolicy().retention;
-/** @spec Every Input expires no later than creationTimestamp + errorSeconds, including pending and retrying inputs. */
+/** @spec Creation-based expiry also covers pending/retrying Inputs; an open Batch must settle before its members can be removed. */
 export function inputHardExpiry(input: Pick<Input, "metadata" | "status">): string {
   return new Date(Date.parse(input.metadata.creationTimestamp) + (input.status.retention ?? defaults).errorSeconds * 1000).toISOString();
 }

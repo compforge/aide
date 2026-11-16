@@ -11,7 +11,6 @@ export const TopicPolicySchema = z.object({
   trigger: z.object({ intervalSeconds: seconds.default(60) }).strict().prefault({}),
   review: TopicReviewPolicySchema.prefault({}),
   deferred: z.object({ count: z.number().int().min(1).max(10).default(10), maxWaitSeconds: seconds.default(600) }).strict().prefault({}),
-  secretary: z.object({ count: z.number().int().min(1).max(10).default(10), maxWaitSeconds: seconds.default(600) }).strict().prefault({}),
   capacityCooldownSeconds: seconds.default(60),
   maxUnfiledInput: z.number().int().min(1).default(40),
   maxNotes: z.number().int().min(1).max(999).default(10),
