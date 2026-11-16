@@ -1,3 +1,4 @@
+import { batchForInput } from "../../plugins/personal/batch/view.ts";
 import { mailView } from "../../plugins/personal/stream/writer.ts";
 import { outputWaitLabels } from "../../plugins/personal/output/view.ts";
 import { inputSessions } from "../../plugins/personal/observation/job.ts";
@@ -67,7 +68,7 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
     if (value.startedAt) append("started", `${label}开始（最近记录）`, value.startedAt, undefined, "started");
     if (value.completedAt) append("completed", `${label}${(value as Assessment).result?.disposition === "cancelled" ? "取消" : (value as Assessment).result?.disposition === "rejected" ? "拒绝" : "完成"}`,
       value.completedAt, (value as Assessment).result?.summary, (value as Assessment).result?.disposition ?? "completed");
-    const failed = stage === "assess" && !!value.lastError && !value.completedAt;
+    const failed = stage === "assess" && !!value.lastError && !value.retryable && !value.completedAt;
     if (value.lastError) append("error", `${label}${failed ? "失败" : "异常记录"}`, undefined, value.lastError, failed ? "failed" : value.completedAt ? "recorded" : "attention");
     if (!value.completedAt && !failed) append("pending", `${label}尚未确认完成`, undefined, undefined, "pending");
   };
@@ -79,7 +80,14 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
       status: `${route.result.topics.length} 个主题` });
     if (!route.completedAt && route.nextAttemptAt) timeline.push({ id: "route:retry", stage: "route", title: "路由等待重试", text: `计划重试时间：${route.nextAttemptAt}`, status: "retrying" });
   } else timeline.push({ id: "route:pending", stage: "route", title: "等待路由", status: "pending" });
-  if (input.status.assess) attempt("assess", "assess", input.status.assess);
+  const batch = batchForInput(aide.topics.resources, input);
+  if (batch) {
+    timeline.push({ id: `batch:${batch.metadata.uid}`, stage: "assess", at: input.status.batchAt,
+      title: "归入 Batch", text: batch.metadata.name, status: batch.status.phase });
+    timeline.push({ id: `batch:${batch.metadata.uid}:result`, stage: "assess", at: batch.status.assess?.completedAt ?? batch.status.assess?.errorAt ?? batch.status.assess?.startedAt,
+      title: "Batch 处理状态", text: batch.status.assess?.result?.summary ?? batch.status.assess?.lastError, status: batch.status.phase,
+      executionId: batch.status.assess?.executionId });
+  } else if (input.status.assess) attempt("assess", "assess", input.status.assess);
   for (const [key, value] of Object.entries(input.status.handle ?? {})) attempt(`handle:${key}`, "handle", value, value);
   const outputs = aide.topics.outputStore.list({ inputId: id });
   for (const output of outputs) {
@@ -94,7 +102,7 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
     if (output.status.lastError) timeline.push({ id: `output:${output.metadata.name}:error`, stage: "output", title: "Output 投递异常记录", text: output.status.lastError, status: output.status.phase, consumer: target });
   }
   timeline.sort((a, b) => a.at && b.at ? a.at.localeCompare(b.at) : a.at ? -1 : b.at ? 1 : 0);
-  return { input, sessions: inputSessions(input, outputs), label: definition(aide, input.spec), timeline, outputCount: outputs.length,
+  return { input, batch, sessions: inputSessions(input, outputs), label: definition(aide, input.spec), timeline, outputCount: outputs.length,
     routeAttempts: route?.attempts ?? 0,
     outputs: outputs.map(o => ({ id: o.metadata.name, target: o.spec.target, status: { ...o.status, delivery: o.status.delivery && { ...o.status.delivery, receivers: o.status.delivery.receivers.toJSON() } } })) };
 }

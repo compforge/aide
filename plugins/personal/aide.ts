@@ -1,4 +1,8 @@
-import { expandInputs } from "./input/batch.ts";
+import { batchForInput } from "./batch/view.ts";
+import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "./batch/model.ts";
+import { batchById } from "./batch/members.ts";
+import { expandBatch } from "./batch/admission.ts";
+import { assessBatch, type AssessBatch } from "./batch/assess.ts";
 import { isGateInput } from "./gate/input.ts";
 import { ensureGateTopic } from "./gate/topic.ts";
 import { isGateTopic, isRootTopic, isProcessingRoot } from "./topic/boundary.ts";
@@ -46,7 +50,7 @@ import type { TopicSpec, TopicStatus } from "./topic/model.ts";
 import { inputPrinter } from "./input/printer.ts";
 import type { Logger } from "pino";
 import type { Resource, ResourceType } from "@compforge/aide-plugin";
-import { InputAttention, inputAttention, isInternalInput, type InputReceipt, type InputSpec, type InputStatus } from "./input/model.ts";
+import { InputAttention, inputAttention, isInternalInput, assessmentFinished, type InputReceipt, type InputSpec, type InputStatus } from "./input/model.ts";
 import type { Manager } from "../../src/host/plugin/manager.ts";
 import { ApplicationRuntime } from "../../src/host/runtime/index.ts";
 import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
@@ -116,7 +120,7 @@ export class Personal {
       };
       const assess = async (input: AssessInput, toolCallId: string) => {
         const c = active();
-        const result = await assessInput(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, toolCallId);
+        const result = await assessInput(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, toolCallId, topicPolicy(this.options.topic));
         this.log.info({ topicId, inputId: input.inputId, workUids: input.workRequests?.map(r => r.workUid) ?? [] }, "Chief assessment completed");
         return result;
       };
@@ -132,15 +136,23 @@ export class Personal {
           topicPolicy(this.options.topic).maxChars);
         this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
         return result;
-      }, notes => this.mailSender.cite(active().status.execution!.id, notes));
+      }, notes => this.mailSender.cite(active().status.execution!.id, notes), async (args: AssessBatch, toolCallId: string) => {
+        const c = active();
+        const result = await assessBatch(this.plugins.resourceClient("personal"), c, c.status.execution!.id, args, toolCallId);
+        this.log.info({ topicId, batchId: args.batchId, executionId: c.status.execution!.id }, "Chief Batch assessed");
+        return result;
+      });
       return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, inputBinding: {
         read: () => {
           const c = active();
           return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "aide:review",
-            inputs: this.topics.inputStore.query("assessExecution", c.status.execution!.id).filter(i => !i.spec.batch).map(i => ({
+            inputs: [...this.topics.inputStore.query("assessExecution", c.status.execution!.id).map(i => ({
               id: i.metadata.name, deliveryId: i.status.assess?.deliveryId ?? `input:${i.metadata.uid}`, initial: !i.status.assess?.deliveryId && i.status.assess?.startedAt === c.status.execution!.startedAt,
               origin: i.spec.origin, immediate: immediate(i.spec), text: inputPreview(i, Math.floor(topicPolicy(this.options.topic).contextChars / 8)),
-            })) };
+            })), ...this.store.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "execution", value: c.status.execution!.id } }).flatMap(batch =>
+              this.topics.inputStore.query("batch", batch.metadata.uid).map(i => ({ id: i.metadata.name, batchId: batch.metadata.uid,
+                deliveryId: batch.status.assess?.deliveryId ?? `batch:${batch.metadata.uid}`, initial: !batch.status.assess?.deliveryId && batch.status.assess?.startedAt === c.status.execution!.startedAt,
+                origin: i.spec.origin, immediate: false, text: inputPreview(i, Math.floor(topicPolicy(this.options.topic).contextChars / 8)) }))) ] };
         },
         inputOrigin: id => this.topics.inputStore.get(id)?.spec.origin,
         changed: (task, tools) => this.log.info({ topicId, executionId: task.executionId, inputOrigin: task.origin,
@@ -214,13 +226,13 @@ export class Personal {
     const members = c ? new Set(this.topics.scope(c.metadata.uid).map(t => t.metadata.uid)) : undefined;
     const status = (i: Readonly<Resource<InputSpec, InputStatus>>) => c ? i.status.assess : attemptOf(i, owner);
     if (!id) return { ...(c ? { context: { version: contentVersion(c), summary: summaryText(this.store.resources, c), summaryUid: summaryReference(this.store.resources, c)?.uid, summaryNote: summaryReference(this.store.resources, c), recent: notes(this.store.resources, c.metadata.uid, "subject"),
-      maxChars: topicPolicy(this.options.topic).maxChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, attention: inputAttention(i.spec), status: status(i) })),
+      maxChars: topicPolicy(this.options.topic).maxChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, batchId: i.status.batchId, attention: inputAttention(i.spec), status: status(i) })),
       nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
     const input = this.topics.inputStore.get(id);
     if (!input || (!inputs.some(i => i.metadata.name === id) && !(history && c &&
       (belongsToTopic(input, owner) || belongsToTopic(input, owner, members))))) throw new Error("Input is not attached to this resource");
     const description = inputPrinter.describe(input);
-    return { inputId: id, attention: inputAttention(input.spec), status: status(input), text: description.slice(offset, offset + 8000), nextOffset: offset + 8000 < description.length ? offset + 8000 : null };
+    return { inputId: id, batch: batchForInput(this.store.resources, input), attention: inputAttention(input.spec), status: status(input), text: description.slice(offset, offset + 8000), nextOffset: offset + 8000 < description.length ? offset + 8000 : null };
   }
 
   /** @spec Only the owning resource's intake controller may steer its live agent; admission is durable before dispatch. */
@@ -279,7 +291,7 @@ export class Personal {
 
   /** @spec Only Topic Reconcile chooses when/how to notify Chief. This Host bridge dispatches the requested verb and atomically admits each Input once across all Topics. */
   async submitTopic(scope: ExecutionScope, raw: unknown) {
-    const args = z.object({ inputId: z.string().min(1), inputIds: z.array(z.string().min(1)).min(1).max(10).optional(), operation: z.enum(["steer", "followUp"]) }).strict().parse(raw);
+    const args = z.object({ inputId: z.string().min(1), inputIds: z.array(z.string().min(1)).min(1).max(10).optional(), batchId: z.string().min(1).optional(), operation: z.enum(["steer", "followUp"]) }).strict().parse(raw);
     const ref = scope.resourceRef;
     if (scope.pluginInstanceId !== "personal" || !ref?.uid || ref.kind !== "Topic" || scope.controllerName)
       throw new Error("submit_topic requires the owning Topic intake Reconcile");
@@ -291,22 +303,27 @@ export class Personal {
       if (!invocation) return { accepted: false, reason: "not_running" };
       const ids = [...new Set(args.inputIds ?? [args.inputId])];
       if (ids[0] !== args.inputId) throw new Error("Chief batch inputId must identify its first Input");
+      const scheduled = args.batchId ? await batchById(resources, args.batchId) : undefined;
+      if (args.batchId && (!scheduled || scheduled.spec.topic.uid !== topic.metadata.uid || scheduled.status.phase !== "ready")) return { accepted: false };
       const inputs = ids.map(id => this.topics.inputStore.get(id));
-      if (inputs.some(i => !i || !eligible(i, topic))) return { accepted: false };
-      const batch = await expandInputs(resources, inputs as NonNullable<typeof inputs[number]>[]);
+      if (!scheduled && inputs.some(i => !i || !eligible(i, topic))) return { accepted: false };
+      const batch = scheduled ? await expandBatch(resources, scheduled) : inputs as NonNullable<typeof inputs[number]>[];
+      if (scheduled && (batch.length !== ids.length || batch.some(i => !ids.includes(i.metadata.name)))) return { accepted: false, reason: "admission_conflict" };
       const input = batch[0]!;
       if (batch.some(i => isInternalInput(i.spec)) && batch.length !== 1) throw new Error("Maintenance admits exactly one Input");
-      if (args.operation === "steer" && batch.some(i => !immediate(i.spec))) throw new Error("Only Immediate Inputs may steer Chief");
-      const deliveryId = `input:${input.metadata.uid}`;
+      if (args.operation === "steer" && (scheduled || batch.some(i => !immediate(i.spec)))) throw new Error("Only Immediate Inputs may steer Chief");
+      const deliveryId = scheduled ? `batch:${scheduled.metadata.uid}` : `input:${input.metadata.uid}`;
       const startedAt = new Date().toISOString();
       try {
         await commitStatus(resources, [
           { operation: "patchStatus", resource: topic, patch: {
             execution: { ...topic.status.execution, admissionRevision: (topic.status.execution.admissionRevision ?? 0) + 1 },
           } },
-          ...batch.map(i => ({ operation: "patchStatus" as const, resource: i, patch: { assess: { ...i.status.assess,
-            executionId: topic.status.execution!.id, startedAt, deliveryId, agent: topic.status.agent,
+          ...(scheduled ? [] : batch).map(i => ({ operation: "patchStatus" as const, resource: i, patch: { assess: { ...i.status.assess,
+            executionId: topic.status.execution!.id, startedAt, deliveryId, agent: topic.status.agent, lastError: undefined, errorAt: undefined, retryable: undefined,
           } } })),
+          ...(scheduled ? [{ operation: "patchStatus" as const, resource: scheduled,
+            patch: { phase: "running", assess: { executionId: topic.status.execution!.id, startedAt, deliveryId, agent: topic.status.agent } } }] : []),
         ]);
       } catch (error) { if (/processing assignment changed/.test(String(error))) {
         const latest = args.inputId ? this.topics.inputStore.get(args.inputId) : undefined;
@@ -316,7 +333,7 @@ export class Personal {
       this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid, inputIds: batch.map(i => i.metadata.name),
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
       const budget = topicPolicy(this.options.topic).contextChars;
-      const prompt = `New Inputs:\n${JSON.stringify({ inputId: args.inputId, inputIds: ids })}\n${batch.map(i => inputPreview(i, Math.floor((budget - 2000) / batch.length))).join("\n\n")}\nAssess each original Input separately with the tools for its origin; leave unfinished prior tasks pending.`;
+      const prompt = `New Inputs:\n${JSON.stringify({ batchId: scheduled?.metadata.uid, inputId: args.inputId, inputIds: ids })}\n${batch.map(i => inputPreview(i, Math.floor((budget - 2000) / batch.length))).join("\n\n")}\n${scheduled ? "Complete this Batch with assess_batch; do not assess member Inputs individually." : "Assess each original Input separately."} Leave unfinished prior tasks pending.`;
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
           operation: args.operation, invocationId: invocation.invocationId,
@@ -325,8 +342,15 @@ export class Personal {
         if (result.state !== "success") throw new Error(`Chief notification failed: ${result.state}`);
         const accepted = result.value.outcome === "accepted";
         if (!accepted) {
-          for (const i of batch) await changeAssessment(resources, i, topic.status.execution.id,
-            { executionId: undefined, deliveryId: undefined, agent: undefined, startedAt: undefined, lastError: undefined, errorAt: undefined, retryable: undefined });
+          if (scheduled) {
+            const currentBatch = await batchById(resources, scheduled.metadata.uid);
+            if (currentBatch?.status.phase === "running" && currentBatch.status.assess?.executionId === topic.status.execution.id)
+              await commitStatus(resources, [{ operation: "patchStatus", resource: currentBatch, patch: {
+                phase: "ready", assess: undefined } }]);
+          } else {
+            for (const input of batch) await changeAssessment(resources, input, topic.status.execution.id,
+              { executionId: undefined, deliveryId: undefined, agent: undefined, startedAt: undefined, lastError: undefined, errorAt: undefined, retryable: undefined });
+          }
           // Queue the owning agent Reconcile after the current execution; retrying intake on this bookkeeping would hot-loop unsupported verbs.
           void this.plugins.enqueue({ pluginInstanceId: "personal", namespace: ref.namespace, resourceApiVersion: ref.apiVersion,
             resourceKind: ref.kind, resourceId: ref.name, controllerName: "agent" })
@@ -335,7 +359,11 @@ export class Personal {
         this.log.info({ topicUid: ref.uid, inputId: args.inputId, operation: args.operation, accepted }, "Chief notification dispatched by Reconcile");
         return { accepted, reason: result.value.reason };
       } catch (error) {
-        for (const i of batch) await changeAssessment(resources, i, topic.status.execution.id, { lastError: String(error), errorAt: new Date().toISOString() });
+        for (const i of scheduled ? [] : batch) await changeAssessment(resources, i, topic.status.execution.id, { lastError: String(error), errorAt: new Date().toISOString(), retryable: true });
+        if (scheduled) {
+          const currentBatch = await batchById(resources, scheduled.metadata.uid);
+          if (currentBatch?.status.phase === "running" && currentBatch.status.assess?.executionId === topic.status.execution.id) await commitStatus(resources, [{ operation: "patchStatus", resource: currentBatch, patch: { assess: { ...currentBatch.status.assess, errorAt: new Date().toISOString(), lastError: String(error), retryable: true } } }]);
+        }
         await updateTopic(resources, topic, () => ({ lastError: String(error) }));
         throw error;
       }

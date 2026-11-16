@@ -1,3 +1,6 @@
+import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
+import { assessBatch } from "../plugins/personal/batch/assess.ts";
+import { reconcileBatchMember } from "../plugins/personal/input/assignment.ts";
 import { isRootTopic } from "../plugins/personal/topic/boundary.ts";
 import { composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { InputAttention, inputAttention } from "../plugins/personal/input/model.ts";
@@ -123,6 +126,12 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
               composeMail(new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])), topicId, randomUUID(), mailDraft(c, { topicId, text: result }, { executionId: run.id, target: address, inputIds: ids, inputUids: Object.fromEntries(ids.map(id => [id, new InputStore(home).get(id)!.metadata.uid])) }));
             }
             if (run && ids.length && agent.complete !== false) await assessAll(resources, c, run.id, { inputIds: ids, summary: String(result) || "Handled silently" });
+            if (run && agent.complete !== false) for (const batch of await resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "execution", value: run.id } })) {
+              await assessBatch(resources, c, run.id, { batchId: batch.metadata.uid, summary: String(result) || "Handled silently" });
+              // This external fake writes through a separate client without Host watch callbacks.
+              for (const input of new InputStore(home).query("batch", batch.metadata.uid))
+                await reconcileBatchMember({ resources, logger: { debug() {}, info() {}, warn() {}, error() {} } }, input);
+            }
           }
           sink({ kind: "agent_thought", invocationId: input.invocationId,
             payload: { messageId: randomUUID(), content: [{ type: "text", text: "我先检查当前工作。" }] } });

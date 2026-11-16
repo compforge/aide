@@ -269,7 +269,7 @@ test("prune and retire enforce versions, active ownership and summary lifetime w
 
 test("Note pressure counts direct active Notes and includes oversized summaries", async t => {
   const f = await setup(t);
-  const { refreshNotePressure, dueNotePressure, recordNotePressure } = await import("../plugins/personal/note/pressure.ts");
+  const { refreshNotePressure, dueNotePressure } = await import("../plugins/personal/note/pressure.ts");
   const { retireNote } = await import("../plugins/personal/note/service.ts");
   const { writeSummary } = await import("../plugins/personal/note/summary.ts");
   await f.resources.replace(f.read(), { ...f.read().spec, maxNotes: 1 }, f.read().status);
@@ -280,7 +280,7 @@ test("Note pressure counts direct active Notes and includes oversized summaries"
   await refreshNotePressure(f.context, f.read());
   let agenda = await dueNotePressure(f.resources, f.read());
   assert.equal(agenda.length, 1); assert.equal(agenda[0]!.pressure.count, 2);
-  await recordNotePressure(f.resources, agenda, 60, "live");
+  await completePressure(f, agenda, "live");
   assert.equal((await dueNotePressure(f.resources, f.read())).length, 0, "unchanged no-progress work must not loop");
   await retireNote(f.resources, f.read(), { ...second, reason: "redundant" });
   await refreshNotePressure(f.context, f.read());
@@ -289,14 +289,14 @@ test("Note pressure counts direct active Notes and includes oversized summaries"
   await refreshNotePressure(f.context, f.read());
   agenda = await dueNotePressure(f.resources, f.read());
   assert.equal(agenda[0]!.pressure.count, 1); assert.equal(agenda[0]!.pressure.oversized.length, 1);
-  await recordNotePressure(f.resources, agenda, 60);
+  await completePressure(f, agenda);
   assert.equal((await dueNotePressure(f.resources, f.read())).length, 0, "failed or interrupted rounds respect retry delay");
   assert.equal((await dueNotePressure(f.resources, f.read(), Date.now() + 61_000)).length, 1);
 });
 
 test("reducing an older Note outside the count sample continues consolidation without scanning history", async t => {
   const f = await setup(t);
-  const { refreshNotePressure, dueNotePressure, recordNotePressure } = await import("../plugins/personal/note/pressure.ts");
+  const { refreshNotePressure, dueNotePressure } = await import("../plugins/personal/note/pressure.ts");
   const { retireNote } = await import("../plugins/personal/note/service.ts");
   await f.resources.replace(f.read(), { ...f.read().spec, maxNotes: 1 }, f.read().status);
   const older = await f.note({ text: "older redundant matter" }, "older");
@@ -311,9 +311,9 @@ test("reducing an older Note outside the count sample continues consolidation wi
   await retireNote(f.resources, f.read(), { noteId: older.noteId, version: oldVersion, reason: "no independent value" });
   await refreshNotePressure(f.context, f.read());
   assert.equal(f.read().status.notePressure!.version, agenda[0]!.pressure.version, "threshold sample stayed unchanged");
-  await recordNotePressure(f.resources, agenda, 60, "live");
+  await completePressure(f, agenda, "live");
   assert.equal((await dueNotePressure(f.resources, f.read(), Date.now() + 61_000)).length, 1, "real reduction schedules another bounded pass");
-  await recordNotePressure(f.resources, agenda, 60, "no-reduction-execution");
+  await completePressure(f, agenda, "no-reduction-execution");
   assert.equal((await dueNotePressure(f.resources, f.read(), Date.now() + 61_000)).length, 0, "no reduction stops unchanged work");
 });
 
@@ -335,3 +335,13 @@ test("stored per-Note review metadata is discarded without changing content or a
   assert.equal(await reconcileNote(f.context, before), undefined);
   assert.deepEqual(await f.get(n.noteId), before);
 });
+
+/** Exercise the production creation/completion transactions, including root pressure updates. */
+async function completePressure(f: Awaited<ReturnType<typeof setup>>, pressure: import("../plugins/personal/note/pressure.ts").NotePressureTopic[], executionId?: string) {
+  const { assessInput } = await import("../plugins/personal/topic/assess.ts");
+  if (executionId) await f.resources.patchStatus(f.read(), { execution: { id: executionId, startedAt: new Date().toISOString() } });
+  const review = await createReviewInput(f.context, f.read(), new Date().toISOString(),
+    await maintenanceAgenda(f.resources, []), "aide:review", "note_pressure", { cooldownSeconds: 60, instructions: "Review pressure",
+      plan: { materialVersion: "pressure-test", weaveRevision: 0, absorption: [], notePressure: pressure } });
+  if (executionId) await assessInput(f.resources, f.read(), executionId, { inputId: review.metadata.name, summary: "Pressure reviewed" });
+}

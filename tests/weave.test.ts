@@ -284,7 +284,7 @@ test("Root Chief admits urgent and observed business as separate bounded tasks w
 });
 
 
-test("Unfinished synthesis retains failed review Inputs and backs off without refreshing business activity", async t => {
+test("Unfinished synthesis retries one review Input without refreshing business activity", async t => {
   const f = fixture(t); await f.initialize();
   const a = await ensureSourceTopic(f.resources, "retry:a", "A"), b = await ensureSourceTopic(f.resources, "retry:b", "B");
   await f.group(a, b);
@@ -303,12 +303,14 @@ test("Unfinished synthesis retains failed review Inputs and backs off without re
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 1);
   assert.equal(f.aide.topics.resource(root.id)!.status.absorbAttempts, 1);
-  await f.resources.patchStatus(f.aide.topics.resource(root.id)!, { nextAbsorbAt: "2000-01-01T00:00:00.000Z" });
+  const pending = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+  await f.resources.patchStatus(pending, { assess: { ...pending.status.assess, errorAt: "2000-01-01T00:00:00.000Z" } });
   await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 2);
-  assert.equal(f.aide.topics.resource(root.id)!.status.absorbAttempts, 2);
-  assert.ok(Date.parse(f.aide.topics.resource(root.id)!.status.nextAbsorbAt!) > Date.now() + 110_000);
+  assert.equal(f.aide.topics.resource(root.id)!.status.absorbAttempts, 1);
+  assert.equal(f.aide.topics.inputStore.list().length, 1);
+  assert.equal(f.aide.topics.inputStore.list()[0]!.metadata.uid, pending.metadata.uid);
   assert.ok(f.aide.topics.inputStore.list().every(i => i.spec.origin === "aide:review"));
 });
 

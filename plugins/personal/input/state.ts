@@ -54,7 +54,7 @@ export function assignmentWatch(key: "assess" | "handle", kind: string): Watch {
     // Admission bookkeeping, including explicit rejection, must not hot-loop intake. The
     // dispatching Reconcile queues a retry after its active Chief finishes.
     if (previous && previous.spec.origin === input.spec.origin && previous.spec.attention === input.spec.attention
-      && previous.status.promotedAt === input.status.promotedAt && previous.status.assess?.lastError === input.status.assess?.lastError
+      && previous.status.assess?.lastError === input.status.assess?.lastError
       && previous.status.assess?.completedAt === input.status.assess?.completedAt
       && previous.status.assess?.topic?.uid === input.status.assess?.topic?.uid) return [];
     return [...new Map([input.status.assess?.topic, previous?.status.assess?.topic].filter(t => !!t)

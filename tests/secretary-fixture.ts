@@ -1,3 +1,6 @@
+import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
+import { assessBatch } from "../plugins/personal/batch/assess.ts";
+import { reconcileBatchMember } from "../plugins/personal/input/assignment.ts";
 import { type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,7 +19,7 @@ export async function secretaryFixture(t: TestContext) {
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
   await aide.topics.ensure("root");
   const resources = aide.runtime.plugins.resourceClient("personal");
-  const policy = topicPolicy({ deferred: { count: 2, maxWaitSeconds: 600 }, secretary: { count: 2, maxWaitSeconds: 600 } });
+  const policy = topicPolicy({ deferred: { count: 2, maxWaitSeconds: 600 } });
   const context = { resources, instance: { config: { topic: policy } }, logger: { info() {}, warn() {}, error() {} } } as unknown as PluginContext;
   const root = () => aide.topics.resource("root")!;
   const input = async (id: string, attention = InputAttention.Deferred, origin: InputOrigin = "source", originId = "fixture", extra: Partial<InputSpec> = {}) => {
@@ -31,9 +34,14 @@ export async function secretaryFixture(t: TestContext) {
       if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "session" } };
       calls++;
       if (onPrompt) await onPrompt();
-      else await assessAll(resources, root(), id, { inputIds: aide.topics.inputStore.list().filter(i => i.status.assess?.executionId === id).map(i => i.metadata.name), summary: "checked" });
+      else {
+        for (const batch of await resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "execution", value: id } }))
+          await assessBatch(resources, root(), id, { batchId: batch.metadata.uid, summary: "checked" });
+        await assessAll(resources, root(), id, { inputIds: aide.topics.inputStore.list().filter(i => i.status.assess?.executionId === id).map(i => i.metadata.name), summary: "checked" }, policy);
+      }
       return { state: "success", value: { result: { stopReason: "end_turn" } } };
     },
   } } as unknown as ReconcileContext);
-  return { aide, resources, root, context, policy, input, execution, calls: () => calls };
+  const project = async () => { for (const input of aide.topics.inputStore.list()) await reconcileBatchMember(context, input); };
+  return { aide, resources, root, context, policy, input, execution, project, calls: () => calls };
 }

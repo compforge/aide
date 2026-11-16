@@ -59,7 +59,7 @@ export async function inputJob(input: Input, allOutputs: readonly Output[], read
   const view: JobView = {
     schema_version: "agent-ledger/job@1", job: { source: "aide.input", id: input.metadata.uid },
     name: input.metadata.name, goal: input.spec.text,
-    status: complete ? "completed" : input.status.assess?.lastError && !input.status.assess.completedAt ? "failed" : receipts.some(([, r]) => r.lastError && !r.completedAt) ? "outcome_unknown" : active ? "running" : "unknown",
+    status: complete ? "completed" : input.status.assess?.lastError && !input.status.assess.retryable && !input.status.assess.completedAt ? "failed" : receipts.some(([, r]) => r.lastError && !r.completedAt) ? "outcome_unknown" : active ? "running" : "unknown",
     ...timing("job", input.metadata.creationTimestamp, complete ? receipts.map(([, r]) => r.completedAt!).sort().at(-1) : undefined, issues),
     nodes: [received],
     relations: [], attributes: { completion: "Input processing only; not Work goal completion or Output delivery", sessions: value(inputSessions(input, outputs)),

@@ -1,9 +1,9 @@
+import { topicPolicy } from "./topic/config.ts";
 import { isProcessingRoot } from "./topic/boundary.ts";
 import { inputExpired } from "./input/retention.ts";
-import { expandInputs, settleBatch } from "./input/batch.ts";
+import { BATCH_TYPE, type Batch, type BatchSpec, type BatchStatus } from "./batch/model.ts";
+import { preparedIntake } from "./topic/scheduling.ts";
 import { preparedInputs } from "./input/scheduling.ts";
-import { readyBusinessInputs } from "./input/scheduling.ts";
-import { topicPolicy } from "./topic/config.ts";
 import { asHarnessError } from "@compforge/aide-plugin";
 import { invalidateAssignment } from "./input/assignment.ts";
 import { commitStatus } from "./status.ts";
@@ -24,7 +24,7 @@ const attentionOrder = { [InputAttention.Immediate]: 0, [InputAttention.Normal]:
 export const canActivate = (input: InputSpec, owner: Pick<LoopResource, "kind">) =>
   owner.kind !== "Topic" || inputAttention(input) !== InputAttention.Deferred;
 export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
-  if ((owner.kind === "Topic" && input.status.batch) || input.metadata.deletionTimestamp || inputExpired(input)) return false;
+  if ((owner.kind === "Topic" && input.status.batchId) || input.metadata.deletionTimestamp || inputExpired(input)) return false;
   if (owner.kind === "Topic") return isProcessingRoot(owner as import("./topic/model.ts").TopicResource)
     && input.status.assess?.topic?.uid === owner.metadata.uid && !!input.status.assess && !assessmentFinished(input.status.assess) && !input.status.assess.executionId;
   const receipt = attemptOf(input, resourceRef(owner));
@@ -53,26 +53,26 @@ export async function submitPending(context: PluginContext, execution: Reconcile
   if (!owner.status.execution) return;
   let retry = false;
   if (owner.kind === "Topic") {
-    const ready = await readyBusinessInputs(context.resources, owner as import("./topic/model.ts").TopicResource, topicPolicy(context.instance.config.topic));
+    const ready = await preparedIntake(context.resources, owner as import("./topic/model.ts").TopicResource, true, topicPolicy(context.instance.config.topic).trigger.intervalSeconds * 1000);
     if (ready.inputs.length) {
-      const urgent = ready.inputs.filter(i => immediate(i.spec));
+      const urgent = ready.batch ? [] : ready.inputs.filter(i => immediate(i.spec));
       const inputs = urgent.length ? urgent : ready.inputs;
       const result = await execution.verbs.action<{ accepted: boolean; reason?: string }>("submit_topic", {
-        inputId: inputs[0]!.metadata.name, inputIds: inputs.map(i => i.metadata.name), operation: urgent.length ? "steer" : "followUp",
+        ...(ready.batch ? { batchId: ready.batch.metadata.uid } : {}), inputId: inputs[0]!.metadata.name, inputIds: inputs.map(i => i.metadata.name), operation: urgent.length ? "steer" : "followUp",
       });
       if (result.state === "failure") throw new Error(`Agent Input admission failed: ${result.error ?? "unknown error"}`);
       context.logger.info("Chief business batch notification", { attributes: { topicUid: owner.metadata.uid,
-        count: inputs.length, trigger: ready.reason ?? "business", oldestDeferredAt: ready.oldestAt ?? null,
+        count: inputs.length, batchId: ready.batch?.metadata.uid ?? null,
         operation: urgent.length ? "steer" : "followUp", accepted: result.state === "success" && result.value.accepted } });
       return result.state === "success" && (result.value.accepted || ["not_running", "admission_conflict"].includes(result.value.reason ?? ""))
         ? { requeueAfterMs: 100 } : undefined;
     }
   }
 
-  const batch = owner.kind === "Topic" ? (await nextInputs(context.resources, owner, 8)).filter(i => isInternalInput(i.spec))
+  const batch = owner.kind === "Topic" ? (await preparedInputs(context.resources, owner as import("./topic/model.ts").TopicResource, 8, false, topicPolicy(context.instance.config.topic).trigger.intervalSeconds * 1000)).filter(i => isInternalInput(i.spec))
     : await pendingInputs(context.resources, resourceRef(owner));
   for (const input of batch) {
-    if (!eligible(input, owner) || (!input.status.promotedAt && !canActivate(input.spec, owner))) continue;
+    if (!eligible(input, owner) || !canActivate(input.spec, owner)) continue;
     const result = await execution.verbs.action<{ accepted: boolean; reason?: string }>(owner.kind === "Topic" ? "submit_topic" : "submit_input", { inputId: input.metadata.name, operation: immediate(input.spec) ? "steer" : "followUp" });
     if (result.state === "failure") throw new Error(`Agent Input admission failed: ${result.error ?? "unknown error"}`);
     if (result.state === "success" && !result.value.accepted && ["not_running", "admission_conflict"].includes(result.value.reason ?? "")) retry = true;
@@ -80,21 +80,16 @@ export async function submitPending(context: PluginContext, execution: Reconcile
   return retry || (owner.kind === "Topic" && batch.length === 8 && batch.some(i => canActivate(i.spec, owner))) ? { requeueAfterMs: 100 } : undefined;
 }
 /** @spec Only the owning Reconcile invokes its Agent. All automatic input paths persist their admission before dispatch; version conflicts never dispatch stale batches. */
-export async function runInput(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>, target: string, prompt: string, inputId?: string, batchIds: readonly string[] = []) {
+export async function runInput(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>, target: string, prompt: string, inputId?: string, additionalInputIds: readonly string[] = [], batch?: Batch) {
   const current = await context.resources.get<unknown, LoopStatus>(resourceRef(owner));
   if (!current || current.metadata.deletionTimestamp || current.status.execution) return;
   if (current.kind === "Topic" && !isProcessingRoot(current as import("./topic/model.ts").TopicResource)) return;
-  const inputIds = [...new Set([...(inputId ? [inputId] : []), ...batchIds])];
+  const inputIds = [...new Set([...(inputId ? [inputId] : []), ...additionalInputIds])];
   if (inputIds.length > 20) throw new Error("Agent admission batch exceeds 20 Inputs");
   const inputs = await Promise.all(inputIds.map(id => context.resources.get<InputSpec, import("./input/model.ts").InputStatus>(inputRef(id))));
 
-  if (inputs.some(input => !input || !eligible(input, current))) return;
-  if (current.kind === "Topic") {
-    const expanded = await expandInputs(context.resources, inputs as Input[]);
-    inputs.splice(0, inputs.length, ...expanded);
-    if (expanded.length > 20) throw new Error("Agent admission batch exceeds 20 Inputs");
-    inputIds.splice(0, inputIds.length, ...expanded.map(i => i.metadata.name));
-  }
+  if (inputs.some(input => !input || (batch ? input.status.batchId !== batch.metadata.uid || input.status.assess?.executionId || assessmentFinished(input.status.assess) : !eligible(input, current)))) return;
+  if (batch && (current.kind !== "Topic" || batch.spec.topic.uid !== current.metadata.uid || batch.status.phase !== "ready")) return;
   if (current.kind === "Topic" && inputs.some(input => input && isInternalInput(input.spec))
     && inputs.length !== 1) throw new Error("Chief maintenance admits exactly one Input origin");
   const startedAt = new Date().toISOString();
@@ -102,9 +97,10 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
     await commitStatus(context.resources, [
       { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, ...(inputs[0] ? { inputOrigin: inputs[0].spec.origin } : {}), admissionRevision: 0, observedGeneration: current.metadata.generation },
         ...(current.kind === "Topic" ? { lastError: null } : {}) } },
-      ...inputs.map(input => ({ operation: "patchStatus" as const, resource: input!, patch: attemptPatch(input!, resourceRef(current), {
+      ...(batch ? [] : inputs).map(input => ({ operation: "patchStatus" as const, resource: input!, patch: attemptPatch(input!, resourceRef(current), {
         executionId: execution.executionId, agent: undefined, startedAt, lastError: undefined, errorAt: undefined, retryable: undefined, nextAttemptAt: undefined,
         ...(current.kind === "Route" ? { attempts: (input!.status.route?.attempts ?? 0) + 1 } : {}) }) })),
+      ...(batch ? [{ operation: "patchStatus" as const, resource: batch, patch: { phase: "running", assess: { executionId: execution.executionId, startedAt } } }] : []),
     ]);
   } catch (error) {
     // Reconcile reselects the remaining inputs and rebuilds its prompt after a competing claim.
@@ -126,11 +122,15 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   let error = "Agent ended without confirming input completion";
   try {
     agent = await prepareAgent(context.resources, execution, current, target);
-    for (const input of current.kind === "Topic" ? inputs as Input[] : []) await changeAssessment(context.resources, input, execution.executionId, { agent });
+    for (const input of current.kind === "Topic" && !batch ? inputs as Input[] : []) await changeAssessment(context.resources, input, execution.executionId, { agent });
+    if (batch) {
+      const admitted = await context.resources.get<BatchSpec, BatchStatus>(resourceRef(batch));
+      if (admitted?.status.phase === "running") await commitStatus(context.resources, [{ operation: "patchStatus", resource: admitted, patch: { assess: { ...admitted.status.assess, agent } } }]);
+    }
     for (const id of current.kind === "Topic" ? [] : inputIds) await changeAttempt(context.resources, id, resourceRef(current), receipt =>
       receipt?.executionId === execution.executionId && !receipt.completedAt ? { agent } : {});
-    if (current.kind === "Topic" && inputs.some(input => input?.spec.origin === "channel" && immediate(input.spec))) {
-      const stream = await execution.verbs.action<{ streaming: boolean }>("begin_output_stream", { inputIds: inputs.filter(i => !i!.spec.batch).map(i => i!.metadata.name) });
+    if (current.kind === "Topic" && !batch && inputs.some(input => input?.spec.origin === "channel" && immediate(input.spec))) {
+      const stream = await execution.verbs.action<{ streaming: boolean }>("begin_output_stream", { inputIds: inputs.map(i => i!.metadata.name) });
       if (stream.state !== "success") throw new Error("Could not establish Chief output stream");
       streaming = stream.value.streaming;
       if (streaming) prompt += "\nA live Output is already bound to this Immediate Input. Your agent events are written to its Stream. Before finishing, call cite_output for all Notes used by this reply; external new facts need a classified Note first. Write the reply directly in assistant text; do not call say for this same reply. Use say only for a separately intended communication. Do not emit an internal final acknowledgement.";
@@ -172,9 +172,9 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   return completed;
 }
 /**
- * @spec Admission evidence survives completion of the invocation and restart; unknown effects never automatically replay.
+ * @spec Chief retries Inputs and Batches without a terminal receipt after releasing their execution; completed receipts remain immutable.
  * @why Chief idle time starts after every execution, including failure or recovery; missed timer checks never force continuation.
- * @spec Internal execution completion preserves review backoff; Topic reconciliation owns material progress and no-op outcomes.
+ * @spec Internal execution completion preserves review backoff; assessment commits material progress and no-op outcomes.
  * @spec Final compaction failure releases only the matching binding with its execution; future admission independently creates an Agent.
  * @why This is a Personal fallback, not a verdict that native history is corrupt; failed Inputs and native files remain evidence.
  * @link docs/harness/pi.md#压缩与失败恢复
@@ -189,37 +189,32 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
     if (!latest || latest.metadata.uid !== owner.metadata.uid || latest.status.execution?.id !== executionId) return;
     const released = compactionFailed && failure.agent?.sessionId && latest.status.agent?.harness === failure.agent.harness
       && latest.status.agent.sessionId === failure.agent.sessionId ? latest.status.agent : undefined;
-    if (latest.kind === "Topic") {
-      const batches = await context.resources.list<InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessExecution", value: executionId } });
-      for (const batch of batches.filter(i => i.spec.batch)) await settleBatch(context.resources, batch);
-    }
     const unfinished = latest.kind === "Topic"
       ? await context.resources.list<import("./input/model.ts").InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessExecution", value: executionId } })
       : (await pendingInputs(context.resources, resourceRef(latest))).filter(i => attemptOf(i, resourceRef(latest))?.executionId === executionId);
-    const suspended = new Set(!error && latest.kind === "Topic" && (latest.status.execution.admissionRevision ?? 0) > 0
-      ? unfinished.filter(i => isInternalInput(i.spec)).map(i => i.metadata.name) : []);
-    const failed = unfinished.filter(i => !suspended.has(i.metadata.name));
+    const batches = latest.kind === "Topic" ? await context.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE,
+      { matchIndex: { name: "execution", value: executionId } }) : [];
     const at = new Date().toISOString();
     try {
       await commitStatus(context.resources, [
         ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: latest.kind === "Topic" ? { assess: { ...i.status.assess,
-          ...(suspended.has(i.metadata.name)
-            ? { executionId: undefined, agent: undefined, startedAt: undefined, deliveryId: undefined, lastError: undefined, errorAt: undefined, retryable: undefined }
-            : { lastError: error || "Chief ended without confirming input completion", errorAt: at }) } } : attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error, errorAt: at, retryable: !compactionFailed,
+          executionId: undefined, deliveryId: undefined, lastError: error || "Chief ended without confirming input completion", errorAt: at, retryable: true } } : attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error, errorAt: at, retryable: !compactionFailed,
           ...(latest.kind === "Route" && !compactionFailed ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
-        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(released ? { agent: undefined } : {}), ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null, reviewCheckedAt: null, ...(latest.status.execution.inputOrigin && !isInternalInput({ origin: latest.status.execution.inputOrigin })
+        ...batches.map(batch => ({ operation: "patchStatus" as const, resource: batch, patch: {
+          phase: "ready", assess: { ...batch.status.assess, executionId: undefined, deliveryId: undefined, retryable: true, errorAt: at, lastError: error || "Chief ended without confirming Batch completion" } } })),
+        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(released ? { agent: undefined } : {}), ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null, reviewCheckedAt: null, ...((latest.status.execution.inputOrigin && !isInternalInput({ origin: latest.status.execution.inputOrigin }))
+            || ((latest as import("./topic/model.ts").TopicResource).status.lastInputAt ?? "") > latest.status.execution.startedAt
             ? { idleReviewCount: 0 } : {}), idleReviewReset: null } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
           lastExecutionId: executionId,
           ...(!compactionFailed && (unfinished.length || (latest.status as import("./work-status.ts").WorkAgentStatus).lastExecutionId !== executionId)
             ? { recovery: { reason: "ExecutionUncertain", message: error || "Execution ended without a business receipt" } } : {}),
         } : {}) } },
       ]);
+      if (batches.length) context.logger.warn("Chief Batches returned to ready", { attributes: { resourceUid: latest.metadata.uid,
+        executionId, batchIds: batches.map(batch => batch.metadata.uid), error: error || "Missing Batch assessment", recovery: "retry" } });
       if (latest.kind === "Topic" && error) context.logger.warn("Chief execution failed", { attributes: { topicUid: latest.metadata.uid, executionId, error } });
-      if (suspended.size) context.logger.info("Chief interrupted maintenance returned to pending", { attributes: {
-        topicUid: latest.metadata.uid, executionId, inputIds: [...suspended],
-      } });
-      if (failed.length) context.logger.warn(latest.kind === "Topic" ? "Chief input assessments failed" : compactionFailed ? "Agent inputs failed" : "Agent inputs await recovery", { attributes: { resourceUid: latest.metadata.uid, executionId,
-        inputIds: failed.map(i => i.metadata.name), recovery: compactionFailed || latest.kind === "Topic" ? "none" : latest.kind === "Route" ? "retry" : "inspect", error } });
+      if (unfinished.length) context.logger.warn(latest.kind === "Topic" ? "Chief Inputs returned to pending" : compactionFailed ? "Agent inputs failed" : "Agent inputs await recovery", { attributes: { resourceUid: latest.metadata.uid, executionId,
+        inputIds: unfinished.map(i => i.metadata.name), recovery: latest.kind === "Topic" || latest.kind === "Route" && !compactionFailed ? "retry" : compactionFailed ? "none" : "inspect", error } });
       if (released) context.logger.warn("Agent binding released after compaction failure", { attributes: { resourceUid: latest.metadata.uid,
         executionId, harness: released.harness, sessionId: released.sessionId ?? null, code: failure!.code, error: failure!.message } });
       return released;

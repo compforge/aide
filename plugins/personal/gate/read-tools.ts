@@ -1,3 +1,4 @@
+import { batchForInput } from "../batch/view.ts";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Store } from "../store.ts";
@@ -65,7 +66,7 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
       async execute(_id, { inputId, offset = 0 }) {
         const input = store.topics.inputStore.get(inputId);
         if (!input || input.metadata.deletionTimestamp) throw new Error("Input is unavailable");
-        return result({ inputId, ...pageText(inputPrinter.describe(input), offset) });
+        return result({ inputId, batch: batchForInput(store.resources, input), ...pageText(inputPrinter.describe(input), offset) });
       } }),
     tool({ name: "list_work", label: "Find Work", description: "Page Task or Routine across Topics, optionally filter topic UID and title/instruction q. Each call scans at most 20 records; follow continue even on an empty match page. Search both kinds before creating overlapping work. Reading never resumes work.",
       parameters: Type.Object({ kind: Type.Union([Type.Literal("task"), Type.Literal("routine")]), topicUid: Type.Optional(text), q: Type.Optional(Type.String({ maxLength: 500 })), continue: Type.Optional(text) }),
