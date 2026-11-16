@@ -76,6 +76,27 @@ test("Transcript loads bodies while the shared process pane retains selection an
     assert.equal(step.open, true); assert.match(globalThis.location.href, /process=run-1/);
     const count = calls.length; timeline.pause(); timeline.show(); assert.equal(calls.length, count + 1);
     calls.at(-1)!.resolve(new Response(JSON.stringify(processView))); await settle(); assert.equal(step.open, true);
+    // The reader can select another message from the same execution after details have loaded.
+    const sameRun = { ...view, blocks: [{ ...view.blocks[1]!, lazy: undefined, content: "另一条消息的上下文" }] };
+    timeline.render(sameRun);
+    const beforeSameRun = calls.length;
+    history.children[0]!.querySelector(".process-link")!.dispatchEvent(new Event("click"));
+    assert.match(pane.querySelector(".process-subtitle")!.text(), /另一条消息的上下文/);
+    assert.equal(calls.length, beforeSameRun, "Same execution reuses its loaded process");
+    assert.equal(step.open, true, "Switching message context preserves expanded steps");
+    timeline.pause(); timeline.show();
+    calls.at(-1)!.resolve(new Response(JSON.stringify({ ...processView, blocks: [...processView.blocks,
+      { id: "input:original", type: "input", content: "首条输入", group_id: "run-1" }] })));
+    await settle();
+    assert.match(pane.querySelector(".process-subtitle")!.text(), /另一条消息的上下文/, "Polling must retain the selected message context");
+    // Switching after the first execution completed replaces the pane with the next execution.
+    timeline.render({ ...view, blocks: [{ ...view.blocks[2]!, lazy: undefined, content: "下一次执行" }] });
+    history.children[0]!.querySelector(".process-link")!.dispatchEvent(new Event("click"));
+    const nextProcess = calls.at(-1)!; assert.match(nextProcess.url, /executionId=run-2/);
+    assert.doesNotMatch(pane.text(), /correct result/);
+    nextProcess.resolve(new Response(JSON.stringify({ ...view, blocks: [
+      { id: "execution:three", type: "execution", content: "过程", group_id: "run-2", status: "completed", detail: "next execution result" }] })));
+    await settle(); assert.match(pane.text(), /next execution result/);
     pane.querySelector("button")!.dispatchEvent(new Event("click")); assert.equal(pane.hidden, true);
     assert(!globalThis.location.href.includes("process="));
     scope.abort(); assert(calls.slice(1, 4).every(c => c.signal!.aborted));

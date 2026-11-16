@@ -48,6 +48,8 @@ Gate 与 Topic 使用相同的对话组件。主对话直接显示 Input 和正�
 
 `GET /topics/history?topicId=...&before=...` 向上加载更早的 10 条，游标绑定 Topic UID 与时间边界。补入历史保持可见消息及偏移；已加载记录与滚动 SSE 快照按块 ID 去重。只有读者原本在底部时才跟随新内容，短首屏可通过向上滚轮加载。每次只请求一页，失败保留游标并提供重试；重连缺口用同样的有界分页补齐。来源 observation、摘要、近期 Note 和执行详情不进入正文 SSE。
 
+“查看过程”以执行为单位加载详情，同时显示读者点击的消息上下文。切换同一执行内的另一条消息会更新上下文并保留步骤展开状态；切换执行会取消旧请求、清空旧过程，迟到响应不能覆盖新选择。轮询不改变读者选中的消息。
+
 `src/api/stream.ts` 使用 SDK 的 PatchEmitter / encodeSse，首次和重连发送 start，内容更新用 set / append；顺序变化发送新快照。浏览器通过 applyPatch 更新模型，保持正文与独立过程面板的阅读状态。
 
 空闲连接发送 ping，连接定期 end 后由 EventSource 重连；投影错误以 error / end 收口，首次失败返回 HTTP 500。背压时等待 drain，再根据最新模型生成 patch。断开清理订阅与定时器，不取消服务端执行；seq 属于当前连接，不通过 Last-Event-ID 回放历史补丁。
