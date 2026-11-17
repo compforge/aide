@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { LogEntry } from "../src/host/logging.ts";
 import { ConnectorRegistry } from "../src/host/connector/registry.ts";
-import { createConnectorAccess } from "@compforge/aide-connector";
+import { createConnectorAccess, ConnectorTimeoutError } from "@compforge/aide-connector";
 
 interface Echo { echo(value: { text: string; optional?: string }): Promise<{ text: string; optional?: string }> }
 const EchoKind = "test.echo";
@@ -111,4 +112,103 @@ test("concurrent close calls await the same cleanup",async()=>{
   registry.register<Echo>(EchoKind, "v1","close",{handlers:{async echo(_context,value){return value;}},async close(){closed++;await done;}});
   const first=registry.close(),second=registry.close();assert.equal(first,second);assert.equal(closed,1);
   release();await first;await second;
+});
+
+test("routine successes stay DEBUG and diagnostic failures cannot change call results", async () => {
+  const entries: LogEntry[] = [];
+  const registry = new ConnectorRegistry(entry => { entries.push(entry); throw new Error("diagnostic sink unavailable"); });
+  const ref = registry.register("requirement", "v1", "work", { handlers: { async identity() { return { userKey: "private-user-key" }; } } });
+  assert.deepEqual(await registry.call(ref, "identity", []), { userKey: "private-user-key" });
+  const completed = entries.filter(entry => entry.message === "Connector call completed");
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0]!.level, "debug");
+  assert.equal(completed[0]!.attributes?.method, "identity");
+  assert.equal(JSON.stringify(entries).includes("private-user-key"), false);
+  await registry.close();
+});
+
+test("provider failures retain their cause at ERROR without dumping arguments or arbitrary error fields", async () => {
+  const entries: LogEntry[] = [];
+  const registry = new ConnectorRegistry(entry => entries.push(entry));
+  const cause = Object.assign(new Error("Upstream deadline exceeded"), { response: "private-response-body" });
+  const failure = new Error("Requirement comments read failed", { cause });
+  const ref = registry.register<Echo>(EchoKind, "v1", "work", { handlers: { async echo() { throw failure; } } });
+  await assert.rejects(registry.call(ref, "echo", [{ text: "private-request-body" }]), error => error === failure);
+  const failed = entries.find(entry => entry.message === "Connector call failed")!;
+  assert.equal(failed.level, "error");
+  assert.equal(failed.error?.message, failure.message);
+  assert.equal(failed.error?.cause?.message, cause.message);
+  assert.equal(failed.attributes?.phase, "running");
+  assert.equal(failed.attributes?.cancelled, false);
+  assert.equal(failed.attributes?.timedOut, false);
+  assert.equal(typeof failed.attributes?.executionMs, "number");
+  assert.equal(JSON.stringify(entries).includes("private-request-body"), false);
+  assert.equal(JSON.stringify(entries).includes("private-response-body"), false);
+  await registry.close();
+});
+
+test("queued overload and deadlines are ERROR while explicit cancellation stays DEBUG", async () => {
+  const entries: LogEntry[] = [];
+  const registry = new ConnectorRegistry(entry => entries.push(entry));
+  let release!: () => void, started!: () => void;
+  const ready = new Promise<void>(resolve => started = resolve), held = new Promise<void>(resolve => release = resolve);
+  const ref = registry.register<Echo>(EchoKind, "v1", "work", { handlers: { async echo(_context, value) { started(); await held; return value; } } },
+    { maxConcurrentCalls: 1, maxQueuedCalls: 1 });
+  const first = registry.call(ref, "echo", [{ text: "first" }]); await ready;
+  try {
+    const pending = registry.call(ref, "echo", [{ text: "queued" }], { timeoutMs: 20 });
+    await assert.rejects(registry.call(ref, "echo", [{ text: "overflow" }]), /queue is full/);
+    await assert.rejects(pending, /timed out/);
+    const abort = new AbortController();
+    const cancelled = registry.call(ref, "echo", [{ text: "cancelled" }], { signal: abort.signal });
+    abort.abort(new Error("Caller stopped"));
+    await assert.rejects(cancelled, /Caller stopped/);
+    const inherited = new AbortController();
+    const expired = registry.withCallOptions({ signal: inherited.signal }, () => registry.call(ref, "echo", [{ text: "inherited deadline" }]));
+    inherited.abort(new ConnectorTimeoutError("Connector verb timed out"));
+    await assert.rejects(expired, /verb timed out/);
+    const failures = entries.filter(entry => entry.message === "Connector call failed");
+    assert.equal(failures.length, 4);
+    assert.equal(failures[0]!.level, "error");
+    assert.equal(failures[0]!.attributes?.activeCalls, 1);
+    assert.equal(failures[0]!.attributes?.queuedCalls, 1);
+    assert.equal(failures[1]!.level, "error");
+    assert.equal(failures[1]!.attributes?.timedOut, true);
+    assert.equal(failures[1]!.attributes?.timeoutMs, 20);
+    assert.equal(failures[2]!.level, "debug");
+    assert.equal(failures[2]!.attributes?.timedOut, false);
+    assert.equal(failures[3]!.level, "error");
+    assert.equal(failures[3]!.attributes?.timedOut, true);
+    for (const failure of failures) {
+      assert.equal(failure.attributes?.phase, "queued");
+      assert.equal(failure.attributes?.executionMs, 0);
+    }
+  } finally { release(); await first; await registry.close(); }
+});
+
+test("slow successful calls distinguish queue wait from handler execution", async () => {
+  const entries: LogEntry[] = [];
+  const registry = new ConnectorRegistry(entry => entries.push(entry));
+  const realNow = Date.now;
+  let clock = realNow(), release!: () => void, started!: () => void;
+  const ready = new Promise<void>(resolve => started = resolve), held = new Promise<void>(resolve => release = resolve);
+  const ref = registry.register<Echo>(EchoKind, "v1", "work", { handlers: { async echo(_context, value) {
+    if (value.text === "held") { started(); await held; }
+    return value;
+  } } }, { maxConcurrentCalls: 1 });
+  Date.now = () => clock;
+  try {
+    const first = registry.call(ref, "echo", [{ text: "held" }]); await ready;
+    const second = registry.call(ref, "echo", [{ text: "queued" }]);
+    clock += 5_001; release(); await Promise.all([first, second]);
+    const slow = entries.filter(entry => entry.message === "Connector call slow");
+    assert.equal(slow.length, 2);
+    assert.equal(slow[0]!.level, "warn");
+    assert.equal(slow[0]!.attributes?.queueMs, 0);
+    assert.equal(slow[0]!.attributes?.executionMs, 5_001);
+    assert.equal(slow[1]!.level, "warn");
+    assert.equal(slow[1]!.attributes?.elapsedMs, 5_001);
+    assert.equal(slow[1]!.attributes?.queueMs, 5_001);
+    assert.equal(slow[1]!.attributes?.executionMs, 0);
+  } finally { Date.now = realNow; release(); await registry.close(); }
 });

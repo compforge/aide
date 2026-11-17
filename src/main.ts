@@ -41,7 +41,7 @@ await withAsyncFileLock(path, async () => {
     task: observed(resolved.task), routine: observed(resolved.routine), pi: resolved.pi && observed(resolved.pi) };
   const sessionConfigs: Record<string, PiConfig | undefined> = { gate: harnesses.gate, chief: harnesses.chief, route: harnesses.route, weave: harnesses.weave,
     task: harnesses.task, routine: harnesses.routine, pi: harnesses.pi };
-  const connectors = await Connectors.load(config.connectors, { environment, registration: environment.AIDE_CONNECTOR_REGISTRATION ?? options.connectorRegistration, baseDir: dirname(file), log: (message, attributes) => log.info(attributes, message) });
+  const connectors = await Connectors.load(config.connectors, { environment, registration: environment.AIDE_CONNECTOR_REGISTRATION ?? options.connectorRegistration, baseDir: dirname(file), log: entry => log[entry.level]({ component: entry.component, ...entry.attributes, ...(entry.error ? { err: entry.error } : {}) }, entry.message) });
   try {
     const transports = new Map(Object.values(config.channels).filter(c => c.enabled).map(c => [c.appId, larkTransport(c, log.child({ appId: c.appId }))]));
     const aide: Aide = new Aide(home, {

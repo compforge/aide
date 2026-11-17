@@ -6,6 +6,7 @@ import type { ConnectorClient } from "@compforge/aide-plugin";
 import type { ConnectorApi, ConnectorPackage } from "@compforge/aide-connector";
 import { ConnectorRegistry, type ConnectorInvocationOptions } from "../src/host/connector/registry.ts";
 import { loadConnectorPackages, type ConnectorConfigurations } from "../src/host/connector/packages.ts";
+import type { LogSink } from "../src/host/logging.ts";
 import { emptyConnectors } from "../src/connector/client.ts";
 import { builtinDefinitions } from "./definitions.ts";
 
@@ -62,7 +63,7 @@ export class Connectors implements ConnectorClient {
     if (entries.length > 1) throw new Error(`Ambiguous Connector selection: ${kind}; use a discovered reference`);
     return entries[0] ? this.get<A>(entries[0]) : undefined;
   }
-  static async load(config: ConnectorConfigurations, options: { registration?: string | ConnectorPackage; baseDir?: string; environment?: Readonly<Record<string, string | undefined>>; log?: (message: string, attributes: Record<string, unknown>) => void } = {}): Promise<Connectors> {
+  static async load(config: ConnectorConfigurations, options: { registration?: string | ConnectorPackage; baseDir?: string; environment?: Readonly<Record<string, string | undefined>>; log?: LogSink } = {}): Promise<Connectors> {
     const registry = new ConnectorRegistry(options.log);
     try {
       await loadConnectorPackages(registry, config, { ...options, definitions: builtinDefinitions() });

@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
+import { logError, type LogAttributes, type LogLevel, type LogSink } from "../logging.ts";
 import { createConnectorAccess, connectorData, ConnectorTimeoutError, type ConnectorApi, type ConnectorAccess, type ConnectorCallOptions,
   type ConnectorRequest, type ConnectorDescription, type ConnectorImplementation, type ConnectorRef } from "@compforge/aide-connector";
 
@@ -13,12 +14,14 @@ interface Binding {
   queue: Array<{ start(): void; cancel(error: Error): void }>;
   limits: { maxConcurrentCalls: number; maxQueuedCalls: number };
 }
+const SLOW_CALL_MS = 5_000;
 const keyOf = (ref: Pick<ConnectorRef, "kind" | "name">) => JSON.stringify([ref.kind, ref.name]);
 const cancelled = (signal: AbortSignal) => signal.reason instanceof Error ? signal.reason : new Error("Connector call cancelled");
 
 /**
  * @spec Every caller resolves the same (kind,name) binding. Stale versions/revisions and unknown methods fail explicitly; callable methods come from the registered handlers.
  * @spec Descriptions expose only declared public metadata. Queueing and active calls share one Connector capacity budget.
+ * @spec Routine successes are DEBUG; slow calls are WARN and failures are ERROR, except intentional cancellation at DEBUG. Diagnostics include queue/execution timing and error causes, never arguments or results.
  * @why Kind is a string identifier; operation signatures belong to domain interfaces, not a core runtime schema.
  * @link docs/connector/extensions.md
  * @case tests/connector-registry.test.ts
@@ -32,12 +35,15 @@ export class ConnectorRegistry implements ConnectorAccess {
     if (request.operation === "connector.list") return this.descriptions(request.kind, request.version) as T;
     return await this.call(request.connector, request.method, request.args, { timeoutMs: request.timeoutMs }) as T;
   });
-  constructor(private readonly log?: (message: string, attributes: Record<string, unknown>) => void) {}
+  constructor(private readonly log?: LogSink) {}
   withCallOptions<T>(options: ConnectorInvocationOptions, operation: () => Promise<T>): Promise<T> {
     return this.callOptions.run(options, operation);
   }
-  private report(message: string, attributes: Record<string, unknown>) {
-    try { this.log?.(message, attributes); } catch { /* Diagnostics do not own access lifecycle. */ }
+  private report(level: LogLevel, message: string, attributes: LogAttributes, error?: unknown) {
+    try {
+      this.log?.({ level, source: "aide", component: "connector", message, attributes,
+        ...(error === undefined ? {} : { error: logError(error) }) });
+    } catch { /* Diagnostics do not own access lifecycle. */ }
   }
 
   register<A extends ConnectorApi<A>>(kind: string, version: string, name: string, implementation: ConnectorImplementation<A>,
@@ -66,7 +72,7 @@ export class ConnectorRegistry implements ConnectorAccess {
       options.signal.addEventListener("abort", () => abort.abort(options.signal!.reason), { once: true });
     }
     this.bindings.set(key, { description, implementation, abort, active: 0, queue: [], limits: { maxConcurrentCalls, maxQueuedCalls } });
-    this.report("Connector registered", { kind, version, name });
+    this.report("info", "Connector registered", { kind, version, name });
     return structuredClone(description);
   }
   descriptions(kind?: string, version?: string): readonly ConnectorDescription[] {
@@ -100,10 +106,17 @@ export class ConnectorRegistry implements ConnectorAccess {
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(new ConnectorTimeoutError(`Connector timed out: ${ref.kind}/${ref.name}.${method}`)), timeoutMs);
     const signal = AbortSignal.any([binding.abort.signal, deadline.signal, ...(options.signal ? [options.signal] : []), ...(inherited?.signal ? [inherited.signal] : [])]);
+    const startedAt = Date.now();
+    let executionStartedAt: number | undefined;
+    const timing = () => {
+      const finishedAt = Date.now();
+      return { elapsedMs: finishedAt - startedAt, queueMs: (executionStartedAt ?? finishedAt) - startedAt,
+        executionMs: executionStartedAt === undefined ? 0 : finishedAt - executionStartedAt };
+    };
     try {
       await this.acquire(binding, signal);
       if (signal.aborted) { this.release(binding); throw cancelled(signal); }
-      const startedAt = Date.now();
+      executionStartedAt = Date.now();
       const operation = Promise.resolve().then(() => {
         if (signal.aborted) throw cancelled(signal);
         return handlers[method]!({ signal }, ...args);
@@ -117,12 +130,20 @@ export class ConnectorRegistry implements ConnectorAccess {
           signal.addEventListener("abort", onAbort, { once: true });
           if (signal.aborted) onAbort();
         })]);
-        this.report("Connector call completed", { kind: ref.kind, name: ref.name, method, elapsedMs: Date.now() - startedAt });
+        const elapsed = timing(), slow = elapsed.elapsedMs >= SLOW_CALL_MS;
+        this.report(slow ? "warn" : "debug", slow ? "Connector call slow" : "Connector call completed",
+          { kind: ref.kind, name: ref.name, method, ...elapsed, timeoutMs });
         return value;
-      } catch (error) {
-        this.report("Connector call failed", { kind: ref.kind, name: ref.name, method, elapsedMs: Date.now() - startedAt, cancelled: signal.aborted });
-        throw error;
       } finally { signal.removeEventListener("abort", onAbort); }
+    } catch (error) {
+      const timedOut = deadline.signal.aborted || (signal.aborted && (signal.reason instanceof ConnectorTimeoutError || signal.reason?.name === "TimeoutError"));
+      const intentionalCancellation = signal.aborted && !timedOut;
+      this.report(intentionalCancellation ? "debug" : "error", "Connector call failed",
+        { kind: ref.kind, name: ref.name, method, ...timing(), timeoutMs,
+          phase: executionStartedAt === undefined ? "queued" : "running",
+          activeCalls: binding.active, queuedCalls: binding.queue.length,
+          cancelled: signal.aborted, timedOut }, error);
+      throw error;
     } finally { clearTimeout(timer); }
   }
 
@@ -143,7 +164,7 @@ export class ConnectorRegistry implements ConnectorAccess {
     if (!binding || binding.description.revision !== ref.revision || binding.description.version !== ref.version) throw new Error(`Connector reference is stale: ${ref.kind}/${ref.name}`);
     this.bindings.delete(keyOf(ref)); binding.abort.abort(new Error("Connector closed"));
     try { await binding.implementation.close?.(); }
-    finally { this.report("Connector closed", { kind: ref.kind, name: ref.name }); }
+    finally { this.report("info", "Connector closed", { kind: ref.kind, name: ref.name }); }
   }
   close(): Promise<void> { return this.closing ??= this.closeAll(); }
   private async closeAll(): Promise<void> {
