@@ -261,10 +261,10 @@ test("Route compaction failure does not schedule replay of its failed Input", as
 
 /** @case A successful immediate interruption preserves maintenance as pending without replaying completed business. */
 test("Immediate business can interrupt internal maintenance and unfinished maintenance remains pending", async t => {
-  const { createReviewInput } = await import("../plugins/personal/topic/review.ts");
+  const { createMaintenanceInput } = await import("../plugins/personal/topic/maintenance-input.ts");
   const { maintenanceAgenda } = await import("../plugins/personal/topic/maintenance.ts");
   const f = fixture(t), root = await f.aide.topics.ensure("a");
-  const maintenance = await createReviewInput(f.context, root, new Date().toISOString(), await maintenanceAgenda(f.resources, []));
+  const maintenance = await createMaintenanceInput(f.context, root, new Date().toISOString(), await maintenanceAgenda(f.resources, []));
   await running(f, root);
   await f.resources.patchStatus(f.current(root), { execution: { ...f.current(root).status.execution!, inputOrigin: "aide:review" } });
   await f.resources.patchStatus(maintenance, { assess: { ...maintenance.status.assess, executionId: "a", startedAt: new Date().toISOString() } });

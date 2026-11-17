@@ -7,12 +7,12 @@ import { resourceRef } from "../input/state.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 import { readTopicRoot } from "../topic/tree.ts";
 import { topicPolicy } from "../topic/config.ts";
-import { NOTE_TYPE, noteMaxChars, noteVersion, type NoteResource } from "./model.ts";
+import { NOTE_TYPE, noteMaxChars, noteVersion, noteTextVersion, type NoteResource } from "./model.ts";
 
 const candidate = z.object({ noteId: z.string(), version: z.string(), chars: z.number().int().nonnegative(), maxChars: z.number().int().positive() }).strict();
 export const NotePressureSchema = z.object({ rootUid: z.string(), version: z.string(), maxNotes: z.number().int().positive(),
   count: z.number().int().nonnegative(), truncated: z.boolean(), notes: z.array(candidate).max(20), oversized: z.array(candidate).max(20),
-  nextAt: z.string().datetime(), attempts: z.number().int().nonnegative().max(5), reviewedVersion: z.string().optional(),
+  nextAt: z.string().datetime(), attempts: z.number().int().nonnegative().max(5),
 }).strict();
 export type NotePressure = z.infer<typeof NotePressureSchema>;
 export type NotePressureTopic = { uid: string; name?: string; pressure: NotePressure };
@@ -29,7 +29,7 @@ export async function refreshNotePressure(context: Pick<PluginContext, "resource
     const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(topic));
     if (!current || current.metadata.deletionTimestamp) return;
     const [notes, oversized] = await Promise.all([
-      context.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { namespace: "v1", limit: maxNotes + 1, direction: "desc", matchIndex: { name: "recentSubject", value: current.metadata.uid } }),
+      context.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { namespace: "v1", limit: maxNotes + 1, direction: "desc", matchIndex: { name: "pressureSubject", value: current.metadata.uid } }),
       context.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { namespace: "v1", limit: 20, direction: "desc", matchIndex: { name: "oversizedSubject", value: current.metadata.uid } }),
     ]);
     const root = notes.items.length > maxNotes || oversized.items.length ? await readTopicRoot(context.resources, resourceRef(current)) : undefined;
@@ -41,10 +41,10 @@ export async function refreshNotePressure(context: Pick<PluginContext, "resource
     const facts = { maxNotes, count: notes.items.length, truncated: !!notes.metadata.continue || !!oversized.metadata.continue,
       notes: notes.items.slice(0, 20).map(reference), oversized: oversized.items.map(reference) };
     // The fingerprint covers the whole bounded sample, even when only 20 IDs are presented.
-    const version = digest([root.metadata.uid, maxNotes, notes.items.map(reference), oversized.items.map(reference)]);
+    const identity = (n: NoteResource) => [n.metadata.uid, noteTextVersion(n), noteMaxChars(n.spec)];
+    const version = digest([root.metadata.uid, maxNotes, notes.items.map(identity), oversized.items.map(identity)]);
     const pressure: NotePressure = { ...facts, rootUid: root.metadata.uid, version,
-      nextAt: previous?.nextAt ?? new Date(0).toISOString(), attempts: previous?.version === version ? previous.attempts : 0,
-      ...(previous?.reviewedVersion ? { reviewedVersion: previous.reviewedVersion } : {}) };
+      nextAt: previous?.version === version ? previous.nextAt : new Date(0).toISOString(), attempts: previous?.version === version ? previous.attempts : 0 };
     if (isDeepStrictEqual(previous, pressure)) return;
     await context.resources.patchStatus(current, { notePressure: pressure }, { resourceVersion: current.metadata.resourceVersion });
     context.logger.info("Topic Note pressure observed", { attributes: { topicUid: current.metadata.uid, rootUid: root.metadata.uid,
@@ -52,7 +52,7 @@ export async function refreshNotePressure(context: Pick<PluginContext, "resource
   });
 }
 
-/** @spec Each root takes at most eight due Topics; completed unchanged pressure leaves the index until new material arrives.
+/** @spec Each root takes at most eight due Topics; unchanged pressure retries with bounded backoff.
  * @why Per-Topic durable receipts aggregate independent requests without losing work behind an existing review Input.
  */
 export async function dueNotePressure(resources: ResourceClient, root: TopicResource, now = Date.now(), limit = 8): Promise<NotePressureTopic[]> {

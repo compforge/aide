@@ -1,44 +1,25 @@
 import { isRootTopic } from "./boundary.ts";
-import { assignInput } from "../input/assignment.ts";
-import { inputStatus } from "../status.ts";
 import { requireTopic } from "./ownership.ts";
 import { isDeepStrictEqual } from "node:util";
-import type { maintenanceAgenda } from "./maintenance.ts";
 import { z } from "zod";
-import { retryOnConflict, type ResourceValidationContext, type PluginContext } from "@compforge/aide-plugin";
-import { TOPIC_TYPE, type TopicResource, type TopicStatus } from "./model.ts";
+import type { ResourceValidationContext } from "@compforge/aide-plugin";
+import type { TopicResource, TopicStatus } from "./model.ts";
 import type { TopicReviewPolicy } from "./config.ts";
-import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
+import type { InputSpec, InputStatus } from "../input/model.ts";
 import { reviewEvidence } from "./review-evidence.ts";
 import type { NotePressureTopic } from "../note/pressure.ts";
 
 /** Transient preparation used to build task text and atomically reserve cooldowns. */
 export interface ReviewPreparation {
-  materialVersion: string;
   weaveRevision: number;
   absorption: { uid: string; parentUid: string; version: string }[];
   notePressure: NotePressureTopic[];
 }
-import { inputRef, resourceRef } from "../input/state.ts";
-import { digest } from "../chief-model.ts";
 
 /** Per-Topic opt-in controls background review, independently of Reconcile wakeups and business input. */
 export const TopicReviewSchema = z.object({ enabled: z.boolean().default(true) }).strict();
 export type TopicReview = z.infer<typeof TopicReviewSchema>;
 export const topicReview = (review?: TopicReview): TopicReview => TopicReviewSchema.parse(review ?? {});
-
-/**
- * @spec Review identity includes knowledge, tree relationships and absorption receipts, not scheduling or execution status.
- * @why Completing a synthetic Input does not create new evidence for another model call.
- * @link docs/personal/topic.md#topic-定时回顾
- */
-export function reviewMaterialVersion(topics: readonly TopicResource[], versions: ReadonlyMap<string, string>) {
-  const entries = (values: Record<string, string> = {}) => Object.entries(values).sort(([a], [b]) => a.localeCompare(b));
-  return digest([
-    [...topics].sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid)).map(t => [t.metadata.uid, t.spec.name ?? "", t.spec.parentRef?.uid ?? "",
-      versions.get(t.metadata.uid), entries(t.status.absorbed), entries(t.status.absorbedSummaries)]),
-  ]);
-}
 
 export function idleReviewDelay(config: TopicReviewPolicy, count = 0): number {
   return 1000 * (config.backoff
@@ -55,7 +36,7 @@ export function idleReviewDelay(config: TopicReviewPolicy, count = 0): number {
  */
 export function idleReviewSchedule(topic: Readonly<TopicResource>, config: TopicReviewPolicy) {
   const status = topic.status;
-  const since = [status.idleSince ?? topic.metadata.creationTimestamp, status.reviewCheckedAt ?? ""].sort().at(-1)!;
+  const since = status.reviewCheckedAt ?? status.idleSince ?? topic.metadata.creationTimestamp;
   const enabled = isRootTopic(topic) && !topic.metadata.deletionTimestamp && topicReview(topic.spec.review).enabled;
   let reset = enabled && config.backoff ? status.idleReviewReset ?? null : null;
   if (reset && reset.at <= since) reset = null;
@@ -70,66 +51,6 @@ export function idleReviewSchedule(topic: Readonly<TopicResource>, config: Topic
   return { dueAt, count, patch };
 }
 
-/** @spec Internal requests use ordinary Input assignment/admission; origin determines scheduling, text carries the task.
- * @why Transaction-local eligibility and pending-request uniqueness allow unrelated Topic status writers to proceed.
- * @spec Request creation and its cooldown commit together; retry contains only resource operations.
- * @link docs/personal/topic.md#树内整理与维护优先级
- */
-export async function createReviewInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: "aide:review" | "aide:triage" | "aide:organize" = "aide:review", trigger: "idle" | "understanding" | "note_pressure" = "idle", preparation?: { plan: ReviewPreparation; instructions: string; cooldownSeconds: number }) {
-  const target = resourceRef(topic);
-  const maintenance = preparation?.plan, instructions = preparation?.instructions ?? "";
-  const input = await retryOnConflict(async () => {
-    const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(target);
-    if (!current || current.metadata.deletionTimestamp) throw new Error("Review Topic no longer exists");
-    const pending = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
-      matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
-    if (pending.items[0]) return pending.items[0];
-    const inputId = `${origin.slice(5)}-${digest([topic.metadata.uid, dueAt])}`;
-    const at = new Date().toISOString();
-    const spec: InputSpec = {
-      origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
-      text: `${origin === "aide:triage" ? "Triage this Topic's direct unfiled Inputs and Work. Inspect business Inputs as evidence only; file completed materials into coherent children, creating a child when needed. Never replay admitted or completed assessments." : origin === "aide:organize" ? "Organize this Topic's direct children. Establish meaningful intermediate groups or detach independent subtrees; do not split merely to satisfy a count." : "Review current understanding, unresolved questions and relevant Work; update summaries only when useful."} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; do not communicate or hand off business Work. Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
-      observation: { dueAt, triggeredAt: at, facts: agenda, trigger, ...(maintenance ? { review: {
-        materialVersion: maintenance.materialVersion, weaveRevision: maintenance.weaveRevision,
-        pressure: maintenance.notePressure.map(({ uid, pressure }) => ({ uid, version: pressure.version })),
-      } } : {}) },
-    };
-    const status: InputStatus = { topic: target,
-      route: { completedAt: at, result: { topics: [target], reason: `Built-in ${origin} request for this Topic` } }, assess: {} };
-    const pressureWrites = [];
-    for (const entry of maintenance?.notePressure ?? []) {
-      const target = (await context.resources.page<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
-        { matchIndex: { name: "uid", value: entry.uid }, limit: 1 })).items[0];
-      if (!target?.status.notePressure) continue;
-      const p = target.status.notePressure;
-      pressureWrites.push({ operation: "patchStatus" as const, resource: target, patch: { notePressure: { ...p,
-        attempts: Math.min(5, p.attempts + 1), nextAt: new Date(Date.now() + Math.max(preparation!.cooldownSeconds,
-          Math.min(900, preparation!.cooldownSeconds * 2 ** p.attempts)) * 1000).toISOString(),
-      } } });
-    }
-    try { await context.resources.commit([
-      { operation: "create", type: INPUT_TYPE, name: inputId, spec, status: inputStatus(status) },
-      ...pressureWrites,
-      { operation: "patchStatus", resource: current, patch: origin === "aide:review"
-        ? { reviewCheckedAt: at, idleReviewReset: null, ...((maintenance && (maintenance.absorption.length || maintenance.weaveRevision)) ? {
-          nextAbsorbAt: new Date(Date.now() + Math.min(900_000, 60_000 * 2 ** (current.status.absorbAttempts ?? 0))).toISOString(),
-          absorbAttempts: Math.min(5, (current.status.absorbAttempts ?? 0) + 1),
-        } : {}) }
-        : { capacityRequests: { [origin]: { checkedAt: at, inputId } } } },
-    ]); } catch (error) {
-      if (typeof error !== "object" || error === null || !("name" in error) || error.name !== "ResourceAlreadyExists") throw error;
-      const existing = await context.resources.get<InputSpec, InputStatus>(inputRef(inputId));
-      if (!existing || existing.metadata.deletionTimestamp || existing.spec.origin !== origin || existing.status.topic?.uid !== target.uid) throw error;
-      return existing;
-    }
-    context.logger.info("Topic internal Input requested", { attributes: { origin, topicUid: topic.metadata.uid, inputId, dueAt } });
-    return (await context.resources.get<InputSpec, InputStatus>(inputRef(inputId)))!;
-  });
-  await assignInput(context, input);
-  return (await context.resources.get<InputSpec, InputStatus>(resourceRef(input)))!;
-}
-
 /** @spec Internal request admission checks current Topic identity and eligibility inside the creation transaction.
  * @case tests/note-knowledge.test.ts
  */
@@ -139,15 +60,4 @@ export function validateReviewRequest(input: { spec: InputSpec; status: InputSta
   if (input.spec.originRef?.uid !== topic.metadata.uid) throw new Error("Internal Input target changed");
   if (input.spec.origin === "aide:review" && (!isRootTopic(topic) || (!topicReview(topic.spec.review).enabled && !["understanding", "note_pressure"].includes(String(input.spec.observation?.trigger)))))
     throw new Error("Review requires an eligible root Topic");
-}
-
-/** Quota exhaustion postpones maintenance, not already persisted business input admission. */
-export async function tryCreateReviewInput(...args: Parameters<typeof createReviewInput>) {
-  try { return await createReviewInput(...args); }
-  catch (error) {
-    if (!String(error).includes("Resource capacity exhausted")) throw error;
-    const [context, topic, , , origin = "aide:review"] = args;
-    context.logger.warn("Topic maintenance deferred at resource capacity", { attributes: { topicUid: topic.metadata.uid, origin, error: String(error) } });
-    return;
-  }
 }

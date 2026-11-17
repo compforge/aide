@@ -282,17 +282,18 @@ plugins:
       maxUnfiledInput: 40
       maxChildren: 8  # 容量维护轮次的最小间隔
       review:
-        idleSeconds: 900      # 基础回顾检查等待
+        completedInputs: 10  # Chief 完成 Input／Batch 数量阈值，包含维护 Input
+        idleSeconds: 900      # 未回顾活动最长等待及静默检查基础间隔
         backoff:             # 默认启用；显式 null 使用固定等待
           factor: 2
           maxIdleSeconds: 7200
 ```
 
-`trigger` 只配置定时协调机制；`review` 配置 Reconcile 的业务检查策略。Chief Harness 只配置模型和能力包，不接受业务调度字段。`intervalSeconds`、`idleSeconds` 和 `maxIdleSeconds` 均为 1–2147483 的整数秒；`factor` 大于 1，上限不小于基础等待。
+`trigger` 只配置定时协调机制；`review` 配置 Reconcile 的业务检查策略。Chief Harness 只配置模型和能力包，不接受业务调度字段。`intervalSeconds`、`idleSeconds` 和 `maxIdleSeconds` 均为 1–2147483 的整数秒；`factor` 大于 1，上限不小于基础等待；`completedInputs` 是至少为 2 的整数。
 
-定时唤醒不会直接调用模型。Secretary 按 deferred 的数量和等待阈值将 Deferred 积压组成 Batch；回顾检查待吸收的子主题认识及材料/子节点整理压力；需要判断时生成已绑定 root 的维护 Input，无事可做时只记录检查时间并增加退避次数。默认配置的空检查或无进展回顾依次等待 15、30、60、120 分钟，之后保持 120 分钟；期间的 Reconcile 唤醒间隔仍为 60 秒。
+定时唤醒不会直接调用模型。Secretary 按 deferred 的数量和等待阈值将 Deferred 积压组成 Batch；回顾检查待吸收的子主题认识及材料/子节点整理压力；需要判断时生成已绑定 root 的维护 Input，无事可做时只记录检查时间并增加退避次数。默认配置的空检查依次等待 15、30、60、120 分钟，之后保持 120 分钟；期间的 Reconcile 唤醒间隔仍为 60 秒。
 
-业务 Input 优先于维护创建和执行；维护创建遇到资源容量不足时推迟，已持久化业务仍可处理。正常业务 Input 直接复用，Immediate / Normal 与结构、子 summary 变化不等待回顾退避。Deferred 达到 count 条或最老一条等待 maxWaitSeconds 后按 Normal 处理，独立于 review 开关和退避。新业务输入重置退避且连续到达不推迟已安排的机会。内置回执不清零退避；成功回顾过的材料未变化时跳过模型，完成业务处理或有实质进展才重置次数。执行完成或中断恢复以完成时间重新计时，不自动重放已有未知效果。
+Immediate／Normal Input 直接复用 Chief 的接纳与执行路径；Secretary 根据处理量、等待时间和 pressure 生成维护 Input。Deferred 达到 count 条或最老等待 maxWaitSeconds 后归为独立 Batch，按 Normal 交给 Chief；Batch 计一次工作量。Task／Routine 的状态变化不计 Chief 工作量。没有待回顾活动时只做退避检查；Review 自身计数但不独自启动下一轮定时需求。维护遇到容量不足会推迟，已持久化业务仍可处理。窗口、去重与退避契约见 [Secretary](personal/secretary.md)。
 
 修改基础等待、倍数或上限并重启后，按持久化时间事实与当前配置重新计算资格；最迟在下一次固定检查时应用，不从重启时重新等待，也不补跑历史周期。每个 Topic 通过 `spec.review.enabled` 开关后台回顾，关闭不停止定时协调、输入接纳或既有职责。完整契约见 [Topic 定时回顾](personal/topic.md#topic-定时回顾)。
 

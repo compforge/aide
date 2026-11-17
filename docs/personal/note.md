@@ -88,7 +88,7 @@ Input 保留大量短暂、步骤级证据；普通 Note 汇集近期事项；su
 
 Topic Reconcile 在 Note 变化时检查压力，周期唤醒兜底。数量查询最多读取 maxNotes+1 条；超长 Note 用独立索引查询，包含 summary，最多 20 条。每个 Topic 持有有界压力快照，按当前 root 与下次尝试时间建立索引，Chief 每轮最多取得 8 个 Topic；不会在每次 root 唤醒时全量遍历 Note 历史。
 
-压力通过 aide:review、trigger=note_pressure 安排 Chief 整理，独立于普通定时 review 开关；业务输入优先。已有 review Input 时，在实际执行时合并当前到期压力，不因请求去重丢失其他 Topic。调用前持久化冷却与失败退避；完成后只确认实际呈现的材料版本。prune、retire、move 的执行回执证明本轮确实削减过来源，即使被削减的旧 Note 不在有界计数样本内，也会在冷却后继续；没有削减且材料未变化时不反复调用模型。新材料或预算变化重新进入判断；数量、长度降到预算内时清除压力。无法安全压缩时允许超额，并完成本轮回执。
+压力通过 `aide:review`、`trigger=note_pressure` 安排 Chief 整理，独立于普通回顾开关；业务输入优先。Secretary 在创建请求时选取到期压力，已创建的请求保持快照，后来的需求留待下一次。请求创建时持久化冷却；完成结果不再修改压力调度。Secretary 根据剩余压力继续安排，同一需求逐步退避，新正文或预算变化恢复基础节奏。数量、长度降到预算内时清除压力。无法安全压缩时允许超额，并完成本轮回执。
 
 upsert_note 负责整合目标信息；prune_note 接受 noteId、version、完整的更短非空正文和 reason，只削减来源正文，保留元数据，也支持 summary 的原子指纹更新；retire_note 接受 noteId、version、reason，让整篇 Note 退出活跃使用。两种削减操作由 review 中的 Chief 使用，事务内校验执行身份、当前归属与版本。仍有归属对象的 summary 禁止退役。
 
@@ -115,8 +115,8 @@ Topic、Task、Routine 使用 aide.dev/v1alpha4，Person 使用 aide.dev/v1alpha
 
 摘要引用场景见 tests/summary-notes.test.ts；事项场景见 tests/note-knowledge.test.ts、tests/notes.test.ts、tests/topic-persons.test.ts 和 tests/pi-agent.test.ts：独立并发、同 Note 冲突、创建重试、过期执行、祖先归属竞争、悬空历史引用、容量回收、完整读取与真实工具路径。
 
-review 请求与 reviewCheckedAt 在同一事务提交，Topic 的无关状态更新不制造请求冲突。创建时在事务内核验目标 Topic 仍存在且是空闲 root；定时回顾要求开关开启，预算压力与认识吸收独立于该开关。并发请求按 Topic / origin 的 pending 索引去重。
+Secretary 创建 review 请求时原子保存触发依据和请求冷却，并按 Topic／origin 的 pending 索引去重。定时与工作量回顾受开关控制，预算压力与子 summary 吸收独立于该开关。Note 压力按稳定材料身份、正文和预算生成需求指纹；改名与 updatedAt 不重置退避。完整 Note 版本继续用于读写与删除校验。
 
-Note Controller 只修复 summary 派生指纹。Topic 监听 Note 内容和退役状态变化以检查预算压力，周期检查兜底；预算内的普通 Note 变化不会立即调用模型。旧版存储的逐条 review 字段在解码时丢弃，旧版排队中的逐条 review Input 直接结束，当前预算压力与 summary 变化分别重新判断。
+Note Controller 只修复 summary 派生指纹。Topic 监听 Note 内容和退役状态变化以检查预算压力，周期检查兜底；预算内的普通 Note 变化不会立即调用模型。
 
 Web 的近期记录项及 summary 正文左下角展示 sensitivity、visibility 和已设置的 nature 原值（例如 `L1 · any · semantic`）；未设置 nature 时省略，属性修改即使不改变正文，也会刷新标记。

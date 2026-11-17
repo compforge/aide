@@ -130,13 +130,13 @@ test("Maintenance counts direct ownership and Route includes bounded activity fr
 });
 
 test("Maintenance agenda survives persistence for unnamed Topics and business Inputs precede queued reviews", async t => {
-  const { createReviewInput } = await import("../plugins/personal/topic/review.ts");
+  const { createMaintenanceInput } = await import("../plugins/personal/topic/maintenance-input.ts");
   const { nextInputs } = await import("../plugins/personal/loop.ts");
   const f = await fixture(t);
   await f.input("one"); await f.input("two");
   await f.resources.patchStatus(f.root(), { execution: null, idleSince: "2000-01-01T00:00:00.000Z" });
   const agenda = await maintenanceAgenda(f.resources, [f.root()], { maxUnfiledInput: 1 });
-  const review = await createReviewInput({ resources: f.resources, logger }, f.root(), new Date(Date.now() + 60_000).toISOString(), agenda);
+  const review = await createMaintenanceInput({ resources: f.resources, logger }, f.root(), new Date(Date.now() + 60_000).toISOString(), agenda);
   assert.match(review.spec.text, /Review current understanding/);
   assert.deepEqual(review.spec.observation!.facts, agenda);
   const { inputPreview } = await import("../plugins/personal/input/prompt.ts");

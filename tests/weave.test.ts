@@ -302,13 +302,13 @@ test("Unfinished synthesis retries one review Input without refreshing business 
   await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 1);
-  assert.equal(f.aide.topics.resource(root.id)!.status.absorbAttempts, 1);
+  assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceRequests?.["aide:review"]?.attempts, 1);
   const pending = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
   await f.resources.patchStatus(pending, { assess: { ...pending.status.assess, errorAt: "2000-01-01T00:00:00.000Z" } });
   await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 2);
-  assert.equal(f.aide.topics.resource(root.id)!.status.absorbAttempts, 1);
+  assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceRequests?.["aide:review"]?.attempts, 1);
   assert.equal(f.aide.topics.inputStore.list().length, 1);
   assert.equal(f.aide.topics.inputStore.list()[0]!.metadata.uid, pending.metadata.uid);
   assert.ok(f.aide.topics.inputStore.list().every(i => i.spec.origin === "aide:review"));
