@@ -32,7 +32,7 @@ function validate(note: NoteResource, context: ResourceValidationContext) {
   if (writer) requireContentWriter(subject, writer, context);
 }
 export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
-  type: NOTE_TYPE, indexVersion: 3, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
+  type: NOTE_TYPE, indexVersion: 4, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
   validator: { create: (note, context) => { if (note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts"); validateAddresses(note, context); validate(note, context); }, update: (before, after, context) => {
     if (!equalResourceValue(before.status.retired, after.status.retired)) {
       if (!after.status.retired || !equalResourceValue(before.spec, after.spec) || before.status.updatedAt !== after.status.updatedAt)
@@ -92,16 +92,13 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
       throw new Error("Summary subject still exists");
   } },
   indexes: {
-    // @why A bounded count sample may not change when older Notes are reduced. Receipts still prove progress.
-    reducedSubject: r => [...(r.status.pruned ? [JSON.stringify([r.spec.subject.uid, r.status.pruned.writer.executionId])] : []),
-      ...(r.status.retired ? [JSON.stringify([r.spec.subject.uid, r.status.retired.writer.executionId])] : []),
-      ...(r.status.organization?.writer ? [JSON.stringify([r.status.organization.from.uid, r.status.organization.writer.executionId])] : [])],
     summaryOf: r => r.spec.summaryOf ? [r.spec.summaryOf.uid] : [],
     knownSummary: r => r.spec.summaryOf && !r.metadata.deletionTimestamp && !r.status.retired && r.spec.text.trim() ? [r.spec.summaryOf.uid] : [],
     uid: r => [r.metadata.uid], subject: r => [r.spec.subject.uid], addresses: r => [...r.spec.addresses].map(a => a.uid), people: r => [...new Set([...r.spec.people].map(p => p.uid))] },
   orderedIndexes: {
     oversizedSubject: r => !r.metadata.deletionTimestamp && !r.status.retired && r.spec.text.length > noteMaxChars(r.spec)
-      ? [{ value: r.spec.subject.uid, order: r.status.updatedAt }] : [],
+      ? [{ value: r.spec.subject.uid, order: r.metadata.uid }] : [],
+    pressureSubject: r => r.spec.summaryOf || r.metadata.deletionTimestamp || r.status.retired ? [] : [{ value: r.spec.subject.uid, order: r.metadata.uid }],
     recentSubject: r => r.spec.summaryOf || r.metadata.deletionTimestamp || r.status.retired ? [] : [{ value: r.spec.subject.uid, order: r.status.updatedAt }],
     recentAddresses: r => r.metadata.deletionTimestamp || r.status.retired ? [] : [...r.spec.addresses].filter(a => a.uid !== r.spec.summaryOf?.uid).map(a => ({ value: a.uid, order: r.status.updatedAt })),
     recentPeople: r => r.spec.summaryOf || r.metadata.deletionTimestamp || r.status.retired ? [] : [...new Set([...r.spec.people].map(p => p.uid))].map(value => ({ value, order: r.status.updatedAt })),

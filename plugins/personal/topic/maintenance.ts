@@ -1,9 +1,8 @@
-import { refreshNotePressure } from "../note/pressure.ts";
-import { tryCreateReviewInput } from "./review.ts";
-import { resourceRef, inputRef } from "../input/state.ts";
-import type { InputSpec, InputStatus } from "../input/model.ts";
+import { tryCreateMaintenanceInput } from "./maintenance-input.ts";
+import { digest } from "../chief-model.ts";
+import { resourceRef } from "../input/state.ts";
 import type { ResourceReader, ResourceType } from "@compforge/aide-plugin";
-import { assessmentFinished, INPUT_TYPE } from "../input/model.ts";
+import { INPUT_TYPE } from "../input/model.ts";
 import { WORK_TYPES } from "../resources.ts";
 import { TOPIC_TYPE, type TopicResource } from "./model.ts";
 import { topicPolicy } from "./config.ts";
@@ -34,15 +33,16 @@ export async function maintenanceAgenda(resources: ResourceReader, topics: reado
     const uid = topic.metadata.uid, namespace = topic.metadata.namespace;
     const inputs = await thresholdCount(resources, INPUT_TYPE, "unfiled", uid, policy.maxUnfiledInput, namespace);
     let work = 0, workTruncated = false;
+    const workIds: string[] = [];
     for (const type of WORK_TYPES) {
       if (work > policy.maxWork) { workTruncated = true; break; }
       const result = await thresholdCount(resources, type, "maintenance", uid, policy.maxWork - work, namespace);
-      work += result.count; workTruncated ||= result.truncated;
+      work += result.count; workTruncated ||= result.truncated; workIds.push(...result.ids);
     }
     const child = await thresholdCount(resources, TOPIC_TYPE, "liveParent", uid, policy.maxChildren, namespace);
     const facts = { uid, ...(topic.spec.name ? { name: topic.spec.name.slice(0, 200) } : {}),
       inputs: inputs.count, work, children: child.count,
-      truncated: inputs.truncated || workTruncated || child.truncated, inputIds: inputs.ids, childUids: child.ids };
+      truncated: inputs.truncated || workTruncated || child.truncated, inputIds: inputs.ids, workIds: workIds.slice(0, 8), childUids: child.ids };
     if (inputs.count > policy.maxUnfiledInput || work > policy.maxWork) material.push(facts);
     else if (child.count > policy.maxChildren && children.length < 8) children.push(facts);
     if (material.length === 8) break;
@@ -56,7 +56,6 @@ export async function maintenanceAgenda(resources: ResourceReader, topics: reado
 /** Every Topic checks only direct capacity; the assigned root performs the requested work. */
 export async function ensureCapacityInputs(context: import("@compforge/aide-plugin").PluginContext, topic: TopicResource) {
   const policy = topicPolicy(context.instance.config.topic);
-  await refreshNotePressure(context, topic);
   const agenda = await maintenanceAgenda(context.resources, [topic], policy);
   const facts = agenda.topics[0];
   if (!facts) return;
@@ -65,13 +64,9 @@ export async function ensureCapacityInputs(context: import("@compforge/aide-plug
     if (!needed) continue;
     const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(topic));
     if (!current || current.metadata.deletionTimestamp) return;
-    const previous = current.status.capacityRequests?.[origin];
-    if (previous) {
-      const input = await context.resources.get<InputSpec, InputStatus>(inputRef(previous.inputId));
-      if (input && !assessmentFinished(input.status.assess)) continue;
-      const since = input?.status.assess?.completedAt ?? previous.checkedAt;
-      if (Date.parse(since) + policy.capacityCooldownSeconds * 1000 > Date.now()) continue;
-    }
-    await tryCreateReviewInput(context, current, new Date().toISOString(), agenda, origin);
+    const fingerprint = digest(origin === "aide:triage"
+      ? [facts.inputs, facts.work, facts.inputIds, facts.workIds, policy.maxUnfiledInput, policy.maxWork]
+      : [facts.children, facts.childUids, policy.maxChildren]);
+    await tryCreateMaintenanceInput(context, current, new Date().toISOString(), agenda, origin, "idle", undefined, policy, fingerprint);
   }
 }

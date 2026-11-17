@@ -1,6 +1,7 @@
 import { z } from "zod";
 const seconds = z.number().int().positive().max(2_147_483);
 export const TopicReviewPolicySchema = z.object({
+  completedInputs: z.number().int().min(2).default(10),
   idleSeconds: seconds.default(900),
   backoff: z.object({ factor: z.number().gt(1), maxIdleSeconds: seconds }).strict().nullable().optional(),
 }).strict().transform(config => ({ ...config, backoff: config.backoff === undefined

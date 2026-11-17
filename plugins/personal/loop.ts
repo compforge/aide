@@ -174,7 +174,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
 /**
  * @spec Chief retries Inputs and Batches without a terminal receipt after releasing their execution; completed receipts remain immutable.
  * @why Chief idle time starts after every execution, including failure or recovery; missed timer checks never force continuation.
- * @spec Internal execution completion preserves review backoff; assessment commits material progress and no-op outcomes.
+ * @spec Chief finalization never schedules maintenance; successful assessment records completion facts.
  * @spec Final compaction failure releases only the matching binding with its execution; future admission independently creates an Agent.
  * @why This is a Personal fallback, not a verdict that native history is corrupt; failed Inputs and native files remain evidence.
  * @link docs/harness/pi.md#压缩与失败恢复
@@ -202,9 +202,7 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
           ...(latest.kind === "Route" && !compactionFailed ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
         ...batches.map(batch => ({ operation: "patchStatus" as const, resource: batch, patch: {
           phase: "ready", assess: { ...batch.status.assess, executionId: undefined, deliveryId: undefined, retryable: true, errorAt: at, lastError: error || "Chief ended without confirming Batch completion" } } })),
-        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(released ? { agent: undefined } : {}), ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null, reviewCheckedAt: null, ...((latest.status.execution.inputOrigin && !isInternalInput({ origin: latest.status.execution.inputOrigin }))
-            || ((latest as import("./topic/model.ts").TopicResource).status.lastInputAt ?? "") > latest.status.execution.startedAt
-            ? { idleReviewCount: 0 } : {}), idleReviewReset: null } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
+        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(released ? { agent: undefined } : {}), ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
           lastExecutionId: executionId,
           ...(!compactionFailed && (unfinished.length || (latest.status as import("./work-status.ts").WorkAgentStatus).lastExecutionId !== executionId)
             ? { recovery: { reason: "ExecutionUncertain", message: error || "Execution ended without a business receipt" } } : {}),

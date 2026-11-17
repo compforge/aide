@@ -43,6 +43,7 @@ function watch(context: PluginContext): Watch {
         || !isDeepStrictEqual(a.status.notePressure, b.status.notePressure)
         || a.metadata.deletionTimestamp !== b.metadata.deletionTimestamp) return rootRequests(b, a);
       return a.status.execution?.id !== b.status.execution?.id || a.status.lastInputAt !== b.status.lastInputAt
+        || a.status.chiefWorkload?.completed !== b.status.chiefWorkload?.completed
         ? [{ name: b.metadata.name, namespace: b.metadata.namespace }] : [];
     } } };
 }

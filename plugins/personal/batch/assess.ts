@@ -1,3 +1,4 @@
+import { completeChiefWork } from "../topic/workload.ts";
 import { z } from "zod";
 import type { ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
 import { WorkInputRequestSchema } from "../model.ts";
@@ -42,7 +43,7 @@ export async function assessBatch(resources: ResourceClient, owner: TopicResourc
     try {
       await commitStatus(resources, [...workGuards.values(), ...writes,
         { operation: "patchStatus", resource: batch, patch: { phase: "completed", assess: { ...batch.status.assess, lastError: undefined, errorAt: undefined, retryable: undefined, completedAt: at, result: { summary: args.summary, disposition: "completed" }, completedBy: agentCall(topic.status, toolCallId) } } },
-        { operation: "patchStatus", resource: topic, patch: {} }]);
+        { operation: "patchStatus", resource: topic, patch: { chiefWorkload: completeChiefWork(topic, at) } }]);
       return { assessedBatch: args.batchId };
     } catch (error) { if (n >= 8 || !/version conflict/.test(String(error))) throw error; }
   }

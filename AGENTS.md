@@ -87,7 +87,9 @@ plugins/personal/
     store.ts               # 宿主侧会话、Input 消费投影与消息流
     config.ts              # 定时协调、回顾退避、整理阈值与上下文预算
     secretary.ts           # 确定性待办准备、批次提级、维护请求与回执水位
-    review.ts              # 回顾资格、退避与维护 Input
+    review.ts              # 回顾资格与静默检查策略
+    maintenance-input.ts   # Secretary 维护 Input 创建、去重与冷却
+    workload.ts            # Chief 完成量与 Review 覆盖窗口
     assignment.ts          # 祖先指纹、直属待办缓存刷新与缺失分派补偿
     reconcile.ts           # 独立接收与 agent Controller、定时回顾
     assess.ts              # 原子研判完成与 Work 交接
@@ -152,7 +154,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 每种 CRD 在所属 plugin package 下有独立目录，模型、Reconcile 和专属辅助代码就近组织；跨资源协作留在插件层。ResourceDefinition 集中声明 Schema、校验、Printer、索引与保留策略；所有写入在存储事务内校验，提交后通知 Watch。
 - 资源身份按插件实例与 namespace 组织，引用固定 UID。同一 Controller 对同一资源串行；主资源纯 status 更新不自动唤醒自身，协作方显式声明 Watch。依赖其它资源的容量资格通过 retention.canEvict 在实际淘汰事务内重查。资源所有者决定能否释放，Host 写入只检查容量并通知独立 GC；GC 对合格 owner tree 原子请求删除，再沿 Controller / finalize 生命周期释放容量。
 - Operator 通过 Harness interface / verb 操作原生 agent loop，恢复参数由 Operator 自己保存。Personal 的 status.agent 只是调用参数；Harness verb 不读写 CRD。原生持久化、历史与恢复属于 Harness，实时投影和诊断日志不承担恢复。
-- Secretary 是 Topic 上独立的确定性 Reconcile，不调用 Agent；按数量/等待时间准备批次和内部维护 Input，Chief 负责接纳与执行。Batch 是独立 CRD，成员关系只保存在 Input.status.batchId；Chief 接纳独立 Input 或 Batch，成员集合在归组后固定，当前仅包含 Deferred；Chief 只写 Batch 执行回执，Input Reconcile 投影成员研判结果，Work 办理回执保持独立。职责见 [Secretary](docs/personal/secretary.md)，批次契约见 [Batch](docs/personal/batch.md)。
+- Secretary 是 Topic 上独立的确定性 Reconcile，不调用 Agent；按数量/等待时间准备批次和内部维护 Input，Chief 只关注抽到的非 Deferred Input／Batch，负责工具选择、Agent 执行与结果。Secretary 旁观处理量、等待时间与 pressure，工作产物是 Input／Batch；Immediate／Normal 直接交给 Chief。每个成功完成的 Input／Batch 计一次 Chief 工作量（包括维护 Input），Task／Routine 普通状态不计入。Batch 是独立 CRD，成员关系只保存在 Input.status.batchId；Chief 接纳独立 Input 或 Batch，成员集合在归组后固定，当前仅包含 Deferred；Chief 只写 Batch 执行回执，Input Reconcile 投影成员研判结果，Work 办理回执保持独立。职责见 [Secretary](docs/personal/secretary.md)，批次契约见 [Batch](docs/personal/batch.md)。
 - Route、Chief、Task、Routine、Weave Agent 只由各自对应的 Reconcile 触发，包括 prompt、steer 与 followUp；协作组件和 Agent 工具通过资源变化协作，不直接触发其它角色。
 - Input、Task、Routine 通过 status.topic 保存唯一且可调整的材料 Topic UID 引用；Input.assess.topic 保存未领取待办的最终一致负责人缓存，领取后保留实际执行归属，Input.assess 保存全局唯一研判及 Chief 接纳 executionId，自动 prompt / steer / followUp 在提交前通过资源事务竞争接纳；Topic 保存 Chief 执行与原生会话。Route 保存首次路由回执，Chief 在树内整理归属，Weave 只改变父子关系。
 - 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。Chief 未提交终态结果的 Input／Batch 在执行释放后重试，已有终态结果保持不变；Work 的副作用恢复由其自身契约负责。

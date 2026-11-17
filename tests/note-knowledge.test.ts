@@ -1,7 +1,7 @@
 import { fixtureGateRef } from "./summary-fixture.ts";
 import { collectResources } from "./fixtures/resource-gc.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
-import { createReviewInput } from "../plugins/personal/topic/review.ts";
+import { createMaintenanceInput } from "../plugins/personal/topic/maintenance-input.ts";
 import { maintenanceAgenda } from "../plugins/personal/topic/maintenance.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -166,7 +166,7 @@ test("pressure review request tolerates unrelated Topic writes and commits its c
     }
     return f.resources.commit(writes);
   } };
-  const input = await createReviewInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review", "note_pressure");
+  const input = await createMaintenanceInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review", "note_pressure");
   assert.equal(input.status.assess!.topic!.uid, f.root.metadata.uid);
   assert.equal(f.read().status.lastError, "preserved");
   assert.ok(f.read().status.reviewCheckedAt);
@@ -183,10 +183,10 @@ test(`review request rolls back on ${race} at commit`, async t => {
     if (race === "disabled") await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
     return f.resources.commit(race === "schedule-failure" ? [...writes, { operation: "patchStatus", resource: f.read(), patch: { unknown: true } }] : writes);
   } };
-  await assert.rejects(createReviewInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review"), race === "schedule-failure" ? /unknown|Unrecognized/ : /eligible root/);
+  await assert.rejects(createMaintenanceInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review"), race === "schedule-failure" ? /unknown|Unrecognized/ : /eligible root/);
   assert.equal(f.aide.topics.inputStore.list().length, 0);
   assert.equal(f.read().status.reviewCheckedAt ?? null, null);
-  assert.equal(f.read().status.nextAbsorbAt, undefined);
+  assert.equal(f.read().status.maintenanceRequests, undefined);
 });
 
 for (const sameDue of [true, false])
@@ -195,8 +195,8 @@ test(`racing review requests reuse one pending Input (same due: ${sameDue})`, as
   await f.resources.patchStatus(f.read(), { execution: null });
   const agenda = await maintenanceAgenda(f.resources, []), due = new Date().toISOString();
   const [a, b] = await Promise.all([
-    createReviewInput(f.context, f.read(), due, agenda, "aide:review", "note_pressure"),
-    createReviewInput(f.context, f.read(), sameDue ? due : "2000-01-01T00:00:00.000Z", agenda, "aide:review", "note_pressure"),
+    createMaintenanceInput(f.context, f.read(), due, agenda, "aide:review", "note_pressure"),
+    createMaintenanceInput(f.context, f.read(), sameDue ? due : "2000-01-01T00:00:00.000Z", agenda, "aide:review", "note_pressure"),
   ]);
   assert.equal(a.metadata.uid, b.metadata.uid);
   assert.equal(f.aide.topics.inputStore.list().length, 1);
@@ -299,22 +299,19 @@ test("reducing an older Note outside the count sample continues consolidation wi
   const { refreshNotePressure, dueNotePressure } = await import("../plugins/personal/note/pressure.ts");
   const { retireNote } = await import("../plugins/personal/note/service.ts");
   await f.resources.replace(f.read(), { ...f.read().spec, maxNotes: 1 }, f.read().status);
-  const older = await f.note({ text: "older redundant matter" }, "older");
-  const oldResource = await f.get(older.noteId);
-  await f.resources.patchStatus(oldResource, { updatedAt: "2000-01-01T00:00:00.000Z" });
-  const oldVersion = noteVersion(await f.get(older.noteId));
-  for (let i = 0; i < 3; i++) await f.note({ text: `recent ${i}` }, `recent-${i}`);
+  const references = [];
+  for (let i = 0; i < 4; i++) references.push(await f.note({ text: `matter ${i}` }, `note-${i}`));
   await refreshNotePressure(f.context, f.read());
   const agenda = await dueNotePressure(f.resources, f.read());
   assert.equal(agenda[0]!.pressure.count, 2); assert.equal(agenda[0]!.pressure.truncated, true);
-  assert.ok(!agenda[0]!.pressure.notes.some(n => n.noteId === older.noteId));
-  await retireNote(f.resources, f.read(), { noteId: older.noteId, version: oldVersion, reason: "no independent value" });
+  const outside = references.find(n => !agenda[0]!.pressure.notes.some(candidate => candidate.noteId === n.noteId))!;
+  await retireNote(f.resources, f.read(), { ...outside, reason: "no independent value" });
   await refreshNotePressure(f.context, f.read());
-  assert.equal(f.read().status.notePressure!.version, agenda[0]!.pressure.version, "threshold sample stayed unchanged");
+  assert.equal(f.read().status.notePressure!.version, agenda[0]!.pressure.version, "bounded sample stayed unchanged");
   await completePressure(f, agenda, "live");
   assert.equal((await dueNotePressure(f.resources, f.read(), Date.now() + 61_000)).length, 1, "real reduction schedules another bounded pass");
   await completePressure(f, agenda, "no-reduction-execution");
-  assert.equal((await dueNotePressure(f.resources, f.read(), Date.now() + 61_000)).length, 0, "no reduction stops unchanged work");
+  assert.equal((await dueNotePressure(f.resources, f.read(), Date.now() + 61_000)).length, 0, "unchanged pressure extends the retry delay");
 });
 
 
@@ -340,8 +337,29 @@ test("stored per-Note review metadata is discarded without changing content or a
 async function completePressure(f: Awaited<ReturnType<typeof setup>>, pressure: import("../plugins/personal/note/pressure.ts").NotePressureTopic[], executionId?: string) {
   const { assessInput } = await import("../plugins/personal/topic/assess.ts");
   if (executionId) await f.resources.patchStatus(f.read(), { execution: { id: executionId, startedAt: new Date().toISOString() } });
-  const review = await createReviewInput(f.context, f.read(), new Date().toISOString(),
+  const review = await createMaintenanceInput(f.context, f.read(), new Date().toISOString(),
     await maintenanceAgenda(f.resources, []), "aide:review", "note_pressure", { cooldownSeconds: 60, instructions: "Review pressure",
-      plan: { materialVersion: "pressure-test", weaveRevision: 0, absorption: [], notePressure: pressure } });
+      plan: { weaveRevision: 0, absorption: [], notePressure: pressure } });
   if (executionId) await assessInput(f.resources, f.read(), executionId, { inputId: review.metadata.name, summary: "Pressure reviewed" });
 }
+
+test("Note renaming preserves pressure identity and backoff while text changes reset it", async t => {
+  const f = await setup(t);
+  const { refreshNotePressure, dueNotePressure } = await import("../plugins/personal/note/pressure.ts");
+  await f.resources.replace(f.read(), { ...f.read().spec, maxNotes: 1 }, f.read().status);
+  const first = await f.note({ name: "before", text: "same content" }, "one");
+  await f.note({ text: "another matter" }, "two");
+  await refreshNotePressure(f.context, f.read());
+  const pressure = f.read().status.notePressure!;
+  await completePressure(f, await dueNotePressure(f.resources, f.read()), "live");
+  const renamed = await f.note({ ...first, name: "after", text: "same content" }, "rename");
+  await refreshNotePressure(f.context, f.read());
+  assert.equal(f.read().status.notePressure?.version, pressure.version);
+  assert.equal(f.read().status.notePressure?.attempts, 1);
+  assert.equal((await dueNotePressure(f.resources, f.read())).length, 0);
+  await f.note({ ...renamed, text: "new content" }, "change");
+  await refreshNotePressure(f.context, f.read());
+  assert.notEqual(f.read().status.notePressure?.version, pressure.version);
+  assert.equal(f.read().status.notePressure?.attempts, 0);
+  assert.equal((await dueNotePressure(f.resources, f.read())).length, 1);
+});

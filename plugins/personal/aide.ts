@@ -120,7 +120,7 @@ export class Personal {
       };
       const assess = async (input: AssessInput, toolCallId: string) => {
         const c = active();
-        const result = await assessInput(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, toolCallId, topicPolicy(this.options.topic));
+        const result = await assessInput(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, toolCallId);
         this.log.info({ topicId, inputId: input.inputId, workUids: input.workRequests?.map(r => r.workUid) ?? [] }, "Chief assessment completed");
         return result;
       };

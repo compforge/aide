@@ -25,15 +25,12 @@ export interface TopicStatus extends ResourceContext {
   absorbed?: Record<string, string>;
   absorbedSummaries?: Record<string, string>;
   agent?: import("@compforge/aide-plugin").AgentStatus;
-  nextAbsorbAt?: string;
-  absorbAttempts?: number;
-  /** Capacity maintenance has its own clock and yields one activation to waiting business material. */
-  capacityRequests?: Partial<Record<"aide:triage" | "aide:organize", { checkedAt: string; inputId: string }>>;
+  chiefWorkload?: import("./workload.ts").ChiefWorkload;
+  /** Secretary retains request identity and no-progress backoff independently of Input retention. */
+  maintenanceRequests?: Partial<Record<"aide:review" | "aide:triage" | "aide:organize", { checkedAt: string; inputId: string; fingerprint: string; attempts: number }>>;
   yieldToInput?: boolean;
   reviewCheckedAt?: string | null;
   idleReviewCount?: number;
-  /** Material inspected by the last completed maintenance turn; not an absorption receipt. */
-  reviewedMaterialVersion?: string;
   idleReviewReset?: { at: string; previousCount: number } | null;
   idleSince?: string;
   execution?: LoopExecution | null;

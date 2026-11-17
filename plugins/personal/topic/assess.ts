@@ -1,5 +1,4 @@
-import { reviewOutcome } from "./review-outcome.ts";
-import { topicPolicy, type TopicPolicy } from "./config.ts";
+import { inputOutcome } from "./input-outcome.ts";
 import { commitStatus } from "../status.ts";
 import { agentCall } from "../observation/reference.ts";
 import { z } from "zod";
@@ -19,7 +18,7 @@ export type AssessInput = z.input<typeof AssessInputSchema>;
  * @spec Assessment does not update Topic summary/recent; meaningful understanding is maintained explicitly.
  * @link docs/personal/chief.md
  */
-export async function assessInput(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, toolCallId?: string, policy: TopicPolicy = topicPolicy()) {
+export async function assessInput(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, toolCallId?: string) {
   const args = AssessInputSchema.parse(raw);
   if (new Set(args.workRequests.map(r => r.workUid)).size !== args.workRequests.length) throw new Error("Duplicate Work request");
   for (let n = 0; ; n++) {
@@ -37,7 +36,7 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
       throw new Error("Input is already admitted to another Chief execution");
     const at = new Date().toISOString();
     const { handle, guards } = await prepareWorkRequests(resources, input, topics, args.workRequests, at);
-    const outcome = await reviewOutcome(resources, input, c, topics, policy, at, executionId);
+    const outcome = inputOutcome(input, c, at);
     try {
       await commitStatus(resources, [
         ...guards,
@@ -45,7 +44,7 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
           lastError: undefined, errorAt: undefined, retryable: undefined,
           ...(toolCallId ? { completedBy: agentCall(c.status, toolCallId) } : {}), completedAt: at, result: { summary: args.summary, disposition: "completed" },
         } } },
-        ...outcome,
+        { operation: "patchStatus", resource: c, patch: outcome },
       ]);
       return { assessed: args.inputId, workUids: args.workRequests.map(r => r.workUid) };
     } catch (e) { if (n >= 8 || !/version conflict/.test(String(e))) throw e; }

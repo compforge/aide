@@ -32,6 +32,7 @@ test("Deferred Batch seals its members and Chief completes only the Batch", asyn
     assert.equal(f.aide.topics.inputStore.get("a")!.status.assess?.completedAt, undefined);
   }), f.root(), f.policy);
   assert.equal((await batchById(f.resources, batch.metadata.uid))!.status.phase, "completed");
+  assert.equal(f.root().status.chiefWorkload?.completed, 1, "one Batch, including duplicate receipt, counts once");
   const detail = inputDetail(f.aide, "a")!;
   assert.equal(detail.batch!.status.assess?.result?.summary, "whole task checked");
   assert.equal(detail.input.status.assess?.completedAt, undefined);
@@ -39,6 +40,7 @@ test("Deferred Batch seals its members and Chief completes only the Batch", asyn
   assert.equal(f.aide.topics.inputStore.storage.canCollect("personal", f.aide.topics.inputStore.get("a")!), false);
   await f.project();
   const first = f.aide.topics.inputStore.get("a")!;
+  assert.equal(f.root().status.chiefWorkload?.completed, 1, "member projection cannot count again");
   assert.equal(first.status.assess?.result?.summary, "whole task checked");
   assert.equal(first.status.assess?.executionId, "one");
   await f.project(); assert.equal(f.aide.topics.inputStore.get("a")!.metadata.resourceVersion, first.metadata.resourceVersion);

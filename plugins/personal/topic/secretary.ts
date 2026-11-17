@@ -1,3 +1,6 @@
+import { digest } from "../chief-model.ts";
+import { chiefWorkload } from "./workload.ts";
+import { tryCreateMaintenanceInput } from "./maintenance-input.ts";
 import { isResourceVersionConflict, type PluginContext } from "@compforge/aide-plugin";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { prepareInputs, reconcileBatches } from "../batch/reconcile.ts";
@@ -11,7 +14,7 @@ import { maintenanceAgenda, ensureCapacityInputs } from "./maintenance.ts";
 import { reviewEvidence } from "./review-evidence.ts";
 import type { ReviewPreparation } from "./review.ts";
 import { TOPIC_TYPE, type TopicResource } from "./model.ts";
-import { idleReviewSchedule, topicReview, reviewMaterialVersion, tryCreateReviewInput } from "./review.ts";
+import { idleReviewSchedule, topicReview } from "./review.ts";
 import { readTopicSubtree, understandingVersion, pendingAbsorption } from "./tree.ts";
 
 function maintenanceInstructions(plan: ReviewPreparation, maxChars: number): string {
@@ -29,10 +32,12 @@ async function cancelObsolete(context: PluginContext, topic: TopicResource, poli
       matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
     const input = pending.items[0];
     if (!input || input.status.assess?.executionId) continue;
-    let obsolete = origin === "aide:review" && (!isProcessingRoot(topic) || Array.isArray(input.spec.observation?.notes)
-      || (input.spec.originId === "personal.topic" && !reviewEvidence(input.spec) && input.spec.observation?.trigger === "note_pressure"));
+    let obsolete = origin === "aide:review" && !isProcessingRoot(topic);
     const evidence = reviewEvidence(input.spec);
-    if (evidence?.pressure.length && evidence.weaveRevision <= (topic.status.notifiedWeaveRevision ?? 0)) {
+    const work = chiefWorkload(topic);
+    const workloadDue = topicReview(topic.spec.review).enabled && (work.completed - work.reviewed >= policy.review.completedInputs
+      || !!work.pendingSince && Date.parse(work.pendingSince) + policy.review.idleSeconds * 1000 <= Date.now());
+    if (evidence?.pressure.length && !workloadDue && evidence.weaveRevision <= (topic.status.notifiedWeaveRevision ?? 0)) {
       const all = await readTopicSubtree(context.resources, resourceRef(topic));
       if (!pendingAbsorption(all, topic).length) {
         const targets = await Promise.all(evidence.pressure.map(entry => context.resources.page<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
@@ -74,34 +79,39 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
     matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, "aide:review"]) }, limit: 1 });
   if (outstanding.items.length) return { requeueAfterMs: next };
   const notePressure = await dueNotePressure(context.resources, topic, Date.now(), Math.max(1, Math.min(8, Math.floor((policy.contextChars - 3000) / 600))));
-  const maintenanceDue = Date.parse(topic.status.nextAbsorbAt ?? "1970-01-01") <= Date.now();
-  const weave = (topic.status.weaveRevision ?? 0) > (topic.status.notifiedWeaveRevision ?? 0) && maintenanceDue;
-  if (!due && !weave && !notePressure.length) {
-    const children = await context.resources.page<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
-      { matchIndex: { name: "liveParent", value: topic.metadata.uid }, limit: 20 });
-    if (!pendingAbsorption([topic, ...children.items], topic, false, new Map()).length) return { requeueAfterMs: next };
-  }
-  const topics = await readTopicSubtree(context.resources, resourceRef(topic));
-  const versions = new Map(await Promise.all(topics.map(async t => [t.metadata.uid,
-    understandingVersion(t, await readNotes(context.resources, t.metadata.uid, "subject"))] as const)));
-  const materialVersion = reviewMaterialVersion(topics, versions), unchanged = topic.status.reviewedMaterialVersion === materialVersion;
-  const absorption = pendingAbsorption(topics, topic, due, versions);
-  const absorb = !unchanged && absorption.length > 0 && (due || maintenanceDue);
-  if (absorb || weave || notePressure.length) {
-    const plan: ReviewPreparation = { materialVersion, weaveRevision: topic.status.weaveRevision ?? 0,
+  const work = chiefWorkload(topic);
+  const countDue = work.completed - work.reviewed >= policy.review.completedInputs;
+  const timeDue = !!work.pendingSince && Date.parse(work.pendingSince) + policy.review.idleSeconds * 1000 <= Date.now();
+  const workloadDue = topicReview(topic.spec.review).enabled && (countDue || timeDue);
+  const weave = (topic.status.weaveRevision ?? 0) > (topic.status.notifiedWeaveRevision ?? 0);
+  // Summary dependencies are scheduling facts; full Note versions remain write-safety facts.
+  const children = await context.resources.page<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
+    { matchIndex: { name: "liveParent", value: topic.metadata.uid }, limit: 20 });
+  const inspectTree = due || topic.status.conditions?.some(c => c.type === "SummaryCurrent" && c.status === "False");
+  const inspected = inspectTree ? await readTopicSubtree(context.resources, resourceRef(topic)) : [topic, ...children.items];
+  const summaryPending = pendingAbsorption(inspected, topic);
+  if (workloadDue || weave || notePressure.length || summaryPending.length) {
+    const topics = inspectTree ? inspected : await readTopicSubtree(context.resources, resourceRef(topic));
+    const versions = new Map(await Promise.all(topics.map(async t => [t.metadata.uid,
+      understandingVersion(t, await readNotes(context.resources, t.metadata.uid, "subject"))] as const)));
+    const plan: ReviewPreparation = { weaveRevision: topic.status.weaveRevision ?? 0,
       absorption: pendingAbsorption(topics, topic, true, versions).slice(0, 20), notePressure };
     const agenda = await maintenanceAgenda(context.resources, [], policy);
     if (notePressure.length) agenda.reason = "note_pressure";
-    await tryCreateReviewInput(context, topic, due ? schedule.dueAt : new Date().toISOString(), agenda,
-      "aide:review", notePressure.length ? "note_pressure" : due ? "idle" : "understanding", { plan, instructions: maintenanceInstructions(plan, policy.maxChars), cooldownSeconds: policy.capacityCooldownSeconds });
+    const fingerprint = digest([weave ? plan.weaveRevision : 0,
+      pendingAbsorption(topics, topic).map(entry => [entry.uid, entry.parentUid, entry.version]),
+      notePressure.map(entry => [entry.uid, entry.pressure.version]), workloadDue ? work.completed : null]);
+    await tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:review",
+      notePressure.length ? "note_pressure" : weave || summaryPending.length ? "understanding" : countDue ? "workload" : "idle",
+      { plan, instructions: maintenanceInstructions(plan, policy.maxChars), cooldownSeconds: policy.capacityCooldownSeconds }, policy, fingerprint);
   } else if (due && !topic.status.execution) {
     const patch = { reviewCheckedAt: new Date().toISOString(), idleReviewReset: null,
       idleReviewCount: policy.review.backoff ? Math.min(Number.MAX_SAFE_INTEGER, schedule.count + 1) : 0 };
     try { await commitStatus(context.resources, [{ operation: "patchStatus", resource: topic, patch }]); }
     catch (error) { if (isResourceVersionConflict(error)) return { requeueAfterMs: 1 }; throw error; }
-    context.logger.info("Topic review deferred without inference", { attributes: { topicUid: topic.metadata.uid,
-      reason: unchanged ? "unchanged_review_material" : "no_pending_material_or_maintenance", idleReviewCount: patch.idleReviewCount,
-      dueAt: idleReviewSchedule({ ...topic, status: { ...topic.status, ...patch } }, policy.review).dueAt } });
+    context.logger.debug?.("Secretary review check found no work", { attributes: { topicUid: topic.metadata.uid,
+      reason: "no_review_demand", completed: work.completed, reviewed: work.reviewed, idleReviewCount: patch.idleReviewCount,
+      nextAt: idleReviewSchedule({ ...topic, status: { ...topic.status, ...patch } }, policy.review).dueAt } });
   }
   return { requeueAfterMs: next };
 }
