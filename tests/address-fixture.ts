@@ -34,7 +34,7 @@ export async function fixtureMe(aide: import("../src/app.ts").Aide) {
 
 /** Inject an already assigned domain Channel fact below Me/Gate ingress, for Chief execution tests. */
 export async function receiveDomain(aide: import("../src/app.ts").Aide, input: import("../src/channel/message.ts").Incoming) {
-  const { digest } = await import("../plugins/personal/chief-model.ts");
+  const { digest } = await import("../plugins/personal/identity.ts");
   const { InputAttention } = await import("../plugins/personal/input/model.ts");
   const { initialTopicName } = await import("../plugins/personal/topic/model.ts");
   const { resourceRef } = await import("../plugins/personal/input/state.ts");

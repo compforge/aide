@@ -1,7 +1,7 @@
 import { batchForInput } from "../batch/view.ts";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { Store } from "../store.ts";
+import type { Store } from "../work/store.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { topicCandidatePage } from "../background.ts";
 import { summaryText, summaryReference } from "../note/summary.ts";
@@ -10,8 +10,8 @@ import { listNotes } from "../note/query.ts";
 import { readNote } from "../note/service.ts";
 import { inputPrinter } from "../input/printer.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
-import { WORK_TYPES, type WorkSpec } from "../resources.ts";
-import type { WorkAgentStatus } from "../work-status.ts";
+import { WORK_TYPES, type WorkSpec } from "../work/resources.ts";
+import type { WorkAgentStatus } from "../work/agent-status.ts";
 
 const text = Type.String({ minLength: 1 });
 const offset = Type.Optional(Type.Integer({ minimum: 0 }));

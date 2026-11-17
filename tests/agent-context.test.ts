@@ -12,13 +12,13 @@ import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { topicCandidates, topicCandidatePage, relatedWork } from "../plugins/personal/background.ts";
 import { Background as RouteBackground } from "../plugins/personal/route/background.ts";
-import { Background as TopicBackground } from "../plugins/personal/topic/background.ts";
+import { Background as TopicBackground } from "../plugins/personal/chief/agent/background.ts";
 import { Background as RoutineBackground } from "../plugins/personal/routine/background.ts";
 import { Background as TaskBackground } from "../plugins/personal/task/background.ts";
 import { TASK_TYPE, type TaskResource } from "../plugins/personal/task/model.ts";
 import type { RoutineResource } from "../plugins/personal/routine/model.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
-import { topicTools } from "../plugins/personal/topic/tools.ts";
+import { topicTools } from "../plugins/personal/chief/agent/topic-tools.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/personal/topic/model.ts";
 

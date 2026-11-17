@@ -1,7 +1,7 @@
-import { AgentStatusSchema } from "../session.ts";
+import { AgentStatusSchema } from "../execution/session.ts";
 import { z } from "zod";
 import type { ResourceDefinition } from "@compforge/aide-plugin";
-import { LoopExecutionSchema } from "../loop.ts";
+import { LoopExecutionSchema } from "../execution/loop.ts";
 import { ROUTE_NAME, ROUTE_TYPE, type RouteStatus } from "./model.ts";
 export const RouteDefinition: ResourceDefinition<Record<string, never>, RouteStatus> = {
   type: ROUTE_TYPE,

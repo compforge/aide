@@ -17,7 +17,7 @@ import { browseTopics } from "../plugins/personal/topic/browse.ts";
 import { gateReadTools } from "../plugins/personal/gate/read-tools.ts";
 import { canReclaimTopic } from "../plugins/personal/topic/retention.ts";
 import { topicCandidates } from "../plugins/personal/background.ts";
-import { collectTopic } from "../plugins/personal/topic/lifecycle.ts";
+import { collectTopic } from "../plugins/personal/chief/session.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 
 const log = pino({ level: "silent" });

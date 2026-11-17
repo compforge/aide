@@ -1,7 +1,7 @@
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
 import { assessBatch } from "../plugins/personal/batch/assess.ts";
 import { reconcileBatchMember } from "../plugins/personal/input/assignment.ts";
-import { prepareInputs } from "../plugins/personal/batch/reconcile.ts";
+import { prepareInputs } from "../plugins/personal/secretary/batching.ts";
 import { topicPolicy } from "../plugins/personal/topic/config.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
 import { committedStatus } from "./fixtures/resource-write.ts";
@@ -16,10 +16,12 @@ import type { PluginContext, ReconcileContext, ResourceClient } from "@compforge
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
-import { runInput, nextInputs, finalizeExecution } from "../plugins/personal/loop.ts";
+import { runInput, finalizeExecution } from "../plugins/personal/execution/loop.ts";
+import { nextInputs as nextRoleInputs } from "../plugins/personal/execution/input.ts";
+import { preparedInputs as nextInputs } from "../plugins/personal/chief/queue.ts";
 import { resourceRef, changeAssessment } from "../plugins/personal/input/state.ts";
-import { assessInput } from "../plugins/personal/topic/assess.ts";
-import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
+import { assessInput } from "../plugins/personal/chief/assess.ts";
+import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 import type { TopicResource } from "../plugins/personal/topic/model.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 
@@ -240,7 +242,7 @@ for (const race of ["status", "session", "execution"] as const) test(`Compaction
 
 test("Route compaction failure does not schedule replay of its failed Input", async t => {
   const f = fixture(t);
-  const route = await f.resources.create<Record<string, never>, import("../plugins/personal/loop.ts").LoopStatus>(ROUTE_TYPE, { name: ROUTE_NAME, spec: {} });
+  const route = await f.resources.create<Record<string, never>, import("../plugins/personal/execution/loop.ts").LoopStatus>(ROUTE_TYPE, { name: ROUTE_NAME, spec: {} });
   f.aide.topics.inputStore.submit("fixture", "route-failed", { origin: "source", originId: "fixture", text: "route-failed" });
   const agent = { harness: "route", sessionId: "route-session" };
   const calls: string[] = [];
@@ -250,19 +252,19 @@ test("Route compaction failure does not schedule replay of its failed Input", as
     throw newHarnessError("harness_compaction_failed", "summary token cap", agent);
   } } } as unknown as ReconcileContext;
   await runInput(f.context, execution, route, "route", "route-failed", "route-failed");
-  const latest = (await f.resources.get<unknown, import("../plugins/personal/loop.ts").LoopStatus>(resourceRef(route)))!;
+  const latest = (await f.resources.get<unknown, import("../plugins/personal/execution/loop.ts").LoopStatus>(resourceRef(route)))!;
   assert.equal(latest.status.agent, undefined);
   assert.deepEqual(calls, ["create", "prompt", "close"]);
   const receipt = f.aide.topics.inputStore.get("route-failed")!.status.route!;
   assert.equal(receipt.lastError, "summary token cap");
   assert.equal(receipt.nextAttemptAt, undefined);
-  assert.deepEqual(await nextInputs(f.resources, latest, 8), []);
+  assert.deepEqual(await nextRoleInputs(f.resources, latest, 8), []);
 });
 
 /** @case A successful immediate interruption preserves maintenance as pending without replaying completed business. */
 test("Immediate business can interrupt internal maintenance and unfinished maintenance remains pending", async t => {
-  const { createMaintenanceInput } = await import("../plugins/personal/topic/maintenance-input.ts");
-  const { maintenanceAgenda } = await import("../plugins/personal/topic/maintenance.ts");
+  const { createMaintenanceInput } = await import("../plugins/personal/secretary/input.ts");
+  const { maintenanceAgenda } = await import("../plugins/personal/secretary/maintenance.ts");
   const f = fixture(t), root = await f.aide.topics.ensure("a");
   const maintenance = await createMaintenanceInput(f.context, root, new Date().toISOString(), await maintenanceAgenda(f.resources, []));
   await running(f, root);
@@ -298,7 +300,7 @@ test("Ten deferred Inputs activate one bounded business batch before full-quota 
 });
 
 test("Deferred deadline uses oldest creation, independently of review, and queries are bounded", async t => {
-  const { preparedIntake } = await import("../plugins/personal/topic/scheduling.ts");
+  const { preparedIntake } = await import("../plugins/personal/chief/intake.ts");
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
   const f = fixture(t), root = await f.aide.topics.ensure("a");
   const first = await f.input("oldest", [root], InputAttention.Deferred);
@@ -313,7 +315,7 @@ test("Deferred deadline uses oldest creation, independently of review, and queri
 });
 
 for (const outcome of ["accepted", "rejected", "uncertain"] as const) test(`Deferred followUp batch ${outcome} keeps one atomic Batch receipt`, async t => {
-  const { submitPending } = await import("../plugins/personal/loop.ts");
+  const { submitChiefPending: submitPending } = await import("../plugins/personal/chief/intake.ts");
   const f = fixture(t), root = await f.aide.topics.ensure("a");
   await running(f, root);
   for (let i = 0; i < 10; i++) await f.input(`batch-${i}`, [root], InputAttention.Deferred);
@@ -347,7 +349,7 @@ for (const outcome of ["accepted", "rejected", "uncertain"] as const) test(`Defe
 
 
 test("A running Chief admits one outstanding deferred batch and resumes after its receipts", async t => {
-  const { submitPending } = await import("../plugins/personal/loop.ts");
+  const { submitChiefPending: submitPending } = await import("../plugins/personal/chief/intake.ts");
   const f = fixture(t), root = await f.aide.topics.ensure("a"); await running(f, root);
   for (let i = 0; i < 20; i++) await f.input(`bounded-${String(i).padStart(2, "0")}`, [root], InputAttention.Deferred);
   const deliveries: any[] = [];

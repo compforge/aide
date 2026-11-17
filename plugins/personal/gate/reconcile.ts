@@ -1,7 +1,7 @@
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
-import { preparedIntake } from "../topic/scheduling.ts";
+import { preparedIntake } from "../chief/intake.ts";
 import { inputPreview } from "../input/prompt.ts";
-import { finalizeExecution, runInput } from "../loop.ts";
+import { finalizeExecution, runInput } from "../execution/loop.ts";
 import type { TopicResource } from "../topic/model.ts";
 import type { TopicPolicy } from "../topic/config.ts";
 

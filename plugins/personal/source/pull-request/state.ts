@@ -1,5 +1,5 @@
 import type { PullRequestSnapshot, PullRequestKey, PullRequestScanCursor, PullRequestScanResult, ForgeReadIssue } from "@compforge/aide-plugin";
-import { digest } from "../../chief-model.ts";
+import { digest } from "../../identity.ts";
 import type { SourceInput } from "../input.ts";
 import type { SourceSnapshot } from "../snapshot.ts";
 

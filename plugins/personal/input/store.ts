@@ -4,7 +4,7 @@ import { admitInput } from "./admission.ts";
 import { Addresses } from "../address/service.ts";
 import { cloneResourceValue } from "../../../src/resource/value.ts";
 import { ResourceAlreadyExists } from "@compforge/aide-plugin";
-import { inputStatus } from "../status.ts";
+import { inputStatus } from "./conditions.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { InputDefinition } from "./definition.ts";
 import { createHash } from "node:crypto";

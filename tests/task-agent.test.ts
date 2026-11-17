@@ -1,4 +1,4 @@
-import { workPhase } from "../plugins/personal/status.ts";
+import { workPhase } from "../plugins/personal/work/status.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -13,9 +13,9 @@ import { deliver } from "../plugins/personal/route/delivery.ts";
 import { TASK_TYPE, type TaskResource } from "../plugins/personal/task/model.ts";
 import { INPUT_TYPE } from "../plugins/personal/input/model.ts";
 import { resourceRef, changeAttempt } from "../plugins/personal/input/state.ts";
-import { reportWork } from "../plugins/personal/work-report.ts";
+import { reportWork } from "../plugins/personal/work/report.ts";
 import { reconcileTask } from "../plugins/personal/task/reconcile.ts";
-import { finalizeExecution } from "../plugins/personal/loop.ts";
+import { finalizeExecution } from "../plugins/personal/execution/loop.ts";
 import { handoff } from "./input-state-fixture.ts";
 const definition = { kind: "task" as const, title: "Check", instruction: "Inspect evidence", trigger: null };
 const completed = { action: "done" as const, report: "Verified", notification: null, question: null, nextAt: null };

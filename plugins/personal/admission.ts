@@ -4,7 +4,7 @@ import { topicSubtree } from "./topic/tree.ts";
 import { isDeepStrictEqual } from "node:util";
 import { TASK_TYPE, type TaskSpec } from "./task/model.ts";
 import { GATE_TOPIC_ID, TOPIC_TYPE, type TopicSpec, type TopicStatus } from "./topic/model.ts";
-import { digest } from "./chief-model.ts";
+import { digest } from "./identity.ts";
 import { resourceRef } from "./input/state.ts";
 import type { ResourceAdmission } from "../../src/host/plugin/resource/client.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "./input/model.ts";

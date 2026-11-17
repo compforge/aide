@@ -21,7 +21,7 @@ import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.
 import { SOURCES } from "../plugins/personal/source/definition.ts";
 import { topicCandidatePage, topicParts, understanding } from "../plugins/personal/background.ts";
 import { searchRootTopics } from "../plugins/personal/weave/candidates.ts";
-import { topicTools } from "../plugins/personal/topic/tools.ts";
+import { topicTools } from "../plugins/personal/chief/agent/topic-tools.ts";
 
 function fixture(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-topic-persons-"));

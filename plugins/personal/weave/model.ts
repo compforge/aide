@@ -1,7 +1,7 @@
 import { PersonRefSchema } from "../person/model.ts";
 import type { Resource } from "@compforge/aide-plugin";
 import { z } from "zod";
-import type { LoopStatus } from "../loop.ts";
+import type { LoopStatus } from "../execution/loop.ts";
 export const WEAVE_TYPE = { apiVersion: "aide.dev/v1alpha2", kind: "Weave" } as const;
 export const WEAVE_NAME = "global";
 const topicVersion = z.object({ uid: z.string(), version: z.string() }).strict();

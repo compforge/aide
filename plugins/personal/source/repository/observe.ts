@@ -1,7 +1,7 @@
 import { patchStatus } from "../../status.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ConnectorClient, PluginContext, Resource } from "@compforge/aide-plugin";
-import { digest } from "../../chief-model.ts";
+import { digest } from "../../identity.ts";
 import { pullRequestSpec, pullRequestSourceName, type PullRequestWatch } from "../pull-request/config.ts";
 import { PULL_REQUEST_SOURCE_TYPE } from "../pull-request/definition.ts";
 import { repositorySourceName, type RepositorySourceSpec } from "./config.ts";

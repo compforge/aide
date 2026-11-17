@@ -2,7 +2,7 @@
 
 ## 整体定位
 
-Task 是同一 Topic 下、围绕稳定工作范围持续办理的载体。`agents/task/` 与 `agents/chief/` 平级，复用 `agents/pi/` 和 PiAdapter。Task 使用自己的系统提示词和必要的领域工具；[Routine](routine.md) 使用独立 Agent，二者复用原生会话管理、输入接纳与回执机制，每个资源使用独立会话，各自管理生命周期。
+Task 是同一 Topic 下、围绕稳定工作范围持续办理的载体。`plugins/personal/task/agent/` 与 `plugins/personal/chief/agent/` 平级，复用 `agents/pi/` 和 PiAdapter。Task 使用自己的系统提示词和必要的领域工具；[Routine](routine.md) 使用独立 Agent，二者复用原生会话管理、输入接纳与回执机制，每个资源使用独立会话，各自管理生命周期。
 
 当前归属保存在 `status.topic`，使用固定 UID 的 Topic 引用；spec 保存工作目标。Chief 可以在自己的树内调整空闲工作的归属，保留身份、进展、调度与办理回执；正在执行时拒绝迁移。
 
@@ -14,7 +14,7 @@ Task 与 Routine 的区别由目标是否终结决定，执行次数与时长不
 
 ## CRD
 
-类型为 `aide.dev/v1alpha4 Task`。完整字段见 [模型](../../plugins/personal/task/model.ts)与[状态 Schema](../../plugins/personal/work-status.ts)。
+类型为 `aide.dev/v1alpha4 Task`。完整字段见 [模型](../../plugins/personal/task/model.ts)与[状态 Schema](../../plugins/personal/work/agent-status.ts)。
 
 ### Spec
 

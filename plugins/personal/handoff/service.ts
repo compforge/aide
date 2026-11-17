@@ -3,11 +3,11 @@ import { isGateTopic, isRootTopic } from "../topic/boundary.ts";
 import { z } from "zod";
 import type { Logger } from "pino";
 import type { Resource, ResourceCommit } from "@compforge/aide-plugin";
-import type { Store } from "../store.ts";
+import type { Store } from "../work/store.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
 import { resourceRef } from "../input/state.ts";
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import { commitStatus } from "../status.ts";
 import { HANDOFF_TYPE, handoffSummary, HandoffSpecSchema, HandoffStatusSchema, type Handoff, type HandoffSpec, type HandoffStatus } from "./model.ts";
 

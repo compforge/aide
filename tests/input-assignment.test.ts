@@ -15,10 +15,11 @@ import { assignInput, registerInputs } from "../plugins/personal/input/assignmen
 import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../plugins/personal/input/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
-import { ensureCapacityInputs } from "../plugins/personal/topic/maintenance.ts";
+import { ensureCapacityInputs } from "../plugins/personal/secretary/maintenance.ts";
 import { topicPolicy } from "../plugins/personal/topic/config.ts";
-import { assessInput } from "../plugins/personal/topic/assess.ts";
-import { nextInputs, runInput } from "../plugins/personal/loop.ts";
+import { assessInput } from "../plugins/personal/chief/assess.ts";
+import { runInput } from "../plugins/personal/execution/loop.ts";
+import { preparedInputs as nextInputs } from "../plugins/personal/chief/queue.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 
 async function fixture(t: TestContext) {

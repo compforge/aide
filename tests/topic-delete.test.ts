@@ -2,7 +2,7 @@ import { receiveDomain } from "./address-fixture.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { moveMaterial, moveTopic } from "../plugins/personal/topic/organize.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
-import { assessInput } from "../plugins/personal/topic/assess.ts";
+import { assessInput } from "../plugins/personal/chief/assess.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { fixtureAddress, fixtureIncoming } from "./address-fixture.ts";

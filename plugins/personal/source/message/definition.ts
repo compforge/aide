@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ResourceDefinition } from "@compforge/aide-plugin";
-import { digest } from "../../chief-model.ts";
+import { digest } from "../../identity.ts";
 import { MessageWatchSchema } from "./config.ts";
 export const MESSAGE_SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "MessageSource" } as const;
 export const MessageSourceDefinition: ResourceDefinition = { type: MESSAGE_SOURCE_TYPE,

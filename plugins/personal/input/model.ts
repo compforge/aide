@@ -97,7 +97,7 @@ export interface Handling extends Assessment {
   assignedAt: string;
   /** Request applied; contextual handling still awaits execution confirmation. */
   appliedAt?: string;
-  request: import("../model.ts").WorkInputRequest;
+  request: import("../work/model.ts").WorkInputRequest;
 }
 export interface InputStatus {
   /** Sole membership record, pinned to the Batch resource UID. */

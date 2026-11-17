@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { ResourceValidationContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
-import { WORK_TYPES, type WorkResource } from "../resources.ts";
+import { WORK_TYPES, type WorkResource } from "../work/resources.ts";
 import { requireOrganization, requireTopic } from "./ownership.ts";
 
 /** @spec Reparenting a descendant requires a quiescent subtree at commit time, including newly arrived work.

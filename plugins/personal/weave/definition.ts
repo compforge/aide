@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ResourceDefinition } from "@compforge/aide-plugin";
-import { AgentStatusSchema } from "../session.ts";
-import { LoopExecutionSchema } from "../loop.ts";
+import { AgentStatusSchema } from "../execution/session.ts";
+import { LoopExecutionSchema } from "../execution/loop.ts";
 import { WEAVE_TYPE, WEAVE_NAME, type WeaveStatus } from "./model.ts";
 export const WeaveDefinition: ResourceDefinition<Record<string, never>, WeaveStatus> = {
   type: WEAVE_TYPE,

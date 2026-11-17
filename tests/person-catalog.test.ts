@@ -15,7 +15,7 @@ import { Aide } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { httpChannel } from "../src/api/index.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { personTools } from "../agents/chief/person-tools.ts";
+import { personTools } from "../plugins/personal/chief/agent/person-tools.ts";
 import { PERSON_TYPE, LOCAL_ME, personRef } from "../plugins/personal/person/model.ts";
 import { Persons } from "../plugins/personal/person/service.ts";
 import { messageRelation } from "../plugins/personal/source/message/relation.ts";

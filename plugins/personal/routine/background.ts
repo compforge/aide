@@ -1,5 +1,5 @@
 import type { Background as AgentBackground } from "../../../agents/background.ts";
-import type { Store } from "../store.ts";
+import type { Store } from "../work/store.ts";
 import { backgroundText, workParts } from "../background.ts";
 import type { RoutineResource } from "./model.ts";
 

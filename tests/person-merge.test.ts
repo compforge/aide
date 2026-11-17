@@ -5,7 +5,7 @@ import { reconcilePerson } from "../plugins/personal/person/reconcile.ts";
 import { personRefs } from "../plugins/personal/person/model.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
-import { personContext } from "../agents/chief/person.ts";
+import { personContext } from "../plugins/personal/chief/agent/person.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";

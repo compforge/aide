@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AgentStatusSchema } from "../session.ts";
+import { AgentStatusSchema } from "../execution/session.ts";
 import { AgentCallSchema } from "../observation/reference.ts";
 
 /** Shared execution and business receipt contract for an Input or a whole Batch. */

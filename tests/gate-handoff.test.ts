@@ -18,7 +18,7 @@ import { routeByRules } from "../plugins/personal/route/rules.ts";
 import { larkAddress, webAddress } from "../src/channel/address.ts";
 import { topicHistory } from "../plugins/personal/topic/history.ts";
 import { TOPIC_TYPE } from "../plugins/personal/topic/model.ts";
-import { digest } from "../plugins/personal/chief-model.ts";
+import { digest } from "../plugins/personal/identity.ts";
 
 const log = pino({ level: "silent" });
 

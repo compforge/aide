@@ -14,7 +14,7 @@ import { join } from "node:path";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { assessInput } from "../plugins/personal/topic/assess.ts";
+import { assessInput } from "../plugins/personal/chief/assess.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { admit } from "./input-state-fixture.ts";
 import { cancelAssignments, resourceRef } from "../plugins/personal/input/state.ts";

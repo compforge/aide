@@ -1,5 +1,5 @@
 import type { ResourceRef } from "@compforge/aide-plugin";
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import { GATE_TOPIC_ID, TOPIC_TYPE, type TopicSpec } from "./model.ts";
 
 type TopicTreeNode = { spec: Pick<TopicSpec, "parentRef"> };

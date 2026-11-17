@@ -1,6 +1,6 @@
 import "./style.css";
 import type { Approval } from "../../api/types.ts";
-import type { Work } from "../../../plugins/personal/model.ts";
+import type { Work } from "../../../plugins/personal/work/model.ts";
 import { byId } from "../shared/dom.ts";
 import { request } from "../shared/http.ts";
 import { createNavigation } from "./navigation.ts";

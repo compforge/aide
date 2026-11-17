@@ -2,7 +2,7 @@ import { mailView } from "../stream/writer.ts";
 import { INPUT_TYPE } from "../input/model.ts";
 import { OUTPUT_TYPE } from "../output/model.ts";
 import { NOTE_TYPE } from "../note/model.ts";
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import type { TopicStore } from "./store.ts";
 import { initialTopicName, GATE_TOPIC_ID, TOPIC_TYPE } from "./model.ts";
 import { topicReview, type TopicReview } from "./review.ts";

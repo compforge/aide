@@ -1,5 +1,5 @@
 import { notes } from "../note/query.ts";
-import type { Store } from "../store.ts";
+import type { Store } from "../work/store.ts";
 import { PERSON_TYPE, type PersonRef } from "../person/model.ts";
 import type { TopicResource } from "./model.ts";
 
@@ -9,7 +9,7 @@ const PERSON_LIMIT = 8;
  * @why No Input/subtree query or retention touch is needed to render recent matter associations.
  * @spec Historical UIDs never resolve to replacement Persons with the same name.
  * @case tests/topic-persons.test.ts
- * @link docs/personal/topic.md#近期相关人物
+ * @link docs/personal/chief.md#近期相关人物
  */
 export function topicPersons(store: Store, topic: TopicResource) {
   const people = new Map<string, PersonRef>();

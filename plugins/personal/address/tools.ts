@@ -1,4 +1,4 @@
-import { INPUT_ORIGINS, type ChiefToolDefinition } from "../../../agents/chief/input-tools.ts";
+import { INPUT_ORIGINS, type ChiefToolDefinition } from "../chief/agent/input-tools.ts";
 import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
@@ -8,7 +8,7 @@ import { writeSummary } from "../note/summary.ts";
 import { WriterResourceSchema } from "../note/model.ts";
 import { resourceRef } from "../input/state.ts";
 import type { Resource } from "@compforge/aide-plugin";
-import { disclosureFields, summaryDescription } from "../../../agents/context-tools.ts";
+import { disclosureFields, summaryDescription } from "../execution/agent/context-tools.ts";
 import { PersonRefsSchema } from "../person/model.ts";
 import { SensitivitySchema, VisibilitySchema } from "../disclosure.ts";
 const ref = Type.Object({ apiVersion: Type.Literal(ADDRESS_TYPE.apiVersion), kind: Type.Literal("Address"), namespace: Type.Literal("v1"), name: Type.String(), uid: Type.String() });

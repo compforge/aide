@@ -5,7 +5,7 @@ import { candidateVersion, candidatePage } from "./candidates.ts";
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
 import { WEAVE_TYPE, WEAVE_NAME, type WeaveResource } from "./model.ts";
 import { weavePolicy, separationCoolingDown } from "./config.ts";
-import { runInput, finalizeExecution } from "../loop.ts";
+import { runInput, finalizeExecution } from "../execution/loop.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 const request = () => [{ name: WEAVE_NAME, namespace: "v1" as const }];
 /** @spec Each Weave batch starts a fresh native session; durable knowledge and scan progress stay in CRDs.

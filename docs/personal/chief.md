@@ -1,22 +1,50 @@
-# Chief：判断、工具与记忆
+# Chief：输入处理、判断与记忆
 
 ## 整体定位
 
-Chief 是 Aide 面向用户的接话与分流入口，也能直接办事，职责类似 System 1：结合上下文快速判断，当轮能处理的问题直接回答或调用工具完成；需要独立推进、等待和跟踪的事情，优先关联已有 Work，再按需要创建 Task 或 Routine。分流依据是是否需要独立的工作生命周期，复杂度只是参考，调用工具不必先创建工作。
+Chief 是 Aide 在领域 root 上处理 Input／Batch 的角色：结合上下文快速判断，当轮能处理的问题直接回答或调用工具完成；需要独立推进、等待和跟踪的事情，优先关联已有 Work，再按需要创建 Task 或 Routine。分流依据是是否需要独立的工作生命周期，复杂度只是参考，调用工具不必先创建工作。
 
-Route 将用户消息或外部观察归入话题后，Chief 结合话题中的 Work 判断下一步；Topic Reconcile 按业务数据选择是否发起回顾。输入分配到 Topic、Task 或 Routine，本质是让一件事进入能解释它、承接它的上下文，具体模型见 [Personal 的主动性与上下文](README.md#主动性与上下文)。Chief 可直接处理、创建或删除工作，或通过 `assess_input` 向已有 Work 交接输入；Work Reconcile 决定如何改变状态与推进。需要用户决定时询问，没有值得打扰的新情况时保持安静。Chief 的判断质量，尤其是提示词、上下文组织与记忆机制，是 Personal Agent 的持续优化重点。
+Route 将用户消息或外部观察归入话题后，Chief 结合话题中的 Work 判断下一步；Secretary 根据处理事实与压力准备回顾等维护 Input。输入分配到 Topic、Task 或 Routine，本质是让一件事进入能解释它、承接它的上下文，具体模型见 [Personal 的主动性与上下文](README.md#主动性与上下文)。Chief 可直接处理、创建或删除工作，或通过 `assess_input` 向已有 Work 交接输入；Work Reconcile 决定如何改变状态与推进。需要用户决定时询问，没有值得打扰的新情况时保持安静。Chief 的判断质量，尤其是提示词、上下文组织与记忆机制，是 Personal Agent 的持续优化重点。
 
-Chief 使用独立的 `chief` Harness 身份，Agent 位于 `agents/chief/`；它组合 [通用 Pi](../harness/pi.md)，复用 PiAdapter 的执行与事件机制。通用边界见 [Harness](../harness/README.md)，工作生命周期与问答编排见 [Personal](README.md)。
+Chief 使用独立的 `chief` Harness 身份，Agent 位于 `plugins/personal/chief/agent/`；它组合 [通用 Pi](../harness/pi.md)，复用 PiAdapter 的执行与事件机制。通用边界见 [Harness](../harness/README.md)，工作生命周期与问答编排见 [Personal](README.md)。
 
-Chief 没有独立 CRD；持久状态由 [Topic.spec/status](topic.md#crd) 承载，执行调度由 [Topic Reconciler](topic.md#reconciler) 负责。
+Chief 没有独立 CRD；持久状态由 [Topic.spec/status](topic.md#crd) 承载，接纳和执行由 Chief Reconciler 负责，后续维护的安排由 [Secretary](secretary.md) 负责。
+
+## Reconciler
+
+### 接纳与连续执行
+
+Chief 从当前 root 的已准备待办中选择独立 Input 或 Batch；一个 Batch 对 Chief 是一项工作。Secretary 负责何时生成维护 Input 和 Deferred Batch，Chief 负责当前待办如何执行。
+
+Chief 的接收 Reconcile 先按祖先指纹分批刷新直属待办的负责人缓存、补齐缺失分派，再分别查询独立 Input 的负责人索引和 Batch 的就绪索引，具名 agent Reconcile 驱动 root Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 由 Secretary 聚合提级后按 Normal 激活；内部维护不消费业务回执。
+
+Input.assess 保存全局唯一研判和 Chief 接纳 executionId。Chief Reconcile 在 prompt / steer / followUp 之前，通过资源事务竞争 Input 接纳；已有接纳或已完成则忽略。Topic 不保存逐条 Input 的通知进度，仍保存 execution、agent 与 Weave 通知版本。assess_input 原子完成唯一研判及 Work 交接，主动读取材料不会重新接纳；后续核对可以提交完成证据。未知投递结果保留当前执行占用；执行结束后，未完成条目释放占用并等待重试。完整查询、并发和恢复契约见 [Input](input.md#归属与-chief-通知)。
+
+明确拒绝 steer / followUp 时恢复待通知状态。status.agent 保存 harness 和原生 sessionId，恢复由 SDK 承担。旧 Chief 自然结束后再释放成为子节点的原生句柄，不修改历史。
+
+root 按 Immediate → 已准备的 Deferred Batch → Normal → aide:triage → aide:organize → aide:review 选择。Secretary 可在业务执行期间准备维护 Input；维护请求保持独立。Deferred 组批策略见 [Secretary](secretary.md#deferred-归组)，成员及准备契约见 [Batch](batch.md)。
+
+维护只接纳本轮内部 Input，不消费业务回执。Immediate 可在维护期间 steer 同一 Chief，下一模型轮次切换工具；其它准备好的待办通过 followUp 排队，在实际取出时切换任务范围。工具与共享 session 的取舍见 [按 Input 选择工具](#按-input-选择工具)。运行中的 Batch 使用一个 deliveryId、一个原生消息和自身的接纳回执；成员通过 batchId 查询执行事实。
+
+普通待办查询按明确负责人索引，不发现责任树。处理当前任务时，按需工具可读取责任子树内的知识；待办查询边界不限制知识读取。
+
+### 完成与重试
+
+Chief 通过 `assess_input` 或 `assess_batch` 持久化结果。成功写入终态即完成；写入失败或执行结束仍无终态时，释放占用后重试原 Input／Batch。完成回执、Chief 工作量和 Review 覆盖水位在同一事务中提交。每个成功 Input／Batch 计一次，包含内部维护，Batch 成员投影不重复计数。计数如何触发新 Review 见 [Secretary](secretary.md#工作量与时间窗口)。
+
+Chief 不为 Secretary 增加结果确认阶段。Batch 的终态由 Input Reconcile 投影到成员；Work 办理和 Output 投递继续遵循各自的完成契约。失败恢复见 [Input](input.md#归属与-chief-通知) 和 [Batch](batch.md)。
+
+### 会话释放
+
+Chief 按 `plugins.personal.topic.idleMs` 释放静默的原生会话，保留 Topic 的认识和树结构。删除或由 root 变为 child 时，关闭旧会话；运行中的旧执行先完成再交接。Gate 保留自己的对话身份，不参与领域静默回收。Topic 的淘汰资格与删除事务见 [Topic 生命周期](topic.md#生命周期)。
 
 ## Agent
 
 ### 与 Reconciler 的协作
 
-Chief Agent 负责判断，Personal Route 负责话题归位。Topic 的接收 Controller 与 agent Controller 分别通知新材料和调用 Chief；assess_input 确认独立 Input，assess_batch 确认整批任务，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
+Chief Agent 负责判断，Personal Route 负责话题归位。Chief 的接收 Controller 与 agent Controller 分别通知新材料和调用 Chief；assess_input 确认独立 Input，assess_batch 确认整批任务，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
 
-所有 Topic 共用 Chief 配置。Personal 的 chiefSession 工厂根据调用 scope 的 ResourceRef 校验 Topic UID，装配限定该会话范围的 WorkService 与工具。工具每次执行都重新确认当前 execution，不捕获过期 verbs。
+所有 Topic 共用 Chief 配置。Chief 的 Host session 工厂根据调用 scope 的 ResourceRef 校验 Topic UID，装配限定该会话范围的 WorkService 与工具。工具每次执行都重新确认当前 execution，不捕获过期 verbs。
 
 原生会话由 Pi SDK 管理持久化；Chief scope 使用 Topic UID，防止同名重建后恢复旧会话。Operator 在 status.agent 保存配置名和 sessionId，后续原样传给 Harness verb；底座不读写这个字段。用户通过 say 收到问题，后续答复以新的 Input 进入。空闲时 prompt，运行中普通输入 followUp、紧急输入 steer；一个 invocation 可以处理多个 Input，assess_input 的业务回执分别确认完成。
 
@@ -53,9 +81,9 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 
 ### 提示词与工具
 
-各 Personal Agent 共用 `agents/personal.ts` 的助理身份与归属规则，遵守 [身份边界](../kernel.md#助理定位与身份边界)。Me 上下文明确人物和渠道身份；已知 Aide 渠道身份随入站证据提供。摘要工具保留作者和确认状态，工作交接区分已有授权、目标与背景建议；这些语义判断由 Agent 完成，不把提示词或版本校验当作归属正确性的确定性证明。
+各 Personal Agent 共用 `plugins/personal/execution/agent/identity.ts` 的助理身份与归属规则，遵守 [身份边界](../kernel.md#助理定位与身份边界)。Me 上下文明确人物和渠道身份；已知 Aide 渠道身份随入站证据提供。摘要工具保留作者和确认状态，工作交接区分已有授权、目标与背景建议；这些语义判断由 Agent 完成，不把提示词或版本校验当作归属正确性的确定性证明。
 
-当前稳定角色规则在 `agents/chief/agent.ts`，包括自然接话、按需创建工作、先检查关联工作、依据工具结果报告操作，以及对外部内容的处理原则。`plugins/personal/topic/reconcile.ts` 组装运行提示，补充 Source 判断约定、当前时间、输入与近期消息；后续回答同样作为普通 Input 接纳。
+当前稳定角色规则在 `plugins/personal/chief/agent/agent.ts`，包括自然接话、按需创建工作、先检查关联工作、依据工具结果报告操作，以及对外部内容的处理原则。`plugins/personal/chief/reconcile.ts` 组装运行提示，补充 Source 判断约定、当前时间、输入与近期消息；后续回答同样作为普通 Input 接纳。
 
 Chief 注册以下业务工具，并按上述 Input 范围向每次模型请求暴露：
 
@@ -78,7 +106,7 @@ Chief 注册以下业务工具，并按上述 Input 范围向每次模型请求�
 
 Chief 的直接回答、研判和工作交接都依赖当前话题与已有委托。当前按以下消息结构组织上下文；业务前缀的刷新与消息机制见 [Route 上下文组织](route.md#上下文组织与优化)。
 
-Chief 的话题材料由 [Topic Background](../../plugins/personal/topic/background.ts) 提供，包含当前会话的 summary、recent 和相关 Work；Chief 装配时再结合最新 Me 认识，形成最终 `Background`。每次模型请求前通过 `background()` 构造快照，Harness 调用 `text()` 生成 custom → user 前缀。读取最新资源与文本化快照分开，通用契约见 [Pi 当前业务背景](../harness/pi.md#当前业务背景)。
+Chief 的话题材料由 [Topic Background](../../plugins/personal/chief/agent/background.ts) 提供，包含当前会话的 summary、recent 和相关 Work；Chief 装配时再结合最新 Me 认识，形成最终 `Background`。每次模型请求前通过 `background()` 构造快照，Harness 调用 `text()` 生成 custom → user 前缀。读取最新资源与文本化快照分开，通用契约见 [Pi 当前业务背景](../harness/pi.md#当前业务背景)。
 
 ```text
 system：Chief 的固定职责、沟通规则和授权边界
@@ -104,6 +132,10 @@ assistant / tool：结合新进展回答或交接，避免重复创建工作
 
 ### 上下文与记忆
 
+root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子节点没有独立 Chief，局部 summary 仍由当前 root Chief 维护。assess 保存单次处理事实，summary 仅在长期认识变化时修订；近期事项按同一事项维护 Note。静默处理一条 Input 不要求修订认识。
+
+原生会话通过 Harness 支持的方式初始化、持久化与恢复。新父 Topic 的 Chief 读取子主题认识，不拼接、改写子 Chief 的原生会话文件，不重放已完成 Input。模型请求前的业务背景使用 [Background](../harness/pi.md#当前业务背景) 通道；完整的吸收和回收约束见 [Topic](topic.md#主题认识与汇总)。
+
 Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-hermes-memory](https://github.com/chandra447/pi-hermes-memory)，由 Pi 的扩展加载器显式加载。
 事项认识由 Note 承载，主题、人物、场合和工作的长期认识由各自 summary 承载，Topic tree 保存主题组织关系；Hermes 提供通用记忆与检索。职责与沉淀主线见 [Personal](README.md#从-input-到认识与成果)。
 
@@ -111,7 +143,7 @@ Chief 在同一轮 `aide:review` 中读取待整理 Note 的完整内容，通�
 
 #### 人物认知
 
-Chief 每轮读取共享目录中的 Me，将姓名、用户明确修正和精简后的当前认识放入上下文。其它人物通过 list_persons / read_person 按需查询；工具读取完整资料和最新版本。Topic 背景中的[近期相关人物](topic.md#近期相关人物)只提供引用与名称，供 Chief 发现需要进一步读取的人物，不自动携带所有人的认识。
+Chief 每轮读取共享目录中的 Me，将姓名、用户明确修正和精简后的当前认识放入上下文。其它人物通过 list_persons / read_person 按需查询；工具读取完整资料和最新版本。Topic 背景中的[近期相关人物](chief.md#近期相关人物)只提供引用与名称，供 Chief 发现需要进一步读取的人物，不自动携带所有人的认识。
 
 summarize_person 接受人物 ID、uid、read_person 返回的 summaryVersion 以及修订后的长期 summary。近期计划、交往和参与事项通过统一 upsert_note 的 people 关联 Person，保留实际作者和确认状态，不从他人的表达推断本人意图。详见[有界认识与近期依据](README.md#有界认识与近期依据)。
 工具只更新人物认识，无法改写外部身份或 Me 标记。用户修正直接保存到同一个 summary，Chief 继续维护时应保留其含义。发生版本冲突时重新读取并合并；Web 编辑与其它会话更新在下一轮可见。用户的明确修正优先于历史推断和 Hermes 记忆。
@@ -160,6 +192,26 @@ PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_star
 ### 与 Route 的协作
 
 输入分派契约见 [Route](route.md)。Chief 可以研判当前 Topic 子树的材料并按需交给 Work；Route 与 Chief 隔离原生上下文，共用 Hermes 长期记忆，Route 只检索、Chief 可以维护。Default 的 Chief 按普通话题规则判断，不因兜底身份获得额外授权。
+
+### 近期相关人物
+
+近期事项保存为独立 Note CRD，`spec.subject` 关联 Topic / Task / Routine，`spec.people` 关联人物。省略 people 保留已有引用，[] 清空；历史人物可悬空。完整契约见 [Note](note.md)。
+
+上下文里的 persons 从当前 Topic 自身 Note 查询窗口中按 UID 去重，最多预览 8 人，返回 source=recentNotes、Note 数和省略人数；不回查 Input 或递归汇总子树。父 Topic 不复制子 Note。人物删除或重建时显示 unavailable，不展开私密资料。
+
+Route、Chief、Weave 的列表在确定范围、排序和 offset 后，逐条补充活动、人物名称等派生信息，达到条数或字符预算即停止，最多多计算一条因字符预算放不下的候选；nextOffset 指向未返回的下一条。人物名称采用只读投影，不刷新 Person 的访问时间，不开启写事务。Note 自动预览同样最多携带 8 个引用，超出部分以 peopleOmitted 标明，完整引用保留在 Note 中并可分页读取。完整 Topic 读取只解析所选 Topic 的人物。
+
+`catalogFingerprint` 根据已加载的 Topic UID、名称、组织调整依据、认识版本和最近 Input 时间计算，覆盖目录顺序、名称、组织调整依据及已记录的认识；`fingerprint` 根据本页实际返回内容计算。目录指纹不为未展示项查询活动、人物名称，也不承诺这些派生数据仍然有效，依赖详情前重新读取相关页面。
+
+共同人物仅是语义关联的参考，结合名称、summary、近期活动与组织调整原因判断；不按人物交集阈值自动归组，也不以缺少交集否定关联。Me 的广泛出现尤其不能充当归组理由。人物关联变化保留在 Note 内容版本中，后续整理或定时回顾时按需纳入判断。验证见 `tests/topic-persons.test.ts`。
+
+### 研判与上下文
+
+assess_input 保存单次研判回执并原子交接 Work。summarize_topic 使用内容 version 修订长期认识，absorbed 使用直接子 Topic 的 understandingVersion；提交时校验 summary 旧值、当前执行与真实归属，并在事务内查询子 Note 版本。upsert_note 默认当前 Topic，可指定子树中的 subject，通过 people 关联人物；不同 Note 不互相锁住。完整规则见 [Note](note.md)。
+
+list_topics 提供摘要预览和普通 Note 名称目录，`notes.total` 表示活跃普通 Note 总数。read_topic 返回对象认识与目录，`nextOffset` 非空时继续读取；Note 正文通过 read_note 按 ID 获取，目录以外的发现使用 list_notes。确认 absorbed 版本前读取相关的完整证据。
+
+maxChars 默认 4000，是普通 Note 与 summary Note 共用的篇幅软预算；单篇存储上限仍为 16000。maxNotes 默认 10，超过直属活跃普通 Note 数量或单篇篇幅预算时，按 [Note 整理](note.md#数量与篇幅驱动的整理) 安排 Chief。contextChars 默认 48000。近期依据仍受统一数量和字符预算约束。详情见[配置](../configuration.md#topic-消费策略)。
 
 ## 验证
 

@@ -1,4 +1,4 @@
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import { SensitivitySchema, VisibilitySchema } from "../disclosure.ts";
 import { PersonRefSchema } from "../person/model.ts";
 import { prepareSummary } from "../note/summary.ts";
@@ -47,7 +47,7 @@ async function targetTopic(resources: ResourceClient, owner: Readonly<TopicResou
  * @spec Long-lived summary and child review receipts can change independently; neither appends a matter Note.
  * @spec Reviewed child versions are checked atomically before they can be reclaimed.
  * @case tests/notes.test.ts
- * @link docs/personal/topic.md#研判与上下文
+ * @link docs/personal/chief.md#研判与上下文
  */
 export async function summarizeTopic(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, maxChars: number) {
   const args = TopicContextSchema.parse(raw);

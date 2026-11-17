@@ -7,10 +7,10 @@ import { ORGANIZATION_COOLDOWN_MS } from "../weave/config.ts";
 import { OrganizationSchema } from "./ref.ts";
 import { z } from "zod";
 import type { ResourceClient } from "@compforge/aide-plugin";
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { resourceRef } from "../input/state.ts";
-import { WORK_TYPES, type WorkResource } from "../resources.ts";
+import { WORK_TYPES, type WorkResource } from "../work/resources.ts";
 import { TOPIC_TYPE, type TopicResource } from "./model.ts";
 import { readTopicSubtree } from "./tree.ts";
 

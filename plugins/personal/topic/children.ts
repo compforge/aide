@@ -1,4 +1,4 @@
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
 import { TOPIC_TYPE } from "./model.ts";
 import type { TopicStore } from "./store.ts";

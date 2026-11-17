@@ -9,7 +9,7 @@ import { personalConnectorConfig } from "../plugins/personal/source/connectors.t
 import { iconFor } from "@compforge/aide-plugin";
 import { initialTopicName } from "../plugins/personal/topic/model.ts";
 import { ROUTE_HARNESS } from "../plugins/personal/route/model.ts";
-import { personalExecution } from "../plugins/personal/execution-context.ts";
+import { personalExecution } from "../plugins/personal/execution/context.ts";
 import { ResourceStorage } from "./host/resource/storage.ts";
 import { OutputDisclosure } from "../plugins/personal/output/disclosure.ts";
 import { isChannelAddress } from "./channel/address.ts";

@@ -1,5 +1,5 @@
 import type { Background as AgentBackground } from "../../../agents/background.ts";
-import type { Store } from "../store.ts";
+import type { Store } from "../work/store.ts";
 import { backgroundText, routeParts } from "../background.ts";
 
 /** Current Route background, captured before one model request. */

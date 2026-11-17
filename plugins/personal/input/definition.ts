@@ -4,11 +4,11 @@ import { inputExpiry, inputHardExpiry, inputPressure } from "./retention.ts";
 import { InputClassificationFields } from "../disclosure.ts";
 import { channelPromotion } from "./identity.ts";
 import { obsoleteReplies, replyIdentity } from "../address/reply.ts";
-import { validateReviewRequest } from "../topic/review.ts";
+import { validateReviewRequest } from "./review.ts";
 import { PersonRefSchema } from "../person/model.ts";
 import { ConditionsSchema } from "../conditions.ts";
 import { AttemptSchema, AssessmentSchema } from "./assessment.ts";
-import { WorkInputRequestSchema } from "../model.ts";
+import { WorkInputRequestSchema } from "../work/model.ts";
 import { ResourceRefSchema, OrganizationSchema } from "../topic/ref.ts";
 import { guardAssessment } from "./assignment.ts";
 import { guardInputTopic } from "../topic/ownership.ts";
@@ -34,7 +34,7 @@ const ref = z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.st
 /**
  * @spec Internal request deduplication covers queued, running and retryable assessments.
  * @why An unfinished request retries in place; later maintenance starts a new Input after a terminal result.
- * @link docs/personal/topic.md#树内整理与维护优先级
+ * @link docs/personal/secretary.md#容量与维护请求
  * @case tests/topic-review.test.ts
  */
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {

@@ -1,6 +1,6 @@
 import { ensureGateTopic } from "../plugins/personal/gate/topic.ts";
 import { TOPIC_TYPE, GATE_TOPIC_ID } from "../plugins/personal/topic/model.ts";
-import { digest } from "../plugins/personal/chief-model.ts";
+import { digest } from "../plugins/personal/identity.ts";
 import { NoteDefinition } from "../plugins/personal/note/definition.ts";
 import type { Resource, ResourceClient, ResourceType } from "@compforge/aide-plugin";
 import type { PluginResourceStore } from "../src/host/plugin/resource/store.ts";

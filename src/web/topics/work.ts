@@ -2,7 +2,7 @@ import { renderNoteClassification } from "../shared/note-classification.ts";
 import { byId as $, element } from '../shared/dom.ts';
 import { request, errorMessage } from '../shared/http.ts';
 import { copyText } from '../shared/clipboard.ts';
-import type { Work } from '../../../plugins/personal/model.ts';
+import type { Work } from '../../../plugins/personal/work/model.ts';
 const labels: Record<Work['status'], string> = { ready: '准备执行', running: '执行中', waiting: '等你回答', scheduled: '等待触发', paused: '已暂停', done: '已完成', uncertain: '需要核对结果', invalid_result: '结果解析失败' };
 
 export function createWorkPanel(topicId: string, onChange: () => Promise<void>, signal: AbortSignal) {
