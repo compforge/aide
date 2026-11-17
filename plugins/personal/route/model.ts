@@ -1,5 +1,5 @@
 import type { Resource } from "@compforge/aide-plugin";
-import type { LoopStatus } from "../loop.ts";
+import type { LoopStatus } from "../execution/loop.ts";
 export const ROUTE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Route" } as const;
 export const ROUTE_NAME = "global";
 export const ROUTE_HARNESS = "route";

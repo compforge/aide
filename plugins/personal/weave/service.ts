@@ -5,7 +5,7 @@ import { commitStatus } from "../status.ts";
 import { separationCoolingDown } from "./config.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { understandingVersion, summaryVersion } from "../topic/tree.ts";
 import { resourceRef } from "../input/state.ts";

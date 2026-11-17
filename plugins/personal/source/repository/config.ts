@@ -1,6 +1,6 @@
 import { InputClassificationFields } from "../../disclosure.ts";
 import { z } from "zod";
-import { digest } from "../../chief-model.ts";
+import { digest } from "../../identity.ts";
 
 export const RepositoryWatchSchema = z.object({
   ...InputClassificationFields,

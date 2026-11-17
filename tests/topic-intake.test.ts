@@ -1,5 +1,5 @@
 import { receiveDomain } from "./address-fixture.ts";
-import { Background as TopicBackground } from "../plugins/personal/topic/background.ts";
+import { Background as TopicBackground } from "../plugins/personal/chief/agent/background.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -10,7 +10,7 @@ import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { routeTo } from "./input-state-fixture.ts";
-import { chiefTools } from "../agents/chief/chief-tools.ts";
+import { chiefTools } from "../plugins/personal/chief/agent/chief-tools.ts";
 import { emptyConnectors } from "../src/connector/client.ts";
 
 /** @case Pending references do not impose a per-Topic admission limit, regardless of producer. */

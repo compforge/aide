@@ -6,16 +6,16 @@ import { understandingVersion } from "./topic/tree.ts";
 import { topicPersons } from "./topic/persons.ts";
 import { recentActivity } from "./route/activity.ts";
 import { createHash } from "node:crypto";
-import type { Store } from "./store.ts";
+import type { Store } from "./work/store.ts";
 import type { TopicResource } from "./topic/model.ts";
 import { TOPIC_TYPE } from "./topic/model.ts";
-import { toWork, type WorkResource } from "./resources.ts";
+import { toWork, type WorkResource } from "./work/resources.ts";
 import type { ContextView } from "./context.ts";
 
 const preview = (text: string | undefined, limit: number) => (text ?? "").length > limit ? text!.slice(0, limit) + "… [truncated]" : text ?? "";
 /** @spec Preview omission is visible at both text and Note-count levels; full data remains available through read tools.
  * @case tests/agent-context.test.ts
- * @link docs/personal/topic.md#研判与上下文
+ * @link docs/personal/chief.md#研判与上下文
  */
 export const understanding = (context: ContextView, summaryPreviewChars = 8000, directory = projectNoteDirectory(context.recent)) => ({
   summary: preview(context.summary, summaryPreviewChars), summaryUid: context.summaryUid, summaryNote: previewNoteReference(context.summaryNote), notes: directory });
@@ -62,7 +62,7 @@ export function contextPage<T, U = T>(items: T[], offset = 0, limit = 20, projec
 /** @spec Enrich only this page's Topics (plus at most one size-overflow candidate), never the whole catalog.
  * @why Directory fingerprints use already loaded Topic facts, independent of derived activity and Person names.
  * @case tests/topic-persons.test.ts
- * @link docs/personal/topic.md#近期相关人物
+ * @link docs/personal/chief.md#近期相关人物
  */
 export function topicPage<T>(topics: readonly TopicResource[], project: (topic: TopicResource) => T, offset = 0, limit = 20) {
   const catalog = topics.map(t => ({ uid: t.metadata.uid, name: t.spec.name, version: understandingVersion(t), lastInputAt: t.status.lastInputAt, organization: t.status.organization }));

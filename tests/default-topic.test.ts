@@ -1,5 +1,5 @@
 import { receiveDomain } from "./address-fixture.ts";
-import { digest } from "../plugins/personal/chief-model.ts";
+import { digest } from "../plugins/personal/identity.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { webAddress } from "../src/channel/address.ts";
 import { fixtureIncoming } from "./address-fixture.ts";

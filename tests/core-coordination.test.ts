@@ -1,4 +1,4 @@
-import { personalExecution } from "../plugins/personal/execution-context.ts";
+import { personalExecution } from "../plugins/personal/execution/context.ts";
 import { test, expect } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,8 +10,8 @@ import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
 import { TopicStore } from "./topic-fixture.ts";
-import { Store } from "../plugins/personal/store.ts";
-import { WorkService } from "../plugins/personal/work.ts";
+import { Store } from "../plugins/personal/work/store.ts";
+import { WorkService } from "../plugins/personal/work/service.ts";
 import { topicView } from "../src/channel/view.ts";
 import type { ChannelService } from "../src/channel/service.ts";
 import { fakeOptions } from "./fake-harness.ts";

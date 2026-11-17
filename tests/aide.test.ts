@@ -10,7 +10,7 @@ import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import type { Outcome } from "./fake-harness.ts";
-import { nextOccurrence, type Work } from "../plugins/personal/model.ts";
+import { nextOccurrence, type Work } from "../plugins/personal/work/model.ts";
 
 import { fakeOptions, type Agent } from "./fake-harness.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";

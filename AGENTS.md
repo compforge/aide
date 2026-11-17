@@ -65,77 +65,64 @@ src/
   resource/value.ts        # Resource 编解码、克隆、冻结与比较
   cli/sync-harness.ts      # Harness 包同步命令入口
 plugins/personal/
-  note/                    # 独立事项 CRD、subject/people 索引与容量保留
-  person/                  # Person CRD 与跨会话人物目录
-    model.ts               # 人物资料、外部身份、Me 标记与认识
-    catalog.ts             # Host 共享资源作用域与身份唯一性校验
-    service.ts             # 人物解析、用户编辑、显式合并和 Chief 认知更新
-    reconcile.ts           # 合并后分批迁移 Address 参与者与标准删除生命周期
-    relation.ts            # 输入与 Me 的关系
-    messages.ts            # Connector 消息贡献人物事实
-  batch/                   # 独立 Batch CRD、成员归组、接纳与生命周期
-  input/                   # Input 定义、幂等接收、分页检索、保留策略与 Printer
-  output/                  # Output 定义、投递状态、action、展示投影与 Printer
-  observation/             # Input JobView、原生调用引用与业务证据关联
-  aide.ts                  # 全局 Personal 服务：领域工具装配、输入与恢复
-  plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine
-  weave/                   # 全局 Weave CRD、有界扫描与 Topic 关系整理
-  route/                   # 全局 Route CRD：规则分发、持续分类与原子分派
-  topic/                   # Topic CRD 的模型、操作与 Reconcile
-    locator.ts             # Channel / Source 提供 Topic 定位信息的领域契约
-    model.ts               # 资源定义与会话类型
-    store.ts               # 宿主侧会话、Input 消费投影与消息流
-    config.ts              # 定时协调、回顾退避、整理阈值与上下文预算
-    secretary.ts           # 确定性待办准备、批次提级、维护请求与回执水位
-    review.ts              # 回顾资格与静默检查策略
-    maintenance-input.ts   # Secretary 维护 Input 创建、去重与冷却
-    workload.ts            # Chief 完成量与 Review 覆盖窗口
-    assignment.ts          # 祖先指纹、直属待办缓存刷新与缺失分派补偿
-    reconcile.ts           # 独立接收与 agent Controller、定时回顾
+  plugin.ts                # Runner 入口：显式注册各角色与资源协调器
+  definitions.ts           # Host 资源定义组装
+  aide.ts                  # Host 应用服务：入口、执行 action、恢复与角色工厂装配
+  chief/                   # root Input/Batch 选择、接纳、执行与完成事务
+    reconcile.ts           # 独立 intake / agent Controller；保持运行中投递能力
+    intake.ts              # 从就绪 Input/Batch 选择待办并通知运行中的 Chief
+    queue.ts               # 独立 Input 优先级与到期重试选择
     assess.ts              # 原子研判完成与 Work 交接
-    state.ts               # Topic 身份检查和 CAS 更新
-  source/                  # Source 分类定义与业务观察资源
-    definition.ts          # 来源身份、名称与稳定图标
-    environment/           # EnvironmentSource
-      config.ts            # 环境观察目标与 namespace 策略
-      observe.ts           # Workload 观察、基线和变化 Input
-    message/               # MessageSource
-      config.ts            # Lark 消息观察与跟进策略
-      observe.ts           # 单聊、群内 @ 与本人发言观察、水位和短期讨论跟进
-      context.ts           # IM 有界上下文、话题根消息与缺口
-    repository/            # RepositorySource：仓库清单缓存、分页刷新与 PR 观察任务交接
-    pull-request/          # PullRequestSource：按仓库或账号扫描、合并 Input 与恢复进度
-    snapshot.ts            # Source 已提交事实与观察时间；刷新和交接进度由各 Source 持有
-    configure.ts           # 观察策略更新保留同一观察范围的 UID 与检查点
-    requirement/           # RequirementSource
-      config.ts            # 需求观察范围与配置校验
-      observe.ts           # 需求观察、水位和调度
-  config.ts                # Topic / Task / Routine / Source 配置、严格校验与默认值
-  task/                    # Task CRD
-    model.ts               # 资源定义
-    reconcile.ts           # 输入接收、持续执行与两阶段静默回收
-    agent.ts               # Host 绑定 Task / Topic 工具范围
-    config.ts              # agent 静默与 Task 保留时长
-  routine/                 # Routine CRD
-    model.ts               # 资源定义
-    reconcile.ts           # 持续职责执行与静默释放 agent
-    agent.ts               # Host 绑定 Routine / Topic 工具范围
-    config.ts              # agent 静默时长
-  model.ts                 # 共用 Work 字段、状态、消息与触发契约
-  resources.ts             # Task / Routine 聚合与 Work 视图
-  work-report.ts           # Task / Routine 原子进展与 Input 回执
-  work-status.ts           # Work Agent 状态契约
-  work.ts                  # 会话范围内 Work 创建、追加输入与删除
-  work-input.ts            # Work Reconcile 查询 Input 办理记录与应用请求
-  store.ts                 # 宿主端工作存取、消息与去重投影
+    workload.ts            # Chief 完成事实与 Review 水位写入
+    agent/                 # Host 加载：session 工厂、提示词、工具与背景
+  secretary/               # 确定性安排后续工作，无 Agent 和独立 CRD
+    reconcile.ts           # 角色注册、资源观察、空检查与过时请求取消
+    batching.ts            # 按数量和等待时间选择 Deferred 材料
+    maintenance.ts         # 直属容量检查与维护议题
+    input.ts               # 维护 Input 创建、去重与准备阶段冷却
+    review.ts              # 回顾时间窗口与退避策略
+  topic/                   # Topic CRD、树结构、归属、认识依赖与生命周期校验
+    model.ts               # 资源字段；Chief / Secretary 状态由 Topic 承载
+    review.ts              # Topic 的回顾开关契约
+    workload.ts            # 持久工作量 schema 与事实读取
+    watch.ts               # Topic 与材料变更的 Watch 映射
+    conditions.ts          # summary 汇总调谐
+    assignment.ts          # 祖先指纹与直属待办负责人缓存刷新
+    organize.ts            # 材料和子树移动的事务约束
+    retention.ts           # 安全回收条件
+    locator.ts             # Channel / Source 提供 Topic 定位信息的领域契约
+    store.ts               # Host 侧 Topic、Input 消费与消息投影
+    config.ts              # 以 Topic 为作用域的策略配置及默认值
+  gate/                    # 全局问答、领域交办；agent/ 为 Host 工厂与提示词
+  route/                   # 初始归属、规则分派；agent/ 为语义路由能力
+  weave/                   # 全局 root 关系整理；agent/ 为组织判断能力
+  task/                    # 有限目标 CRD 与 Reconcile；agent/ 绑定 Host 工具范围
+  routine/                 # 持续职责 CRD 与 Reconcile；agent/ 绑定 Host 工具范围
+  work/                    # Task / Routine 共享模型、服务、请求应用与完成回执
+    model.ts               # 共用 Work 字段与触发契约，Work 不是独立 CRD
+    resources.ts           # Task / Routine 聚合与 Work 查询视图
+    status.ts              # Work 阶段、条件与视图到状态的转换
+    store.ts               # Host 侧 Work 存取
+    agent/                 # 共享 Work 工具
+  execution/               # Personal 共用接纳、会话调用与执行收尾
+    input.ts               # 接纳资格及 Route / Work 的待办投递
+    loop.ts                # 持久接纳、Harness 调用与各类回执恢复
+    agent/                 # Host 加载的共享身份、上下文工具与输入读取
+  input/                   # Input CRD、路由/研判/办理回执、内部请求证据与成员投影
+  batch/                   # Batch CRD、原子归组与封闭成员、接纳及生命周期
+  note/                    # 独立事项与 summary、subject/people 索引与容量保留
+  person/                  # 人物身份、资料与认识；合并、联系人及消息事实协调
+  address/                 # 沟通场合、定位与参与者
+  output/                  # Output CRD、披露、投递与展示
+  handoff/                 # Gate 与领域的委托及回报
+  observation/             # Input JobView、原生调用引用与业务证据关联
+  source/                  # environment / message / repository / pull-request / requirement 观察
+  config.ts                # Personal 配置组装、严格校验与默认值
+  identity.ts              # 跨资源确定性身份摘要
+  status.ts                # Personal 状态事务组装，调用各资源的条件投影
 agents/
-  pi/                      # 通用 Pi Agent：SDK、原生工具、会话与有界 Observation 补录
-  route/                   # 专用路由 Agent，仅分类、目录和共享记忆检索
-  weave/                   # 专用主题整理 Agent，识别 root 关联并提议归组
-  task/                    # 稳定目标的持续办理 Agent，复用 Pi
-  routine/                 # 持续职责 Agent，复用 Pi
-  gate/                    # 独立 Gate Agent：全局问答与领域 Chief 交办
-  chief/                   # Personal 提示词、Person / Work / 问答 / Connector 工具
+  pi/                      # 通用 Pi：SDK、原生工具、会话与 Observation
+  background.ts            # 通用的请求背景接口
 connectors/                # 全局环境目录、需求平台访问；Forge 配置装配与 repocli 只读能力
 packages/common/           # @compforge/aide-common：跨 Host、Plugin、Connector、Channel 的公共错误契约
 packages/connector/        # @compforge/aide-connector：通用 Kind、连接描述、外部实现与调用契约
@@ -151,7 +138,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 底座提供 TypeScript controller-runtime，服务 Plugin Operator；Personal 拥有 Input、Batch、Note、Output、Person、Topic、Task、Routine 与业务判断。通用资源和调度不能导入 Personal，应用装配负责安装定义、通信 action 和投递器。
 - 修改资源更新、并发、条件写入或协调机制时，先核对 [Resource 更新契约](docs/plugin/resource.md#更新操作与并发) 与 Kubernetes / controller-runtime；通用能力缺口优先在底座解决，再接入业务调用方。明确当前实现与设计目标，不用上层逐点重试或独立版本体系替代缺失的写入语义。
 - Host / Runner 不互相导入实现。Runner 经 ResourceClient、Connector API 与 Verb 请求宿主能力，不持有 Store、凭证客户端或 Harness SDK。共享协议放在 src/protocol，公共插件契约放在 packages/plugin。
-- 每种 CRD 在所属 plugin package 下有独立目录，模型、Reconcile 和专属辅助代码就近组织；跨资源协作留在插件层。ResourceDefinition 集中声明 Schema、校验、Printer、索引与保留策略；所有写入在存储事务内校验，提交后通知 Watch。
+- 按业务职责在 plugin package 内组织模块：CRD 的模型、事务约束和生命周期就近放置；Chief / Secretary 等独立角色拥有自己的目录，即使状态存储在 Topic。Task / Routine 等兼具角色与资源的模块保持合一。Agent 是角色内部能力，放在角色的 agent/ 子目录并由 Host 工厂加载，Runner 入口不得运行时导入它；跨角色共享执行机制放在 execution/。ResourceDefinition 集中声明 Schema、校验、Printer、索引与保留策略；所有写入在存储事务内校验，提交后通知 Watch。
 - 资源身份按插件实例与 namespace 组织，引用固定 UID。同一 Controller 对同一资源串行；主资源纯 status 更新不自动唤醒自身，协作方显式声明 Watch。依赖其它资源的容量资格通过 retention.canEvict 在实际淘汰事务内重查。资源所有者决定能否释放，Host 写入只检查容量并通知独立 GC；GC 对合格 owner tree 原子请求删除，再沿 Controller / finalize 生命周期释放容量。
 - Operator 通过 Harness interface / verb 操作原生 agent loop，恢复参数由 Operator 自己保存。Personal 的 status.agent 只是调用参数；Harness verb 不读写 CRD。原生持久化、历史与恢复属于 Harness，实时投影和诊断日志不承担恢复。
 - Secretary 是 Topic 上独立的确定性 Reconcile，不调用 Agent；按数量/等待时间准备批次和内部维护 Input，Chief 只关注抽到的非 Deferred Input／Batch，负责工具选择、Agent 执行与结果。Secretary 旁观处理量、等待时间与 pressure，工作产物是 Input／Batch；Immediate／Normal 直接交给 Chief。每个成功完成的 Input／Batch 计一次 Chief 工作量（包括维护 Input），Task／Routine 普通状态不计入。Batch 是独立 CRD，成员关系只保存在 Input.status.batchId；Chief 接纳独立 Input 或 Batch，成员集合在归组后固定，当前仅包含 Deferred；Chief 只写 Batch 执行回执，Input Reconcile 投影成员研判结果，Work 办理回执保持独立。职责见 [Secretary](docs/personal/secretary.md)，批次契约见 [Batch](docs/personal/batch.md)。
@@ -175,8 +162,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - [文档导航](docs/README.md)：使用、开发与验收的阅读入口。
 - [Kernel](docs/kernel.md)、[Plugin](docs/plugin/README.md)、[Resource](docs/plugin/resource.md)：底座边界、协调、定义、事务与容量；[公共契约](packages/plugin/README.md)。
 - [Personal](docs/personal/README.md)：认知沉淀、对象与完整流程；[Input](docs/personal/input.md)、[Address](docs/personal/address.md)、[Note](docs/personal/note.md)、[Route](docs/personal/route.md)、[Topic](docs/personal/topic.md)、[Output](docs/personal/output.md)。
-- [Topic](docs/personal/topic.md)、[Weave](docs/personal/weave.md)：来源归属、知识融合、root 处理与容量回收契约。
-- [Chief](docs/personal/chief.md)：判断、提示词、上下文与记忆优化；[Person](docs/personal/person.md)、[Task](docs/personal/task.md)、[Routine](docs/personal/routine.md)。
+- [Topic](docs/personal/topic.md)：资源、归属交接、认识依赖与回收；[Secretary](docs/personal/secretary.md)：待办准备与维护调度；[Weave](docs/personal/weave.md)：全局主题关系。
+- [Chief](docs/personal/chief.md)：Input/Batch 接纳、执行、完成，以及提示词、上下文与记忆；[Person](docs/personal/person.md)、[Task](docs/personal/task.md)、[Routine](docs/personal/routine.md)。
 - [Harness](docs/harness/README.md)、[Pi](docs/harness/pi.md)：通用执行契约与原生适配。
 - [Channel](docs/channel/README.md)：[Web](docs/channel/web.md)、[Lark](docs/channel/lark.md)。
 - [Connector 与 Source](docs/connector/README.md)：[Forge](docs/connector/forge.md)、[环境](docs/connector/environments.md)、[Lark 消息](docs/connector/lark-messages.md)、[需求平台](docs/connector/requirements.md)。

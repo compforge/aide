@@ -1,8 +1,8 @@
 import { fixtureGateRef } from "./summary-fixture.ts";
 import { collectResources } from "./fixtures/resource-gc.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
-import { createMaintenanceInput } from "../plugins/personal/topic/maintenance-input.ts";
-import { maintenanceAgenda } from "../plugins/personal/topic/maintenance.ts";
+import { createMaintenanceInput } from "../plugins/personal/secretary/input.ts";
+import { maintenanceAgenda } from "../plugins/personal/secretary/maintenance.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -20,13 +20,13 @@ import { moveNote } from "../plugins/personal/note/operations.ts";
 import { listNotes, notes } from "../plugins/personal/note/query.ts";
 import { NOTE_TYPE, noteVersion, type NoteSpec, type NoteStatus } from "../plugins/personal/note/model.ts";
 import { reconcileNote } from "../plugins/personal/note/reconcile.ts";
-import { collectTopic } from "../plugins/personal/topic/lifecycle.ts";
+import { collectTopic } from "../plugins/personal/chief/session.ts";
 import { ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
-import { topicTools } from "../plugins/personal/topic/tools.ts";
+import { topicTools } from "../plugins/personal/chief/agent/topic-tools.ts";
 import { reclamationVersion } from "../plugins/personal/topic/retention.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
 import { INPUT_TYPE, InputAttention } from "../plugins/personal/input/model.ts";
-import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
+import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 const log = pino({ level: "silent" });
 async function setup(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-knowledge-"));
@@ -335,7 +335,7 @@ test("stored per-Note review metadata is discarded without changing content or a
 
 /** Exercise the production creation/completion transactions, including root pressure updates. */
 async function completePressure(f: Awaited<ReturnType<typeof setup>>, pressure: import("../plugins/personal/note/pressure.ts").NotePressureTopic[], executionId?: string) {
-  const { assessInput } = await import("../plugins/personal/topic/assess.ts");
+  const { assessInput } = await import("../plugins/personal/chief/assess.ts");
   if (executionId) await f.resources.patchStatus(f.read(), { execution: { id: executionId, startedAt: new Date().toISOString() } });
   const review = await createMaintenanceInput(f.context, f.read(), new Date().toISOString(),
     await maintenanceAgenda(f.resources, []), "aide:review", "note_pressure", { cooldownSeconds: 60, instructions: "Review pressure",

@@ -1,5 +1,5 @@
 import { deadlineClock } from "./fixtures/clock.ts";
-import { createMaintenanceInput } from "../plugins/personal/topic/maintenance-input.ts";
+import { createMaintenanceInput } from "../plugins/personal/secretary/input.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
 import { NOTE_TYPE, type NoteSpec, type NoteStatus } from "../plugins/personal/note/model.ts";
 import { reconcileNote } from "../plugins/personal/note/reconcile.ts";
@@ -19,16 +19,17 @@ import { httpChannel } from "../src/api/index.ts";
 import { inputDetail, inputList } from "../src/api/inputs.ts";
 import { topicView } from "../src/channel/view.ts";
 import { inputJob } from "../plugins/personal/observation/job.ts";
-import { topicReview, idleReviewSchedule } from "../plugins/personal/topic/review.ts";
+import { idleReviewSchedule } from "../plugins/personal/secretary/review.ts";
+import { topicReview } from "../plugins/personal/topic/review.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/personal/topic/model.ts";
 import { summaryVersion, understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { reconcileAssignments } from "../plugins/personal/topic/assignment.ts";
-import { reconcileSecretary } from "../plugins/personal/topic/secretary.ts";
-import { reconcileChief, reconcileTopic } from "../plugins/personal/topic/reconcile.ts";
+import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
+import { reconcileChief, reconcileChiefIntake } from "../plugins/personal/chief/reconcile.ts";
 import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../plugins/personal/input/model.ts";
-import { finalizeExecution } from "../plugins/personal/loop.ts";
+import { finalizeExecution } from "../plugins/personal/execution/loop.ts";
 import { topicPolicy, TopicReviewPolicySchema, type TopicPolicy } from "../plugins/personal/topic/config.ts";
-import { maintenanceAgenda } from "../plugins/personal/topic/maintenance.ts";
+import { maintenanceAgenda } from "../plugins/personal/secretary/maintenance.ts";
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -419,7 +420,7 @@ test("Immediate intake can steer a running organization pass", async t => {
   f.hooks.beforeAssess = async () => {
     await f.input("arrival", InputAttention.Immediate);
     await reconcileAssignments(f.context, f.read());
-    await reconcileTopic(f.context, { verbs: { async action(name: string, args: unknown) {
+    await reconcileChiefIntake(f.context, { verbs: { async action(name: string, args: unknown) {
       requests.push({ name, args }); return { state: "success", value: { accepted: true } };
     } } } as unknown as ReconcileContext, f.read());
   };

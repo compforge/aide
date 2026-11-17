@@ -2,7 +2,7 @@ import { isGateTopic, isProcessingRoot } from "./boundary.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { ResourceClient, ResourceReader, ResourceRef } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, initialTopicName, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 
 /** @spec Only parentRef stores hierarchy. Grouping preserves current Input ownership; explicit material moves change status.topic.
  * @link docs/personal/topic.md
@@ -24,7 +24,7 @@ export function topicPath(all: readonly TopicResource[], leaf: TopicResource): T
  * @spec Read only descendants reached through the parent index; unrelated Topic trees are never loaded.
  * @why 拓扑排序：按父子依赖逐层广度优先遍历，父节点先于子节点，无需加载全局 Topic。
  * @case tests/topic-tree.test.ts
- * @link docs/personal/topic.md#接纳与连续执行
+ * @link docs/personal/chief.md#接纳与连续执行
  */
 export function topicSubtree(root: TopicResource, children: (parent: TopicResource) => readonly TopicResource[]): TopicResource[] {
   if (root.metadata.deletionTimestamp) return [];
@@ -114,7 +114,7 @@ export async function ensureSourceTopic(resources: ResourceClient, key: string, 
 
 /** @spec Summary changes can activate parent maintenance. Note-only changes join an already active review.
  * @spec Full context review remains necessary before a child can be reclaimed.
- * @link docs/personal/topic.md#研判与上下文
+ * @link docs/personal/chief.md#研判与上下文
  */
 export function pendingAbsorption(topics: readonly TopicResource[], root: TopicResource, includeNotes = false, versions = new Map<string, string>()) {
   const children = new Map<string, TopicResource[]>();

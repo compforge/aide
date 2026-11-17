@@ -4,7 +4,7 @@ import { summaryText } from "../note/summary.ts";
 import type { ResourceValidationContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource } from "./model.ts";
 import { INPUT_TYPE } from "../input/model.ts";
-import { WORK_TYPES } from "../resources.ts";
+import { WORK_TYPES } from "../work/resources.ts";
 import { NOTE_TYPE, noteView } from "../note/model.ts";
 import type { NoteReader } from "../note/query.ts";
 import { notes } from "../note/query.ts";
@@ -19,7 +19,7 @@ export function reclamationVersion(topic: TopicResource, reader: NoteReader): st
 /** @spec Capacity rechecks current execution, dependencies and knowledge in the eviction transaction.
  * @why A release timestamp orders candidates; it cannot certify dependencies that may change independently.
  * @case tests/note-knowledge.test.ts
- * @link docs/personal/topic.md#静默回收
+ * @link docs/personal/topic.md#回收资格
  */
 export function canReclaimTopic(topic: TopicResource, context: ResourceValidationContext): boolean {
   if (isGateTopic(topic) || topic.spec.default || topic.metadata.deletionTimestamp || topic.status.execution || topic.status.agent?.sessionId || topic.status.lastError) return false;

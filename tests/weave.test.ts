@@ -1,4 +1,4 @@
-import { reconcileSecretary } from "../plugins/personal/topic/secretary.ts";
+import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
 import { isRootTopic } from "../plugins/personal/topic/boundary.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
 import { summaryText } from "../plugins/personal/note/summary.ts";
@@ -7,8 +7,9 @@ import { assignInput } from "../plugins/personal/input/assignment.ts";
 import { seedNotes } from "./fixtures/notes.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
-import { assessInput } from "../plugins/personal/topic/assess.ts";
-import { runInput, nextInputs } from "../plugins/personal/loop.ts";
+import { assessInput } from "../plugins/personal/chief/assess.ts";
+import { runInput } from "../plugins/personal/execution/loop.ts";
+import { preparedInputs as nextInputs } from "../plugins/personal/chief/queue.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { registerWeave } from "../plugins/personal/weave/reconcile.ts";
 import { candidatePage, weaveCandidates, candidateVersion, searchRootTopics } from "../plugins/personal/weave/candidates.ts";
@@ -26,8 +27,8 @@ import { WEAVE_TYPE, type WeaveStatus } from "../plugins/personal/weave/model.ts
 import { groupTopics } from "../plugins/personal/weave/service.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
 import { ensureSourceTopic, topicPath, understandingVersion } from "../plugins/personal/topic/tree.ts";
-import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
-import { collectTopic } from "../plugins/personal/topic/lifecycle.ts";
+import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
+import { collectTopic } from "../plugins/personal/chief/session.ts";
 import { summarizeTopic, upsertTopicNote } from "../plugins/personal/topic/state.ts";
 import { routeByRules } from "../plugins/personal/route/rules.ts";
 import { topicCandidates } from "../plugins/personal/background.ts";

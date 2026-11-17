@@ -18,7 +18,7 @@ Channel 先确定作者与会话事实，Personal 决定路由。Web 是本机 M
 
 单聊规则先于 `topicKey` / `topicId`：从领域 Web 页面发来的消息也归 Gate，所选 Topic 仅是上下文提示。页面提交后进入 Gate 查看回答。消息保留原 Address 和回复坐标，跨渠道共享连续性不改变投递目的地。
 
-Gate 使用独立 `agents/gate/`、`gate` Harness、提示词、工具及 `gate:<Topic UID>` 原生 session scope，不组合 Chief Agent。双方复用 Pi、Harness 执行、Input 接纳和会话恢复底座。`harnesses.gate.model` 可独立配置，缺省复用 Chief 的已解析模型；`harnesses.gate.packages` 独立配置，通过 `aide harness sync gate` 安装。
+Gate 使用独立 `plugins/personal/gate/agent/`、`gate` Harness、提示词、工具及 `gate:<Topic UID>` 原生 session scope，不组合 Chief Agent。双方复用 Pi、Harness 执行、Input 接纳和会话恢复底座。`harnesses.gate.model` 可独立配置，缺省复用 Chief 的已解析模型；`harnesses.gate.packages` 独立配置，通过 `aide harness sync gate` 安装。
 
 ## 查询与交办
 

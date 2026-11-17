@@ -11,10 +11,10 @@ import { readTopicSubtree, readTopicRoot, pendingAbsorption, understandingVersio
 import { resourceRef, topicScope } from "../plugins/personal/input/state.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
 import { relatedWork, topicParts } from "../plugins/personal/background.ts";
-import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
+import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 import { routeByRules } from "../plugins/personal/route/rules.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
-import { topicTools } from "../plugins/personal/topic/tools.ts";
+import { topicTools } from "../plugins/personal/chief/agent/topic-tools.ts";
 
 function fixture(t: { after(fn: () => Promise<void>): void }) {
   const home = mkdtempSync(join(tmpdir(), "aide-topic-tree-"));

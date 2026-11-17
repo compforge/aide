@@ -1,5 +1,5 @@
 import { fixtureGateRef } from "./summary-fixture.ts";
-import { digest } from "../plugins/personal/chief-model.ts";
+import { digest } from "../plugins/personal/identity.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { patchStatus } from "../plugins/personal/status.ts";
 import assert from "node:assert/strict";
@@ -12,7 +12,7 @@ import type { ResourceClient } from "@compforge/aide-plugin";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { createChildTopic, moveMaterial, moveTopic } from "../plugins/personal/topic/organize.ts";
-import { maintenanceAgenda } from "../plugins/personal/topic/maintenance.ts";
+import { maintenanceAgenda } from "../plugins/personal/secretary/maintenance.ts";
 import { resourceRef, assignmentWatch } from "../plugins/personal/input/state.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
@@ -71,8 +71,8 @@ test("Work moves without changing objective, schedule or history, and running co
     assert.deepEqual(moved.spec, before.spec);
     assert.equal((moved.spec as { topicId?: string }).topicId, undefined);
     assert.equal(f.aide.works().find(w => w.id === work.id)!.topicId, child.spec.id);
-    assert.deepEqual((moved.status as import("../plugins/personal/model.ts").WorkStatus).waiting, before.status.waiting);
-    assert.equal((moved.status as import("../plugins/personal/model.ts").WorkStatus).nextTriggerAt, (before.status as import("../plugins/personal/model.ts").WorkStatus).nextTriggerAt);
+    assert.deepEqual((moved.status as import("../plugins/personal/work/model.ts").WorkStatus).waiting, before.status.waiting);
+    assert.equal((moved.status as import("../plugins/personal/work/model.ts").WorkStatus).nextTriggerAt, (before.status as import("../plugins/personal/work/model.ts").WorkStatus).nextTriggerAt);
     await f.resources.patchStatus(moved as TaskResource, { execution: { id: "running-work", startedAt: new Date().toISOString() } });
     await assert.rejects(moveMaterial(f.resources, f.root(), { kind, id: work.id, topicUid: f.root().metadata.uid, reason: "Move back" }), /Finish Work/);
   }
@@ -130,8 +130,8 @@ test("Maintenance counts direct ownership and Route includes bounded activity fr
 });
 
 test("Maintenance agenda survives persistence for unnamed Topics and business Inputs precede queued reviews", async t => {
-  const { createMaintenanceInput } = await import("../plugins/personal/topic/maintenance-input.ts");
-  const { nextInputs } = await import("../plugins/personal/loop.ts");
+  const { createMaintenanceInput } = await import("../plugins/personal/secretary/input.ts");
+  const { preparedInputs: nextInputs } = await import("../plugins/personal/chief/queue.ts");
   const f = await fixture(t);
   await f.input("one"); await f.input("two");
   await f.resources.patchStatus(f.root(), { execution: null, idleSince: "2000-01-01T00:00:00.000Z" });

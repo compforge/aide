@@ -5,7 +5,7 @@ import { patchSummary } from "./summary-fixture.ts";
 import { committedStatus } from "./fixtures/resource-write.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
-import { workPhase } from "../plugins/personal/status.ts";
+import { workPhase } from "../plugins/personal/work/status.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { inputJob } from "../plugins/personal/observation/job.ts";
 import { PiObservations, ObservationConfigSchema } from "../agents/pi/observation.ts";
@@ -15,7 +15,7 @@ import { readdirSync } from "node:fs";
 import type { ReadBackground } from "../agents/background.ts";
 import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { PiAdapter } from "../src/host/harness/pi/adapter.ts";
-import { createRouteAgent } from "../agents/route/agent.ts";
+import { createRouteAgent } from "../plugins/personal/route/agent/agent.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { fixtureAddress } from "./address-fixture.ts";
@@ -39,9 +39,9 @@ import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { resolvePiConfig, type PiModelConfigInput, type PiConfig } from "../src/host/harness/pi/config.ts";
 import { createPiAgent } from "../agents/pi/agent.ts";
-import { createChiefAgent } from "../agents/chief/agent.ts";
-import { WorkService } from "../plugins/personal/work.ts";
-import { Store } from "../plugins/personal/store.ts";
+import { createChiefAgent } from "../plugins/personal/chief/agent/agent.ts";
+import { WorkService } from "../plugins/personal/work/service.ts";
+import { Store } from "../plugins/personal/work/store.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createHarnessAdapter } from "../src/host/harness/registry.ts";
@@ -311,10 +311,10 @@ test("Replay SDK groups roots and routes subsequent source input to the new root
 
 /** @case Native request wiring keeps all Personal roles separate from Me; scripted replies do not prove semantic compliance. */
 test("Personal SDK requests carry assistant policy and refresh human identity independently of agent roles", { timeout: 30_000 }, async t => {
-  const { identityBackground } = await import("../agents/personal.ts");
-  const { createTaskAgent } = await import("../agents/task/agent.ts");
-  const { createRoutineAgent } = await import("../agents/routine/agent.ts");
-  const { createWeaveAgent } = await import("../agents/weave/agent.ts");
+  const { identityBackground } = await import("../plugins/personal/execution/agent/identity.ts");
+  const { createTaskAgent } = await import("../plugins/personal/task/agent/agent.ts");
+  const { createRoutineAgent } = await import("../plugins/personal/routine/agent/agent.ts");
+  const { createWeaveAgent } = await import("../plugins/personal/weave/agent/agent.ts");
   const fixture = await setup(t, () => ({ text: "protocol fixture" }), "chief");
   await fixture.run("Direct request to Aide", "identity-chief");
   const chiefRequest = JSON.stringify(fixture.requests.at(-1)!.messages);
@@ -1009,7 +1009,7 @@ test("Pi waits for in-flight steer admission before releasing a settled binding"
 for (const kind of ["task", "routine"] as const)
 test(`${kind} native session resumes by ID with scoped reading, say and report tools`, { timeout: 30_000 }, async t => {
   let inputId = "", phase = 0;
-  let currentWork: () => import("../plugins/personal/resources.ts").WorkResource;
+  let currentWork: () => import("../plugins/personal/work/resources.ts").WorkResource;
   const fixture = await setup(t, (request, index) => {
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
     for (const tool of [`read_${kind}`, "read_input", "read_topic", "list_addresses", "read_address", "say", `report_${kind}`, "upsert_note", `summarize_${kind}`]) assert.ok(names.includes(tool));
@@ -1036,7 +1036,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
   try {
     await aide.topics.ensure("me", fixtureAddress("me"));
     const work = await aide.work("me").create({ kind, title: "Inspect evidence", instruction: "unique-work-evidence", trigger: kind === "routine" ? { cron: null, timezone: "UTC", event: "sample" } : null });
-    const { workType } = await import("../plugins/personal/resources.ts");
+    const { workType } = await import("../plugins/personal/work/resources.ts");
     const get = () => aide.personal.store.resources.get(workType(kind), work.id) as import("../plugins/personal/routine/model.ts").RoutineResource;
     currentWork = get;
     if (kind === "routine") await aide.event({ id: "first",  topicId: "me", name: "sample", text: "initial observation" });
@@ -1102,12 +1102,12 @@ test(`${kind} ${attention} Input joins the active native invocation`, { timeout:
   for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
   assert.equal(fixture.requests.length, 1);
   const resources = aide.runtime.plugins.resourceClient("personal");
-  const { workType } = await import("../plugins/personal/resources.ts");
+  const { workType } = await import("../plugins/personal/work/resources.ts");
   const { INPUT_TYPE } = await import("../plugins/personal/input/model.ts");
   const { resourceRef } = await import("../plugins/personal/input/state.ts");
   laterId = "later";
   const c = aide.topics.resource("me")!;
-  const task = aide.personal.store.resources.get<import("../plugins/personal/resources.ts").WorkSpec, import("../plugins/personal/work-status.ts").WorkAgentStatus>(workType(kind), work.id);
+  const task = aide.personal.store.resources.get<import("../plugins/personal/work/resources.ts").WorkSpec, import("../plugins/personal/work/agent-status.ts").WorkAgentStatus>(workType(kind), work.id);
   const at = new Date().toISOString();
   // Seed the result of Chief assessment; the real Work controllers own subsequent admission and execution.
   const prepared = await prepareSummary(resources, task, { text: "updated-work-understanding" });
@@ -1356,8 +1356,8 @@ test("Weave queues a review Input after busy Chief business without mixing tools
 /** @case One native loop changes provider-visible tools and rejects out-of-task assessments and stale tool names. */
 test("Chief switches Input tools inside one Pi loop when immediate business interrupts review", { timeout: 30_000 }, async t => {
   const { Type } = await import("typebox");
-  const { INPUT_ORIGINS, BUSINESS_INPUT_ORIGINS } = await import("../agents/chief/input-tools.ts");
-  type Task = import("../agents/chief/input-tools.ts").ChiefInputTask;
+  const { INPUT_ORIGINS, BUSINESS_INPUT_ORIGINS } = await import("../plugins/personal/chief/agent/input-tools.ts");
+  type Task = import("../plugins/personal/chief/agent/input-tools.ts").ChiefInputTask;
   let task: Task = { executionId: "review-run", origin: "aide:review", inputs: [
     { id: "maintenance", origin: "aide:review", immediate: false, text: "Review changed Notes" },
   ] };
@@ -1413,10 +1413,10 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
 /** @case Restoring native review history does not retain its tool scope for a new business execution. */
 test("Chief restores the same session with the new execution's Input tools", { timeout: 20_000 }, async t => {
   const fixture = await setup(t, () => ({ text: "Done" }), "chief");
-  let task: import("../agents/chief/input-tools.ts").ChiefInputTask = {
+  let task: import("../plugins/personal/chief/agent/input-tools.ts").ChiefInputTask = {
     executionId: "review", origin: "aide:review", inputs: [{ id: "review", origin: "aide:review", immediate: false, text: "Review" }],
   };
-  const inputBinding: import("../agents/chief/input-tools.ts").ChiefInputBinding = {
+  const inputBinding: import("../plugins/personal/chief/agent/input-tools.ts").ChiefInputBinding = {
     read: () => task, inputOrigin: () => task.origin, changed() {},
   };
   const first = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding });
@@ -1441,7 +1441,7 @@ test("Chief restores the same session with the new execution's Input tools", { t
 for (const [initialOrigin, origin] of [["aide:review", "source"], ["aide:review", "aide:organize"], ["channel", "aide:organize"]] as const)
 test(`Chief changes tools only when Pi delivers ${origin} followUp after ${initialOrigin}`, { timeout: 20_000 }, async t => {
   const { Type } = await import("typebox");
-  let task: import("../agents/chief/input-tools.ts").ChiefInputTask = { executionId: "initial", origin: initialOrigin, inputs: [
+  let task: import("../plugins/personal/chief/agent/input-tools.ts").ChiefInputTask = { executionId: "initial", origin: initialOrigin, inputs: [
     { id: "initial", origin: initialOrigin, immediate: initialOrigin === "channel", text: "Initial task" },
   ] };
   const action = origin === "source" ? "say" : "move_topic";

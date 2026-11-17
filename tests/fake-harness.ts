@@ -7,12 +7,12 @@ import { InputAttention, inputAttention } from "../plugins/personal/input/model.
 import { emptyConnectors } from "../src/connector/client.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
 import type { Resource } from "@compforge/aide-plugin";
-import type { WorkSpec } from "../plugins/personal/resources.ts";
-import type { WorkAgentStatus } from "../plugins/personal/work-status.ts";
+import type { WorkSpec } from "../plugins/personal/work/resources.ts";
+import type { WorkAgentStatus } from "../plugins/personal/work/agent-status.ts";
 type AgentWork = Resource<WorkSpec, WorkAgentStatus>;
 import { TASK_TYPE } from "../plugins/personal/task/model.ts";
-import { toWork } from "../plugins/personal/resources.ts";
-import { reportWork } from "../plugins/personal/work-report.ts";
+import { toWork } from "../plugins/personal/work/resources.ts";
+import { reportWork } from "../plugins/personal/work/report.ts";
 import { assessAll } from "./input-state-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
@@ -29,7 +29,7 @@ import { ConfigSchema } from "../src/config.ts";
 import type { TopicStatus } from "../plugins/personal/topic/model.ts";
 import { randomUUID } from "node:crypto";
 import type { Harness, HarnessEventSink, PromptInput } from "../src/host/harness/adapter.ts";
-import type { Work } from "../plugins/personal/model.ts";
+import type { Work } from "../plugins/personal/work/model.ts";
 export interface Outcome {
   action: "done" | "ask" | "wait"; report: string;
   notification: string | null; question: string | null; nextAt: string | null;

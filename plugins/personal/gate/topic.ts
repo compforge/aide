@@ -1,6 +1,6 @@
 import { isGateTopic } from "../topic/boundary.ts";
 import type { ResourceClient } from "@compforge/aide-plugin";
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import { GATE_TOPIC_ID, TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 
 /** @spec Gate is a persistent singleton conversation and global tree root; domain children keep independent ownership.

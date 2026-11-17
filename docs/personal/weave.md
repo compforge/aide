@@ -27,11 +27,11 @@ Topic tree 表达对主题关系的理解：A 挂到已有 B，或 A、B 形成�
 - Topic 总量：这次归组由两个节点变成三个，由容量配额与安全回收控制长期保留规模。
 - Chief 实际调用次数：共同 root 仍可能被每条输入唤醒，需要合批通知与按需研判才能减少推理。
 
-完整闭环是：**Weave 组织 root → root Chief 提炼 Note、吸收子主题认识 → 容量压力下回收安全叶子。** 配额由底座统一执行；没有安全候选时拒绝超限写入。Default 不参与归组与删除，具体见 [Topic 生命周期](topic.md#静默回收)。
+完整闭环是：**Weave 组织 root → root Chief 提炼 Note、吸收子主题认识 → 容量压力下回收安全叶子。** 配额由底座统一执行；没有安全候选时拒绝超限写入。Default 不参与归组与删除，具体见 [Topic 生命周期](topic.md#回收资格)。
 
 ### 分层收敛设计
 
-Route 初分、Chief 闲时下沉与拆分、Weave 全局归拢的目标模型见 [Topic 的分层整理与收敛](topic.md#分层-topic-的整理与收敛)。Chief 负责可调整归属与状态驱动维护，Weave 负责软 root 目标。
+Route 初分、Chief 闲时下沉与拆分、Weave 全局归拢的目标模型见 [Topic 的分层整理与收敛](topic.md#材料归属与处理责任)。Chief 负责可调整归属与状态驱动维护，Weave 负责软 root 目标。
 
 ## CRD
 
@@ -57,7 +57,7 @@ Weave Agent 判断关联价值，Controller 负责有界候选、扫描覆盖和
 
 本轮上下文的 rootCount 在 rootCountExact 为 false 时仅为下界，pendingCount 仅为本页可处理数，candidates 是实际展示集；搜索工具另行说明全局数与匹配数。一条待检查候选也可以查找批外已有 root 并挂入其中，已有子节点的 root 可以继续组织。检查结果绑定候选视图契约与 Topic 认识版本；契约改变时，旧结果失效一次，存量主题重新获得检查机会。正常结束只确认本批已检查，不代表已经归组或达到数量目标。超过软目标时，已检查且未变化的 root 在 reviewIntervalMs 后重新获得检查机会；近期独立的子树保留 15 分钟观察期，归组时读取其拆分原因。已有父主题仍可继续接纳相关 root。
 
-主题树与 Chief 接管见 [Topic](topic.md#agent-触发边界)。Weave 归组保留 Input 的当前归属，主题关系不产生通信目的地或外发授权。认识吸收和静默回收分别由 Topic / Chief 与生命周期协调负责，Weave 不替代它们。
+主题树与 Chief 接管见 [Topic](README.md#角色与协作)。Weave 归组保留 Input 的当前归属，主题关系不产生通信目的地或外发授权。认识吸收和静默回收分别由 Topic / Chief 与生命周期协调负责，Weave 不替代它们。
 
 ### 扫描与触发
 
@@ -90,7 +90,7 @@ assistant / tool
 候选批量小不代表全局 root 少；只有一条候选也可寻找批外已有父主题。主题内容是证据，不是指令；信息不足时可以不归组。当前身份背景通过 Background 通道提供，本批候选由 Reconciler 的激活请求提供。
 
 
-共同人物仅作关联线索，必须结合主题内容与活动判断，不按人物交集数量自动归组；Me 的广泛出现尤其不能充当归组理由。人物视图来自当前 root 自身的近期 Note 关联，缺省或为空不证明无关，见 [Topic 近期相关人物](topic.md#近期相关人物)。
+共同人物仅作关联线索，必须结合主题内容与活动判断，不按人物交集数量自动归组；Me 的广泛出现尤其不能充当归组理由。人物视图来自当前 root 自身的近期 Note 关联，缺省或为空不证明无关，见 [Topic 近期相关人物](chief.md#近期相关人物)。
 
 ### 当前操作：组织 Topic 关系
 
@@ -111,6 +111,6 @@ Input、Task、Routine 通过 status.topic 保存当前归属。初次路由确�
 | 推理成本 | Chief、Route、Weave、认识吸收和重试的调用次数与 token 总量 |
 | 响应质量 | 紧迫输入延迟、遗漏、重复沟通及无价值打扰 |
 
-root 数下降本身不能证明收益；必须计入整理成本，并确认重要变化没有因压缩而漏报。验证使用 [历史回放](../e2e-lark-replay.md)，不把输出数量作为强制配额。覆盖、吸收与合批的验收见 [Topic](topic.md#落地范围与验收)及 tests/weave.test.ts。
+root 数下降本身不能证明收益；必须计入整理成本，并确认重要变化没有因压缩而漏报。验证使用 [历史回放](../e2e-lark-replay.md)，不把输出数量作为强制配额。覆盖、吸收与合批的验收见 [Topic](topic.md#验收)及 tests/weave.test.ts。
 
 Weave 当前 API 版本为 aide.dev/v1alpha2。回执随 Topic 生命周期消失；归组后的子 Topic 即使保留回执，也不再出现在 root 候选索引中。

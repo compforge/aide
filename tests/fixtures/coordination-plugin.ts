@@ -1,6 +1,6 @@
 import { assignmentWatch } from "../../plugins/personal/input/state.ts";
-import { consumeWorkInputs } from "../../plugins/personal/work-input.ts";
-import type { WorkResource } from "../../plugins/personal/resources.ts";
+import { consumeWorkInputs } from "../../plugins/personal/work/input.ts";
+import type { WorkResource } from "../../plugins/personal/work/resources.ts";
 import type { PluginPackage } from "@compforge/aide-plugin";
 const task = { apiVersion: "aide.dev/v1alpha4", kind: "Task" };
 const observation = { apiVersion: "tests.aide.dev/v1alpha1", kind: "WorkObserver" };

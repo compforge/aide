@@ -1,12 +1,13 @@
-import { workPhase, workDueAt, workBlocked } from "../status.ts";
+import { workPhase, workDueAt, workBlocked } from "../work/status.ts";
 import { patchStatus } from "../status.ts";
 import { assignedTopicId } from "../topic/ownership.ts";
 import { inputPreview } from "../input/prompt.ts";
 import { assignmentWatch, cancelAssignments, resourceRef } from "../input/state.ts";
 import type { PluginContext, ReconcileContext, Watch } from "@compforge/aide-plugin";
 import { ROUTINE_TYPE, type RoutineSpec, type RoutineStatus, type RoutineResource } from "./model.ts";
-import { consumeWorkInputs } from "../work-input.ts";
-import { finalizeExecution, nextInput, runInput, submitPending } from "../loop.ts";
+import { consumeWorkInputs } from "../work/input.ts";
+import { finalizeExecution, runInput } from "../execution/loop.ts";
+import { nextInput, submitPending } from "../execution/input.ts";
 import { routinePolicy } from "./config.ts";
 
 async function cleanup(context: PluginContext, execution: ReconcileContext, routine: Readonly<RoutineResource>) {

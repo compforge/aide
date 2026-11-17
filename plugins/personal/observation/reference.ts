@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AgentStatusSchema } from "../session.ts";
+import { AgentStatusSchema } from "../execution/session.ts";
 import type { AgentStatus } from "@compforge/aide-plugin";
 
 /** Native identity of the tool that committed a business fact; independent of the original admission. */

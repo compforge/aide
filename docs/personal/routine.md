@@ -2,13 +2,13 @@
 
 ## 整体定位
 
-Routine 是同一 Topic 下持续存在的委托职责。`agents/routine/` 与 Chief、Task 平级，拥有独立提示词和领域工具，复用 Pi SDK 与 PiAdapter。它比较新旧观察、处理值得推进的变化，必要时通过 say 通知或询问用户。
+Routine 是同一 Topic 下持续存在的委托职责。`plugins/personal/routine/agent/` 与 Chief、Task 平级，拥有独立提示词和领域工具，复用 Pi SDK 与 PiAdapter。它比较新旧观察、处理值得推进的变化，必要时通过 say 通知或询问用户。
 
 当前归属保存在 `status.topic`，使用固定 UID 的 Topic 引用；spec 保存工作目标与触发规则。Chief 可以在自己的树内调整空闲工作的归属，保留身份、进展、调度与办理回执；正在执行时拒绝迁移。
 
 ## CRD
 
-类型为 `aide.dev/v1alpha4 Routine`。完整字段见 [模型](../../plugins/personal/routine/model.ts)与[状态 Schema](../../plugins/personal/work-status.ts)。
+类型为 `aide.dev/v1alpha4 Routine`。完整字段见 [模型](../../plugins/personal/routine/model.ts)与[状态 Schema](../../plugins/personal/work/agent-status.ts)。
 
 ### Spec
 

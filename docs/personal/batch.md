@@ -29,4 +29,4 @@ Batch.status.phase 表达准备与调度阶段，status.assess 与 Input 使用�
 
 Batch 未终结或成员尚未回填时，成员不能删除或被容量回收。Batch 在成员回填完成前也不能删除，避免执行事实丢失。成员持有对 Batch 的引用；正常回收在终结、投影完成并满足引用与保留规则后进行。
 
-Secretary 协调未接纳 Batch，Chief 负责运行中 Batch 的执行恢复，Input Reconcile 负责成员结果投影。实现位于 `plugins/personal/batch/`；独立 Input 与 Batch 的选择位于 `topic/scheduling.ts`。验证见 `tests/input-batch.test.ts` 与 `tests/input-admission.test.ts`。
+Secretary 协调未接纳 Batch，Chief 负责运行中 Batch 的执行恢复，Input Reconcile 负责成员结果投影。实现位于 `plugins/personal/batch/`；独立 Input 与 Batch 的选择位于 `chief/intake.ts`。验证见 `tests/input-batch.test.ts` 与 `tests/input-admission.test.ts`。

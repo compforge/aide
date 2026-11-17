@@ -2,7 +2,7 @@ import { newHarnessError } from "@compforge/aide-plugin";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { routeByRules } from "../plugins/personal/route/rules.ts";
 import { larkAddress } from "../src/channel/address.ts";
-import { nextInput } from "../plugins/personal/loop.ts";
+import { nextInput } from "../plugins/personal/execution/input.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";

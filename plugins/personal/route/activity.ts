@@ -1,6 +1,6 @@
 import { INPUT_TYPE } from "../input/model.ts";
 import { notes } from "../note/query.ts";
-import type { Store } from "../store.ts";
+import type { Store } from "../work/store.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 
 /** @spec Each Route candidate includes bounded recent activity even when its summary is absent or stale.

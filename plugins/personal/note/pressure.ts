@@ -2,7 +2,7 @@ import { isGateTopic } from "../topic/boundary.ts";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { retryOnConflict, type PluginContext, type ResourceClient } from "@compforge/aide-plugin";
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import { resourceRef } from "../input/state.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 import { readTopicRoot } from "../topic/tree.ts";

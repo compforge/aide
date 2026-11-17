@@ -1,0 +1,80 @@
+import { noteDirectory } from "../../note/directory.ts";
+import { isRootTopic } from "../../topic/boundary.ts";
+import { noteFields } from "../../execution/agent/context-tools.ts";
+import { summaryText, summaryReference } from "../../note/summary.ts";
+import { reclamationVersion } from "../../topic/retention.ts";
+import { WriterResourceSchema, SubjectSchema } from "../../note/model.ts";
+import { resourceRef } from "../../input/state.ts";
+import { noteTools } from "../../note/tools.ts";
+import { isInternalInput } from "../../input/model.ts";
+import { contentVersion } from "../../context-write.ts";
+import { notes } from "../../note/query.ts";
+import { topicPersons } from "../../topic/persons.ts";
+import { createChildTopic, moveMaterial, moveTopic } from "../../topic/organize.ts";
+import type { Logger } from "pino";
+import { Type, type TSchema } from "typebox";
+import { INPUT_ORIGINS, type ChiefToolDefinition } from "./input-tools.ts";
+import type { Store } from "../../work/store.ts";
+import { TOPIC_TYPE, type TopicResource } from "../../topic/model.ts";
+import { readTopicInScope, understandingVersion } from "../../topic/tree.ts";
+import { contextPage, topicPage, understanding } from "../../background.ts";
+const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
+const tool = <T extends TSchema>(definition: ChiefToolDefinition<T>): ChiefToolDefinition<T> => definition;
+/** Root agents may inspect their own subtree, never expand unrelated trees into automatic context. */
+export function topicTools(store: Store, active: () => TopicResource, log?: Logger): ChiefToolDefinition[] {
+  const report = (resource: { kind: string; metadata: { uid: string }; status: unknown }) => {
+    log?.info({ kind: resource.kind, uid: resource.metadata.uid, organization: (resource.status as { organization?: unknown }).organization }, "Chief organization applied");
+    return result(resource);
+  };
+  return [...noteTools(store.client, active, log),
+    tool({ name: "release_topic", inputOrigins: ["aide:review"], label: "Allow Topic reclamation", description: "Explicitly allow capacity reclamation of a root whose current knowledge is dispensable or safely retained elsewhere. Read this Topic first and supply its reclamationVersion and reason. Does not delete now. New knowledge invalidates the decision. Default, busy Topics and live dependencies remain protected.",
+      parameters: Type.Object({ uid: Type.Optional(Type.String()), version: Type.String(), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
+      async execute(_id, args) {
+        const actor = active(), topic = await readTopicInScope(store.client, actor, args.uid);
+        if (!topic || !actor.status.execution || !isRootTopic(topic)) throw new Error("Release requires an active Chief and a root Topic");
+        if (reclamationVersion(topic, store.resources) !== args.version) throw new Error("Topic understanding changed; read_topic again");
+        const updated = await store.client.patchStatus(topic, { reclamation: { version: args.version, reason: args.reason,
+          writer: { resource: WriterResourceSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id } } });
+        log?.info({ topicUid: topic.metadata.uid, reason: args.reason }, "Topic approved for capacity reclamation");
+        return result({ uid: updated.metadata.uid, eligibleWhenSafe: true });
+      } }),
+    tool({ name: "create_topic", inputOrigins: ["aide:triage", "aide:organize"], label: "Create child Topic", description: "Create a meaningful child inside this root tree. Supply a stable scope and reason; do not split just to meet a count.",
+      parameters: Type.Object({ parentUid: Type.Optional(Type.String()), name: Type.String({ minLength: 1, maxLength: 200 }), summary: Type.String({ maxLength: 16000, description: "Soft budget: 4000 characters. Preserve essential knowledge." }), people: noteFields.people, reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
+      async execute(id, args) { return report(await createChildTopic(store.client, active(), args, id)); } }),
+    tool({ name: "move_input", inputOrigins: ["aide:triage"], label: "Move Input", description: "Move an Input's current ownership within this tree. Finish any admitted assessment first. Facts, routing history and processing receipts remain intact.",
+      parameters: Type.Object({ inputId: Type.String(), topicUid: Type.String(), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
+      async execute(_id, args) { return report(await moveMaterial(store.client, active(), { ...args, id: args.inputId, kind: "Input" })); } }),
+    tool({ name: "move_work", inputOrigins: ["aide:triage"], label: "Move Work", description: "Move an idle Task or Routine within this tree; preserves objective, schedule, identity and progress. Retry after running work finishes.",
+      parameters: Type.Object({ kind: Type.Union([Type.Literal("Task"), Type.Literal("Routine")]), id: Type.String(), topicUid: Type.String(), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
+      async execute(_id, args) { return report(await moveMaterial(store.client, active(), args)); } }),
+    tool({ name: "move_topic", inputOrigins: ["aide:organize"], label: "Reorganize Topic", description: "Move a descendant under another Topic in this tree, or use null parentUid to make its subtree independent. Wait for active processing in that subtree to finish. Explain the lasting boundary; Weave will see this reason.",
+      parameters: Type.Object({ uid: Type.String(), parentUid: Type.Union([Type.String(), Type.Null()]), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
+      async execute(_id, args) { return report(await moveTopic(store.client, active(), args)); } }),
+    tool({ name: "list_inputs", inputOrigins: INPUT_ORIGINS, label: "List Topic inputs", description: "Page through retained business Inputs directly assigned to a Topic in this tree, including already assessed material. Use read_input for full evidence before reorganizing.",
+      parameters: Type.Object({ topicUid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
+      async execute(_id, { topicUid, offset = 0 }) {
+        const root = active(), topic = await readTopicInScope(store.client, root, topicUid);
+        if (!topic) throw new Error("Topic is outside this root");
+        const items = store.topics.inputStore.query("topic", topic.metadata.uid).filter(i => !i.metadata.deletionTimestamp && !isInternalInput(i.spec));
+        return result(contextPage(items.map(i => ({ id: i.metadata.name, topicUid: i.status.topic!.uid, text: i.spec.text.slice(0, 240), assessed: !!i.status.assess?.completedAt })), offset));
+      } }),
+    { name: "list_topics", inputOrigins: INPUT_ORIGINS, label: "List child topics", description: "List direct children within this root's subtree with summary and Note directories for discovery. Text ending in [truncated] is incomplete; notes.total counts active ordinary Notes. Use read_note(id) for bodies and list_notes with notes.listNotes for further discovery. Before relying on incomplete context or confirming absorbed versions, use read_topic(uid) and continue with offset=nextOffset until the needed context is read. Follow this list's nextOffset to discover remaining children.",
+      parameters: Type.Object({ parentUid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
+      async execute(_id, { parentUid, offset = 0 }) {
+        const root = active(), parent = parentUid ?? root.metadata.uid;
+        if (!await readTopicInScope(store.client, root, parent)) throw new Error("Topic is outside this root");
+        return result(topicPage(store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, { matchIndex: { name: "parent", value: parent } }), t => ({
+          uid: t.metadata.uid, name: t.spec.name, persons: topicPersons(store, t), ...understanding({ ...t.status, summary: summaryText(store.resources, t), summaryUid: summaryReference(store.resources, t)?.uid, summaryNote: summaryReference(store.resources, t), recent: notes(store.resources, t.metadata.uid, "subject") }, 1200, noteDirectory(store.resources.storage, t.metadata.uid)), version: understandingVersion(t, notes(store.resources, t.metadata.uid, "subject")), organization: t.status.organization,
+        }), offset));
+      } },
+    { name: "read_topic", inputOrigins: INPUT_ORIGINS, label: "Read topic", description: "Read this root or a descendant's full summary and Note directory in text pages. Use read_note for Note bodies. A non-null nextOffset means more text remains: continue with offset=nextOffset; null marks the end. Use its content version for summarize_topic and understandingVersion for absorbed receipts after reviewing the child context.",
+      parameters: Type.Object({ uid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
+      async execute(_id, { uid, offset = 0 }) {
+        const root = active(), topic = await readTopicInScope(store.client, root, uid);
+        if (!topic) throw new Error("Topic is outside this root");
+        const text = JSON.stringify({ ...topic.spec, persons: topicPersons(store, topic), conditions: topic.status.conditions, summaryDependencies: topic.status.summaryDependencies, summary: summaryText(store.resources, topic), summaryUid: summaryReference(store.resources, topic)?.uid, summaryNote: summaryReference(store.resources, topic), notes: noteDirectory(store.resources.storage, topic.metadata.uid), organization: topic.status.organization });
+        return result({ uid: topic.metadata.uid, version: contentVersion(topic), reclamationVersion: reclamationVersion(topic, store.resources), understandingVersion: understandingVersion(topic, notes(store.resources, topic.metadata.uid, "subject")),
+          text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
+      } },
+  ];
+}

@@ -1,73 +1,56 @@
-import { batchForInput } from "./batch/view.ts";
-import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "./batch/model.ts";
+import { chiefSession } from "./chief/agent/session.ts";
+import { routeSession } from "./route/agent/session.ts";
 import { batchById } from "./batch/members.ts";
 import { expandBatch } from "./batch/admission.ts";
-import { assessBatch, type AssessBatch } from "./batch/assess.ts";
 import { isGateInput } from "./gate/input.ts";
 import { ensureGateTopic } from "./gate/topic.ts";
-import { isGateTopic, isRootTopic, isProcessingRoot } from "./topic/boundary.ts";
+import { isProcessingRoot } from "./topic/boundary.ts";
 import { MailSender } from "./stream/sender.ts";
 import { Addresses } from "./address/service.ts";
-import { addressTools } from "./address/tools.ts";
-import { summaryText, summaryReference } from "./note/summary.ts";
 import { invalidateAssignment } from "./input/assignment.ts";
-import { readNote } from "./note/service.ts";
-import { contentVersion } from "./context-write.ts";
-import { WriterResourceSchema, SubjectSchema } from "./note/model.ts";
-import { notes } from "./note/query.ts";
 import { inputIdentity } from "./input/identity.ts";
 import { observeMentionedPeople, type LarkMention } from "./person/mentions.ts";
-import { workPhase } from "./status.ts";
+import { workPhase } from "./work/status.ts";
 import { commitStatus, patchStatus } from "./status.ts";
-import { identityBackground } from "../../agents/personal.ts";
 import { weavePolicy } from "./weave/config.ts";
-import { topicTools } from "./topic/tools.ts";
-import { weaveSession } from "./weave/agent.ts";
+import { weaveSession } from "./weave/agent/session.ts";
 import { WEAVE_TYPE } from "./weave/model.ts";
 import { inputPreview } from "./input/prompt.ts";
-import { topicCandidatePage } from "./background.ts";
-import { Background as TopicBackground } from "./topic/background.ts";
-import { Background as RouteBackground } from "./route/background.ts";
-import { routineSession } from "./routine/agent.ts";
-import { taskSession } from "./task/agent.ts";
+import { routineSession } from "./routine/agent/session.ts";
+import { taskSession } from "./task/agent/session.ts";
 import type { PiConfig } from "../../src/host/harness/pi/config.ts";
-import { summarizeTopic, upsertTopicNote, updateTopic } from "./topic/state.ts";
-import { personalExecution } from "./execution-context.ts";
-import { say } from "./output/action.ts";
+import { updateTopic } from "./topic/state.ts";
+import { personalExecution } from "./execution/context.ts";
 import type { OutputStore } from "./output/store.ts";
-import { createRouteAgent } from "../../agents/route/agent.ts";
-import { agentCall } from "./observation/reference.ts";
-import { assessInput, type AssessInput } from "./topic/assess.ts";
-import { belongsToTopic, attemptOf, attemptPatch, resourceRef, changeAttempt, changeAssessment } from "./input/state.ts";
+import { attemptPatch, resourceRef, changeAttempt, changeAssessment } from "./input/state.ts";
 import { topicPolicy } from "./topic/config.ts";
-import { canActivate, eligible, immediate, finalizeExecution, type LoopStatus } from "./loop.ts";
-import { ROUTE_TYPE, type RouteStatus } from "./route/model.ts";
-import { deliver, routed } from "./route/delivery.ts";
-import { defaultDestination, routeByRules } from "./route/rules.ts";
+import { finalizeExecution, type LoopStatus } from "./execution/loop.ts";
+import { canActivate, eligible, immediate } from "./execution/input.ts";
+import { ROUTE_TYPE } from "./route/model.ts";
+import { routed } from "./route/delivery.ts";
+import { routeByRules } from "./route/rules.ts";
 import { z } from "zod";
 import type { ExecutionScope } from "../../src/protocol/verbs.ts";
 import type { TopicSpec, TopicStatus } from "./topic/model.ts";
-import { inputPrinter } from "./input/printer.ts";
 import type { Logger } from "pino";
 import type { Resource, ResourceType } from "@compforge/aide-plugin";
-import { InputAttention, inputAttention, isInternalInput, assessmentFinished, type InputReceipt, type InputSpec, type InputStatus } from "./input/model.ts";
+import { InputAttention, inputAttention, isInternalInput, type InputReceipt, type InputSpec, type InputStatus } from "./input/model.ts";
 import type { Manager } from "../../src/host/plugin/manager.ts";
 import { ApplicationRuntime } from "../../src/host/runtime/index.ts";
 import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
-import { IncomingSchema, type Incoming, type OutputView } from "./model.ts";
-import { WorkService } from "./work.ts";
-import { Store } from "./store.ts";
-import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
-import { TOPIC_TYPE, INPUT_TYPE, digest } from "./chief-model.ts";
+import { type OutputView } from "./output/view.ts";
+import { IncomingSchema, type Incoming } from "../../src/channel/message.ts";
+import { WorkService } from "./work/service.ts";
+import { Store } from "./work/store.ts";
+import { workType, WORK_TYPES, type WorkSpec } from "./work/resources.ts";
+import { TOPIC_TYPE } from "./topic/model.ts";
+import { INPUT_TYPE } from "./input/model.ts";
+import { digest } from "./identity.ts";
 import { TopicDeletionBlocked, type TopicDeletion } from "./topic/model.ts";
 import { TopicStore } from "./topic/store.ts";
 import type { InputStore } from "./input/store.ts";
-import { domainHandoffTools } from "./handoff/tools.ts";
-import { Handoffs } from "./handoff/service.ts";
-import { BUSINESS_INPUT_ORIGINS } from "../../agents/chief/input-tools.ts";
-import { gateSession } from "./gate/agent.ts";
-import { chiefTools } from "../../agents/chief/chief-tools.ts";
-import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
+import { gateSession } from "./gate/agent/session.ts";
+import { type ChiefAgentOptions } from "./chief/agent/agent.ts";
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { channelRelation } from "./person/relation.ts";
@@ -105,65 +88,9 @@ export class Personal {
     return gateSession(scope, config, this.store, this.plugins, this.log, this.options.persons, this.mailSender);
   }
 
-  chiefSession(scope: ExecutionScope, config: ChiefAgentOptions["config"]): PiSessionFactory {
-    const ref = scope.resourceRef;
-    if (scope.pluginInstanceId !== "personal" || ref?.kind !== TOPIC_TYPE.kind || ref.apiVersion !== TOPIC_TYPE.apiVersion || !ref.uid) throw new Error("Chief requires a Topic resource scope");
-    return async (options) => {
-      const initial = this.store.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, ref.name, ref.namespace);
-      if (isGateTopic(initial) || initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Chief Topic is missing or replaced");
-      const topicId = initial.spec.id;
-      const active = () => {
-        const c = this.topics.resource(topicId);
-        if (!c || c.metadata.uid !== initial.metadata.uid || !c.status.execution) throw new Error("Chief execution is not active");
-        this.plugins.executionVerbs(c.status.execution.id, { topicId });
-        return c;
-      };
-      const assess = async (input: AssessInput, toolCallId: string) => {
-        const c = active();
-        const result = await assessInput(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, toolCallId);
-        this.log.info({ topicId, inputId: input.inputId, workUids: input.workRequests?.map(r => r.workUid) ?? [] }, "Chief assessment completed");
-        return result;
-      };
-      const tools = chiefTools(this.connectors, async (id, input) => {
-        const c = active();
-        return say(this.plugins.executionVerbs(c.status.execution!.id, { topicId }), { ...input, idempotencyKey: id });
-      }, (id, offset) => {
-        const c = active();
-        return this.readLoopInput(resourceRef(c), id, offset, true);
-      }, assess, async input => {
-        const c = active();
-        const result = await summarizeTopic(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input,
-          topicPolicy(this.options.topic).maxChars);
-        this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
-        return result;
-      }, notes => this.mailSender.cite(active().status.execution!.id, notes), async (args: AssessBatch, toolCallId: string) => {
-        const c = active();
-        const result = await assessBatch(this.plugins.resourceClient("personal"), c, c.status.execution!.id, args, toolCallId);
-        this.log.info({ topicId, batchId: args.batchId, executionId: c.status.execution!.id }, "Chief Batch assessed");
-        return result;
-      });
-      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, inputBinding: {
-        read: () => {
-          const c = active();
-          return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "aide:review",
-            inputs: [...this.topics.inputStore.query("assessExecution", c.status.execution!.id).map(i => ({
-              id: i.metadata.name, deliveryId: i.status.assess?.deliveryId ?? `input:${i.metadata.uid}`, initial: !i.status.assess?.deliveryId && i.status.assess?.startedAt === c.status.execution!.startedAt,
-              origin: i.spec.origin, immediate: immediate(i.spec), text: inputPreview(i, Math.floor(topicPolicy(this.options.topic).contextChars / 8)),
-            })), ...this.store.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "execution", value: c.status.execution!.id } }).flatMap(batch =>
-              this.topics.inputStore.query("batch", batch.metadata.uid).map(i => ({ id: i.metadata.name, batchId: batch.metadata.uid,
-                deliveryId: batch.status.assess?.deliveryId ?? `batch:${batch.metadata.uid}`, initial: !batch.status.assess?.deliveryId && batch.status.assess?.startedAt === c.status.execution!.startedAt,
-                origin: i.spec.origin, immediate: false, text: inputPreview(i, Math.floor(topicPolicy(this.options.topic).contextChars / 8)) }))) ] };
-        },
-        inputOrigin: id => this.topics.inputStore.get(id)?.spec.origin,
-        changed: (task, tools) => this.log.info({ topicId, executionId: task.executionId, inputOrigin: task.origin,
-          inputIds: task.inputs.map(i => i.id), tools, toolCount: tools.length }, "Chief Input tools selected"),
-      }, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...domainHandoffTools(new Handoffs(this.store, this.log), active).map(t => ({ ...t, inputOrigins: BUSINESS_INPUT_ORIGINS })), ...addressTools(new Addresses(this.store.resources.storage.home), active, ref => this.store.topics.outputStore.deliveryCapability(ref)), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
-        const c = active();
-        const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId, topicPolicy(this.options.topic).maxChars);
-        this.log.info({ topicId, targetTopicId: input.topicId, noteId: result.noteId, version: result.version, sensitivity: result.sensitivity, visibility: result.visibility }, "Topic Note updated");
-        return result;
-      }, contextWriter: () => { const c = active(); return { resource: WriterResourceSchema.parse(resourceRef(c)), executionId: c.status.execution!.id }; }, beforeWorkMutation: () => { active(); } });
-    };
+  chiefSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
+    return chiefSession(scope, config, { store: this.store, plugins: this.plugins, log: this.log, persons: this.options.persons,
+      connectors: this.connectors, mailSender: this.mailSender, policy: topicPolicy(this.options.topic) });
   }
 
   weaveSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
@@ -178,61 +105,8 @@ export class Personal {
     return taskSession(scope, config, this.store, this.plugins, this.log, this.options.persons);
   }
 
-  routeSession(scope: ExecutionScope, config: ChiefAgentOptions["config"]): PiSessionFactory {
-    const ref = scope.resourceRef;
-    if (scope.pluginInstanceId !== "personal" || ref?.kind !== ROUTE_TYPE.kind || ref.apiVersion !== ROUTE_TYPE.apiVersion || !ref.uid) throw new Error("Route requires a Route resource scope");
-    return async options => {
-      const initial = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ref.name, ref.namespace);
-      if (initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Route resource is missing or replaced");
-      const active = () => {
-        const route = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ref.name, ref.namespace);
-        if (route.metadata.uid !== initial.metadata.uid || !route.status.execution) throw new Error("Route execution is not active");
-        this.plugins.executionVerbs(route.status.execution.id, {});
-        return route;
-      };
-      return createRouteAgent({ ...options, config, scope: `route:${initial.metadata.uid}`, background: identityBackground(this.options.persons, () => { active(); return new RouteBackground(this.store); }), port: {
-        topics: (offset, query, parentUid) => {
-          active();
-          const page = topicCandidatePage(this.store, offset, query, parentUid);
-          return { topics: page.items, total: page.total, catalogFingerprint: page.catalogFingerprint, fingerprint: page.fingerprint, nextOffset: page.nextOffset };
-        },
-        input: (id, offset) => { const r = active(); return this.readLoopInput(resourceRef(r), id, offset); },
-        route: async (raw, toolCallId) => {
-          const args = z.object({ inputId: z.string(), topicUids: z.array(z.string()).max(1), reason: z.string().min(1).max(4000) }).strict().parse(raw);
-          const r = active();
-          const input = this.topics.inputStore.get(args.inputId);
-          if (!input) throw new Error("Input is not owned by Route");
-          if (routed(input)) return { routed: args.inputId };
-          if (input.status.route?.executionId !== r.status.execution!.id) throw new Error("Input has not been admitted to Route");
-          const resources = this.plugins.resourceClient("personal");
-          const context = { resources, logger: { info: (message: string, detail?: unknown) => this.log.info({ detail }, message) } };
-          const topics = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-          const destinations = [...new Set(args.topicUids)].map(uid => {
-            const c = topics.find(c => c.metadata.uid === uid && !c.metadata.deletionTimestamp);
-            if (!c || !isRootTopic(c)) throw new Error(`Root Topic no longer exists: ${uid}`);
-            return { name: c.metadata.name, uid };
-          });
-          if (!destinations.length) destinations.push(await defaultDestination(context));
-          await deliver(context, input, destinations, args.reason, agentCall(r.status, toolCallId), true);
-          return { routed: args.inputId, topicUids: destinations.map(c => c.uid) };
-        },
-      } });
-    };
-  }
-
-  private readLoopInput(owner: import("@compforge/aide-plugin").ResourceRef, id: string | undefined, offset: number, history = false) {
-    const inputs = owner.kind === "Route" ? this.topics.inputStore.query("routePending", "pending") : this.topics.pending(owner.uid!);
-    const c = owner.kind === "Topic" ? this.store.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, owner.name) : undefined;
-    const members = c ? new Set(this.topics.scope(c.metadata.uid).map(t => t.metadata.uid)) : undefined;
-    const status = (i: Readonly<Resource<InputSpec, InputStatus>>) => c ? i.status.assess : attemptOf(i, owner);
-    if (!id) return { ...(c ? { context: { version: contentVersion(c), summary: summaryText(this.store.resources, c), summaryUid: summaryReference(this.store.resources, c)?.uid, summaryNote: summaryReference(this.store.resources, c), recent: notes(this.store.resources, c.metadata.uid, "subject"),
-      maxChars: topicPolicy(this.options.topic).maxChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, batchId: i.status.batchId, attention: inputAttention(i.spec), status: status(i) })),
-      nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
-    const input = this.topics.inputStore.get(id);
-    if (!input || (!inputs.some(i => i.metadata.name === id) && !(history && c &&
-      (belongsToTopic(input, owner) || belongsToTopic(input, owner, members))))) throw new Error("Input is not attached to this resource");
-    const description = inputPrinter.describe(input);
-    return { inputId: id, batch: batchForInput(this.store.resources, input), attention: inputAttention(input.spec), status: status(input), text: description.slice(offset, offset + 8000), nextOffset: offset + 8000 < description.length ? offset + 8000 : null };
+  routeSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
+    return routeSession(scope, config, this.store, this.plugins, this.log, this.options.persons);
   }
 
   /** @spec Only the owning resource's intake controller may steer its live agent; admission is durable before dispatch. */
@@ -393,7 +267,7 @@ export class Personal {
     const executing = this.invocations().some((invocation) => invocation.topicId === topicId && ["queued", "running", "uncertain"].includes(invocation.phase));
     if (unfinished || executing) return { deleted: false, reason: "busy" };
     const hasWork = WORK_TYPES.some((type) => this.store.resources.list<WorkSpec, unknown>(type)
-      .some((work) => (work.status as import("./model.ts").WorkStatus).topic.uid === topic.metadata.uid));
+      .some((work) => (work.status as import("./work/model.ts").WorkStatus).topic.uid === topic.metadata.uid));
     if (hasWork) return { deleted: false, reason: "work" };
     try {
       await this.plugins.resourceClient("personal").delete(TOPIC_TYPE, topic.metadata.name, "v1", { uid: topic.metadata.uid, resourceVersion: topic.metadata.resourceVersion });
@@ -424,7 +298,7 @@ export class Personal {
       await finalizeExecution({ resources, logger: { debug: () => {}, info: (message, detail) => this.log.info({ detail }, message), warn: (message: string, detail?: unknown) => this.log.warn({ detail }, message), error: () => {} } }, c, id);
       this.log.warn({ resourceUid: c.metadata.uid, executionId: id }, "Recovered interrupted agent without replaying actions");
     }
-    for (const type of WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work-status.ts").WorkAgentStatus>(type)) {
+    for (const type of WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work/agent-status.ts").WorkAgentStatus>(type)) {
       if (work.metadata.deletionTimestamp || workPhase(work) !== "running") continue;
       const text = `「${work.spec.title}」执行被中断，结果未知。请核对外部结果后告诉我是否继续。`;
       await patchStatus(resources, work, { recovery: { reason: "ExecutionUncertain", message: "Inspect effects before resuming" }, waiting: null,
@@ -444,13 +318,13 @@ export class Personal {
   private async flushRecoveryNotices(): Promise<void> {
     const resources = this.plugins.resourceClient("personal");
     let retry = false;
-    for (const type of WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work-status.ts").WorkAgentStatus>(type)) {
+    for (const type of WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work/agent-status.ts").WorkAgentStatus>(type)) {
       const notice = work.status.recoveryNotice;
       if (!notice || work.metadata.deletionTimestamp) continue;
       try {
         await this.topics.say(this.store.topicId(work.status.topic), undefined, notice.text, undefined,
           { to: { me: true }, inputIds: [], idempotencyKey: notice.id });
-        const current = await resources.get<WorkSpec, import("./work-status.ts").WorkAgentStatus>(resourceRef(work));
+        const current = await resources.get<WorkSpec, import("./work/agent-status.ts").WorkAgentStatus>(resourceRef(work));
         if (current?.status.recoveryNotice?.id === notice.id) await patchStatus(resources, current, { recoveryNotice: null });
         this.log.info({ workId: work.metadata.name, noticeId: notice.id }, "Recovery notification accepted");
       } catch (error) {

@@ -1,6 +1,6 @@
 import { HarnessError } from "@compforge/aide-plugin";
 import { HarnessCalls } from "../src/host/harness/calls.ts";
-import { personalExecution } from "../plugins/personal/execution-context.ts";
+import { personalExecution } from "../plugins/personal/execution/context.ts";
 import { say, SayInputSchema } from "../plugins/personal/output/action.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";

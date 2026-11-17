@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import type { AgentStatus, ResourceClient, ResourceDefinition } from "@compforge/aide-plugin";
-import { AgentStatusSchema, prepareAgent, saveAgent } from "../plugins/personal/session.ts";
+import { AgentStatusSchema, prepareAgent, saveAgent } from "../plugins/personal/execution/session.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ExecutionService } from "../src/host/runtime/execution.ts";

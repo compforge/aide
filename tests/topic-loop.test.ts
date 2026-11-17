@@ -3,7 +3,7 @@ import { committedStatus } from "./fixtures/resource-write.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { attemptOf, resourceRef } from "../plugins/personal/input/state.ts";
 import type { PluginContext, ReconcileContext, ResourceCommit } from "@compforge/aide-plugin";
-import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
+import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 import { reconcileRouteAgent } from "../plugins/personal/route/reconcile.ts";
 import { ROUTE_TYPE, ROUTE_NAME, type RouteResource } from "../plugins/personal/route/model.ts";
 import type { TopicResource } from "../plugins/personal/topic/model.ts";
@@ -18,7 +18,7 @@ import { fakeOptions, type Agent } from "./fake-harness.ts";
 import { assessAll } from "./input-state-fixture.ts";
 import { routeTo } from "./input-state-fixture.ts";
 import { admit } from "./input-state-fixture.ts";
-import type { LoopStatus } from "../plugins/personal/loop.ts";
+import type { LoopStatus } from "../plugins/personal/execution/loop.ts";
 
 function setup(t: { after(fn: () => Promise<void>): void }, agent: Partial<Agent> = {}) {
   const root = mkdtempSync(join(tmpdir(), "aide-continuous-"));
@@ -136,12 +136,17 @@ for (const kind of ["Topic", "Route"] as const) for (const failure of ["write fa
 
 /** @case Notification progress does not recursively wake the intake controller after a rejected native verb. */
 test("Chief notification bookkeeping does not wake Topic Reconcile", async t => {
-  const { registerTopics } = await import("../plugins/personal/topic/reconcile.ts");
+  const { registerSecretary } = await import("../plugins/personal/secretary/reconcile.ts");
+  const { registerTopicObservations } = await import("../plugins/personal/topic/conditions.ts");
+  const { registerChief } = await import("../plugins/personal/chief/reconcile.ts");
   const { aide } = setup(t);
   const resources = aide.runtime.plugins.resourceClient("personal");
   const topic = await aide.topics.ensure("me");
   const definitions: any[] = [];
-  registerTopics({ resources, instance: { config: {} }, controllers: { register(definition: unknown) { definitions.push(definition); } } } as unknown as PluginContext);
+  const context = { resources, instance: { config: {} }, controllers: { register(definition: unknown) { definitions.push(definition); } } } as unknown as PluginContext;
+  registerTopicObservations(context);
+  registerChief(context);
+  registerSecretary(context);
   const notified = await resources.patchStatus(topic, { notifiedWeaveRevision: 1 });
   const reverted = await resources.patchStatus(notified, { notifiedWeaveRevision: 0 });
   const changed = await resources.patchStatus(reverted, { weaveRevision: 2 });

@@ -2,7 +2,7 @@ import { InputClassificationFields, inputClassification } from "../../disclosure
 import { z } from "zod";
 import type { RepositoryKey, Resource } from "@compforge/aide-plugin";
 import type { RepositoryWatch, RepositorySourceSpec } from "../repository/config.ts";
-import { digest } from "../../chief-model.ts";
+import { digest } from "../../identity.ts";
 
 const policy = {
   ...InputClassificationFields,

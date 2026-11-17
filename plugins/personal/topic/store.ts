@@ -22,7 +22,7 @@ import { DEFAULT_TOPIC_ID, GATE_TOPIC_ID, TOPIC_TYPE, initialTopicName, type Top
 import { outputView, type OutputDraft, type OutputView } from "../output/view.ts";
 import { OutputStore } from "../output/store.ts";
 import { outputWrite } from "../output.ts";
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import { topicReview } from "./review.ts";
 export const topicKey = digest;
 

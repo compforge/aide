@@ -1,7 +1,7 @@
 import type { TopicPolicy } from "../plugins/personal/topic/config.ts";
 import { INPUT_TYPE } from "../plugins/personal/input/model.ts";
 import type { ResourceClient } from "@compforge/aide-plugin";
-import { assessInput } from "../plugins/personal/topic/assess.ts";
+import { assessInput } from "../plugins/personal/chief/assess.ts";
 import type { TopicResource } from "../plugins/personal/topic/model.ts";
 import { deliver, type RoutingInput } from "../plugins/personal/route/delivery.ts";
 export async function assessAll(resources: ResourceClient, c: TopicResource, executionId: string, args: { inputIds: string[]; summary: string }, _policy?: TopicPolicy) {
@@ -21,7 +21,7 @@ export async function admit(resources: ResourceClient, inputId: string, executio
   return resources.patchStatus(input, { assess: { ...input.status.assess, executionId, startedAt: new Date().toISOString() } });
 }
 
-export async function handoff(store: import("../plugins/personal/topic/store.ts").TopicStore, resources: ResourceClient, inputId: string, requests: import("../plugins/personal/topic/assess.ts").AssessInput["workRequests"], summary = "Handed to Work") {
+export async function handoff(store: import("../plugins/personal/topic/store.ts").TopicStore, resources: ResourceClient, inputId: string, requests: import("../plugins/personal/chief/assess.ts").AssessInput["workRequests"], summary = "Handed to Work") {
   const c = store.resource("me")!;
   const executionId = c.status.execution?.id ?? "fixture";
   if (!c.status.execution) await resources.patchStatus(c, { execution: { id: executionId, startedAt: new Date().toISOString() } });

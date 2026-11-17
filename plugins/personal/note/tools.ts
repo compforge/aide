@@ -1,9 +1,9 @@
 import { Type } from "typebox";
-import { INPUT_ORIGINS, type ChiefToolDefinition } from "../../../agents/chief/input-tools.ts";
+import { INPUT_ORIGINS, type ChiefToolDefinition } from "../chief/agent/input-tools.ts";
 import type { ResourceClient } from "@compforge/aide-plugin";
 import type { Logger } from "pino";
 import type { TopicResource } from "../topic/model.ts";
-import { subjectField } from "../../../agents/context-tools.ts";
+import { subjectField } from "../execution/agent/context-tools.ts";
 import { pruneNote, retireNote } from "./service.ts";
 import { listNotes } from "./query.ts";
 import { MoveNoteSchema, moveNote } from "./operations.ts";

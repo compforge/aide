@@ -1,11 +1,11 @@
-import { completeChiefWork } from "../topic/workload.ts";
+import { completeChiefWork } from "../chief/workload.ts";
 import { z } from "zod";
 import type { ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
-import { WorkInputRequestSchema } from "../model.ts";
+import { WorkInputRequestSchema } from "../work/model.ts";
 import { resourceRef, topicScope } from "../input/state.ts";
 import { isInternalInput } from "../input/model.ts";
 import { agentCall } from "../observation/reference.ts";
-import { prepareWorkRequests } from "../topic/assess.ts";
+import { prepareWorkRequests } from "../chief/assess.ts";
 import type { TopicResource } from "../topic/model.ts";
 import { commitStatus } from "../status.ts";
 import { batchById, batchMembers } from "./members.ts";

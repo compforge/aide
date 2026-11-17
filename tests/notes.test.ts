@@ -1,4 +1,4 @@
-import { digest } from "../plugins/personal/chief-model.ts";
+import { digest } from "../plugins/personal/identity.ts";
 import { collectResources } from "./fixtures/resource-gc.ts";
 import { composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { mailDraft } from "../plugins/personal/output.ts";
@@ -26,10 +26,10 @@ import { notes, readNotes } from "../plugins/personal/note/query.ts";
 import { NOTE_TYPE } from "../plugins/personal/note/model.ts";
 import { PERSON_TYPE, type PersonRef } from "../plugins/personal/person/model.ts";
 import { ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
-import { chiefNoteTools } from "../agents/chief/note-tools.ts";
-import { workContextTools } from "../plugins/personal/work-context.ts";
+import { chiefNoteTools } from "../plugins/personal/chief/agent/note-tools.ts";
+import { workContextTools } from "../plugins/personal/work/context.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
-import type { WorkResource } from "../plugins/personal/resources.ts";
+import type { WorkResource } from "../plugins/personal/work/resources.ts";
 const log = pino({ level: "silent" });
 async function setup(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-notes-"));

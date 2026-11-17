@@ -8,7 +8,8 @@ import { isDeepStrictEqual } from "node:util";
 import { SOURCES } from "../definition.ts";
 import type { ConnectorClient, EnvironmentSnapshot, PluginContext, Resource, WorkloadSnapshot } from "@compforge/aide-plugin";
 import { type EnvironmentSourceSpec } from "./config.ts";
-import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "../../chief-model.ts";
+import { INPUT_TYPE, type InputSpec, type InputStatus } from "../../input/model.ts";
+import { digest } from "../../identity.ts";
 
 import { ENVIRONMENT_SOURCE_TYPE } from "./definition.ts";
 export { ENVIRONMENT_SOURCE_TYPE } from "./definition.ts";

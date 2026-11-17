@@ -2,7 +2,7 @@ import { isGateInput } from "../gate/input.ts";
 import { isGateTopic, isRootTopic } from "../topic/boundary.ts";
 import { ensureGateTopic } from "../gate/topic.ts";
 import { ensureDefaultTopic } from "../topic/default.ts";
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import { DEFAULT_TOPIC_ID, GATE_TOPIC_ID, TOPIC_TYPE, initialTopicName, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { deliver, routed, type RoutingContext, type RoutingInput } from "./delivery.ts";

@@ -1,7 +1,7 @@
 import { ensureGateTopic } from "../gate/topic.ts";
 import { resourceRef } from "../input/state.ts";
 import type { ResourceClient } from "@compforge/aide-plugin";
-import { digest } from "../chief-model.ts";
+import { digest } from "../identity.ts";
 import { DEFAULT_TOPIC_ID, TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 
 /**

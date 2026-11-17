@@ -77,7 +77,7 @@ system 包含助理身份、归属约束与 Route 固定规则；user 背景包�
 
 #### 上下文组织与优化
 
-每个候选 root 占一个条目：身份 UID，以及有则展示的名称、summary、近期活动和[近期相关人物](topic.md#近期相关人物)预览。名称最多 200 字符、summary 最多 2000 字符；近期活动从子树 Input、Work 进展和 Topic Note 中选最近 3 条，每条最多 240 字符。通过归属与父子关系索引查询，自动上下文不加载历史正文；目录同时受分页条数和字符预算限制，缺失详情按需读取。
+每个候选 root 占一个条目：身份 UID，以及有则展示的名称、summary、近期活动和[近期相关人物](chief.md#近期相关人物)预览。名称最多 200 字符、summary 最多 2000 字符；近期活动从子树 Input、Work 进展和 Topic Note 中选最近 3 条，每条最多 240 字符。通过归属与父子关系索引查询，自动上下文不加载历史正文；目录同时受分页条数和字符预算限制，缺失详情按需读取。
 
 上下文组织是后续效果优化的重点。固定职责属于 system；会变化的候选信息属于业务背景，以 Pi custom message 投影，LLM 侧是 user；Input 保留为独立 user 消息。当前按以下结构准备每次模型请求，v1 / v2 只表示内容变化，不是 CRD 版本字段：
 
@@ -121,6 +121,6 @@ Route 使用本资源目录下的 [Background](../../plugins/personal/route/back
 
 `harnesses.route.model` 可单独选择模型，缺省复用 Chief 配置。`plugins.personal.route.contextChars` 限制新输入预览，全文用 read_input 分页读取。见 [配置](../configuration.md#route-连续分类与模型)。
 
-实现入口：[Route Agent](../../agents/route/agent.ts)、[Reconcile](../../plugins/personal/route/reconcile.ts)、[规则](../../plugins/personal/route/rules.ts)、[原子分派](../../plugins/personal/route/delivery.ts)、[持续调用与恢复](../../plugins/personal/loop.ts)。
+实现入口：[Route Agent](../../plugins/personal/route/agent/agent.ts)、[Reconcile](../../plugins/personal/route/reconcile.ts)、[规则](../../plugins/personal/route/rules.ts)、[原子分派](../../plugins/personal/route/delivery.ts)、[持续调用与恢复](../../plugins/personal/execution/loop.ts)。
 
 [路由测试](../../tests/route.test.ts)覆盖规则、Default、并发、单一归属的原子提交 和重试公平性；[研判测试](../../tests/input-assessment.test.ts)覆盖 Work 交接与释放；[SDK 测试](../../tests/pi-agent.test.ts)覆盖工具权限、持久上下文和 steer。模拟模型测试不证明真实语义路由准确率。

@@ -15,19 +15,19 @@ import { guardTopicOrganization } from "./organization.ts";
 import { requireTopic } from "./ownership.ts";
 import { ConditionsSchema } from "../conditions.ts";
 import { OrganizationSchema } from "../topic/ref.ts";
-import { digest } from "../chief-model.ts";
-import { AgentStatusSchema } from "../session.ts";
+import { digest } from "../identity.ts";
+import { AgentStatusSchema } from "../execution/session.ts";
 import { ContextFields } from "../context.ts";
 import { z } from "zod";
 import { TopicReviewSchema } from "./review.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { AddressRefSchema } from "../address/model.ts";
 import { TOPIC_TYPE, TopicDeletionBlocked, DEFAULT_TOPIC_ID, GATE_TOPIC_ID, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
-import { LoopExecutionSchema } from "../loop.ts";
+import { LoopExecutionSchema } from "../execution/loop.ts";
 import { ResourceRefSchema } from "../topic/ref.ts";
 import { BATCH_TYPE } from "../batch/model.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
-import { WORK_TYPES, type WorkResource } from "../resources.ts";
+import { WORK_TYPES, type WorkResource } from "../work/resources.ts";
 import { understandingVersion } from "./tree.ts";
 /** @spec Default is a system-owned singleton; ordinary Topics cannot adopt or relinquish that role.
  * @why Only creation checks the singleton index; updates preserve the reserved immutable identity.
@@ -109,7 +109,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   }, delete: (resource, context) => {
     // @spec Deletion checks current indexed dependents in the write transaction, including preceding writes.
     // @case tests/resource-validation-scope.test.ts
-    // @link docs/personal/topic.md#静默回收
+    // @link docs/personal/topic.md#回收资格
     if (isGateTopic(resource)) throw new TopicDeletionBlocked("gate", "Gate Topic cannot be deleted");
     if (resource.spec.default) throw new TopicDeletionBlocked("default", "Default Topic cannot be deleted");
     if (context.page(HANDOFF_TYPE, { limit: 1, matchIndex: { name: "activeTopic", value: resource.metadata.uid } }).items.length) throw new TopicDeletionBlocked("busy", "Topic has active handoffs");

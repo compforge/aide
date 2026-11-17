@@ -1,11 +1,11 @@
 import { deadlineClock } from "./fixtures/clock.ts";
-import { assessInput } from "../plugins/personal/topic/assess.ts";
+import { assessInput } from "../plugins/personal/chief/assess.ts";
 import { BATCH_TYPE } from "../plugins/personal/batch/model.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { secretaryFixture } from "./secretary-fixture.ts";
-import { reconcileSecretary } from "../plugins/personal/topic/secretary.ts";
-import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
+import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
+import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { patchSummary } from "./summary-fixture.ts";
@@ -223,7 +223,7 @@ test("Task and Routine status updates do not count as Chief workload", async t =
   const { TASK_TYPE } = await import("../plugins/personal/task/model.ts");
   const { ROUTINE_TYPE } = await import("../plugins/personal/routine/model.ts");
   for (const [type, id] of [[TASK_TYPE, "task"], [ROUTINE_TYPE, "routine"]] as const) {
-    const work = await f.resources.create<unknown, import("../plugins/personal/work-status.ts").WorkAgentStatus>(type, { name: id,
+    const work = await f.resources.create<unknown, import("../plugins/personal/work/agent-status.ts").WorkAgentStatus>(type, { name: id,
       spec: { title: id, instruction: "Independent work", ...(id === "task" ? { initialInputId: "initial" } : { trigger: { cron: null, timezone: "UTC", event: "changed" } }) }, status: { topic: resourceRef(f.root()) } });
     await f.resources.patchStatus(work, { idleSince: new Date().toISOString() });
   }

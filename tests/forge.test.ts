@@ -6,7 +6,7 @@ import {
 
 import { createConnectors } from "./connector-fixture.ts";
 import { createConnectorClient, dispatchConnector } from "../src/connector/client.ts";
-import { chiefTools } from "../agents/chief/chief-tools.ts";
+import { chiefTools } from "../plugins/personal/chief/agent/chief-tools.ts";
 import { createForgeReader } from "@compforge/repocli";
 
 for (const provider of ["github", "gitlab"] as const) test(`${provider} repocli reads cross Aide's JSON Connector boundary`, async () => {

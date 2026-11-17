@@ -2,17 +2,18 @@ import { inputDetail } from "../src/api/inputs.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { secretaryFixture } from "./secretary-fixture.ts";
-import { prepareInputs, cancelBatch } from "../plugins/personal/batch/reconcile.ts";
+import { cancelBatch } from "../plugins/personal/batch/reconcile.ts";
+import { prepareInputs } from "../plugins/personal/secretary/batching.ts";
 import { batchById, batchMembers } from "../plugins/personal/batch/members.ts";
 import { assessBatch } from "../plugins/personal/batch/assess.ts";
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
-import { preparedIntake } from "../plugins/personal/topic/scheduling.ts";
+import { preparedIntake } from "../plugins/personal/chief/intake.ts";
 import { commitStatus } from "../plugins/personal/status.ts";
 import { INPUT_TYPE, InputAttention } from "../plugins/personal/input/model.ts";
-import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
-import { assessInput } from "../plugins/personal/topic/assess.ts";
+import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
+import { assessInput } from "../plugins/personal/chief/assess.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
-import { runInput } from "../plugins/personal/loop.ts";
+import { runInput } from "../plugins/personal/execution/loop.ts";
 
 // @case Sealing separates subsequent arrivals and Chief never writes member assessment receipts.
 test("Deferred Batch seals its members and Chief completes only the Batch", async t => {
@@ -223,7 +224,7 @@ test("Channel promotion preserves fixed Batch membership without granting steer"
   await prepareInputs(f.context, f.root(), f.policy);
   await f.resources.patchStatus(f.root(), { execution: { id: "busy", startedAt: new Date().toISOString() } });
   const calls: { operation: string; batchId?: string }[] = [];
-  const { submitPending } = await import("../plugins/personal/loop.ts");
+  const { submitChiefPending: submitPending } = await import("../plugins/personal/chief/intake.ts");
   await submitPending(f.context, { verbs: { action: async (_: string, args: { operation: string; batchId?: string }) => {
     calls.push(args); return { state: "success", value: { accepted: true } };
   } } } as unknown as import("@compforge/aide-plugin").ReconcileContext, f.root());
