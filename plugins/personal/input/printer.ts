@@ -1,4 +1,5 @@
 import type { ResourcePrinter } from "@compforge/aide-plugin";
+import type { Input } from "./state.ts";
 import type { InputSpec, InputStatus } from "./model.ts";
 
 /**
@@ -8,32 +9,34 @@ import type { InputSpec, InputStatus } from "./model.ts";
  * @case tests/input-printer.test.ts
  */
 export const inputPrinter: ResourcePrinter<InputSpec, InputStatus> = {
-  describe({ metadata, spec, status }) {
-    const lines = [
-      `Input: ${metadata.name}`,
-      `Origin: ${spec.origin}/${spec.originId}`,
-      `Received: ${metadata.creationTimestamp}`,
-    ];
-    if (status.batchId) lines.push(`Scheduling batch UID: ${status.batchId}\nBatched at: ${status.batchAt}`);
-    if (status.topic) lines.push(`Material Topic: ${status.topic.uid}`);
-    if (status.assess?.topic) lines.push(`Processing Topic: ${status.assess.topic.uid}`);
-    if (spec.handoff) lines.push(`Handoff: ${JSON.stringify(spec.handoff)}\nDomain owns this request. Reply with say(respondToHandoffId=handoff.id); report_handoff records progress independently. Preserve original user evidence and authorization.`);
-    if (spec.source) lines.push(`Source address: ${JSON.stringify(spec.source)}`);
-    if (spec.topicName !== undefined) lines.push(`Suggested Topic name: ${spec.topicName}`);
-    if (spec.topicKey !== undefined) lines.push(`Topic key: ${spec.topicKey}`);
-    if (spec.topicId !== undefined) lines.push(`Explicit Topic: ${spec.topicId}`);
-    if (spec.relation !== undefined) lines.push(`Relation to Person: ${spec.relation}`);
-    if (spec.sensitivity !== undefined) lines.push(`Sensitivity: ${spec.sensitivity}`);
-    if (spec.visibility !== undefined) lines.push(`Visibility: ${spec.visibility}`);
-    if (spec.sender) lines.push(`Sender Person: ${JSON.stringify(spec.sender)}`);
-    if (spec.timezone !== undefined) lines.push(`Timezone: ${spec.timezone}`);
-    if (spec.originRef !== undefined) lines.push(`Source resource: ${JSON.stringify(spec.originRef)}`);
-    lines.push(`\nText:\n${spec.text}`);
-    if (spec.observation !== undefined) lines.push(`\nObservation:\n${JSON.stringify(spec.observation, null, 2)}`);
-    return lines.join("\n");
-  },
+  describe: describeInput,
   summarize({ spec }) {
     const text = Array.from(spec.text.replace(/\s+/gu, " ").trim());
     return text.length <= 120 ? text.join("") : `${text.slice(0, 119).join("")}…`;
   },
 };
+
+export function describeInput({ metadata, spec, status }: Input, material = false): string {
+  const lines = [
+    `${material ? "Source input" : "Input"}: ${metadata.name}`,
+    `Origin: ${spec.origin}/${spec.originId}`,
+    `Received: ${metadata.creationTimestamp}`,
+  ];
+  if (!material && status.batchId) lines.push(`Scheduling batch UID: ${status.batchId}\nBatched at: ${status.batchAt}`);
+  if (status.topic) lines.push(`Material Topic: ${status.topic.uid}`);
+  if (status.assess?.topic) lines.push(`Processing Topic: ${status.assess.topic.uid}`);
+  if (spec.handoff) lines.push(`Handoff: ${JSON.stringify(spec.handoff)}\nDomain owns this request. Reply with say(respondToHandoffId=handoff.id); report_handoff records progress independently. Preserve original user evidence and authorization.`);
+  if (spec.source) lines.push(`Source address: ${JSON.stringify(spec.source)}`);
+  if (spec.topicName !== undefined) lines.push(`Suggested Topic name: ${spec.topicName}`);
+  if (spec.topicKey !== undefined) lines.push(`Topic key: ${spec.topicKey}`);
+  if (spec.topicId !== undefined) lines.push(`Explicit Topic: ${spec.topicId}`);
+  if (spec.relation !== undefined) lines.push(`Relation to Person: ${spec.relation}`);
+  if (spec.sensitivity !== undefined) lines.push(`Sensitivity: ${spec.sensitivity}`);
+  if (spec.visibility !== undefined) lines.push(`Visibility: ${spec.visibility}`);
+  if (spec.sender) lines.push(`Sender Person: ${JSON.stringify(spec.sender)}`);
+  if (spec.timezone !== undefined) lines.push(`Timezone: ${spec.timezone}`);
+  if (spec.originRef !== undefined) lines.push(`Source resource: ${JSON.stringify(spec.originRef)}`);
+  lines.push(`\nText:\n${spec.text}`);
+  if (spec.observation !== undefined) lines.push(`\nObservation:\n${JSON.stringify(spec.observation, null, 2)}`);
+  return lines.join("\n");
+}

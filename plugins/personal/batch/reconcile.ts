@@ -1,5 +1,6 @@
 import type { PluginContext, ResourceClient, Watch } from "@compforge/aide-plugin";
 import { patchStatus } from "../status.ts";
+import { isRootTopic } from "../topic/boundary.ts";
 import { readTopicRoot } from "../topic/tree.ts";
 import type { TopicResource } from "../topic/model.ts";
 import { BATCH_TYPE, batchFinished, type Batch, type BatchSpec, type BatchStatus } from "./model.ts";
@@ -17,7 +18,7 @@ export async function reconcileBatches(context: Pick<PluginContext, "resources" 
     if (batch.status.phase === "preparing" && Date.now() - Date.parse(batch.metadata.creationTimestamp) < 60_000) continue;
     const members = await batchMembers(context.resources, batch);
     const roots = await Promise.all(members.map(m => m.status.topic ? readTopicRoot(context.resources, m.status.topic) : undefined));
-    if (batch.status.phase === "ready" && members.length && members.every((m, n) => unclaimed(m) && roots[n]?.metadata.uid === topic.metadata.uid)) continue;
+    if (isRootTopic(topic) && batch.status.phase === "ready" && members.length && members.every((m, n) => unclaimed(m) && roots[n]?.metadata.uid === topic.metadata.uid)) continue;
     await cancelBatch(context.resources, batch, "Batch membership or ownership changed before admission");
     context.logger.info("Secretary batch cancelled before admission", { attributes: { batchId: batch.metadata.uid, topicUid: topic.metadata.uid } });
   }

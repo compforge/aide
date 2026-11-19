@@ -4,6 +4,7 @@ import type { ResourceDefinition, ResourceValidationContext } from "@compforge/a
 import { inputExpired } from "../input/retention.ts";
 import { InputAttention, assessmentFinished } from "../input/model.ts";
 import { ResourceRefSchema } from "../topic/ref.ts";
+import { isRootTopic } from "../topic/boundary.ts";
 import { requireTopic } from "../topic/ownership.ts";
 import { AssessmentSchema } from "../input/assessment.ts";
 import { compatibleMembers, membersInTransaction, unclaimed, validateMemberRoots } from "./members.ts";
@@ -19,7 +20,7 @@ export const BatchDefinition: ResourceDefinition<BatchSpec, BatchStatus> = {
   validator: {
     create(batch, context) {
       if (batch.metadata.namespace !== "v1") throw new Error("Batch uses the Personal global namespace");
-      requireTopic(batch.spec.topic, context);
+      if (!isRootTopic(requireTopic(batch.spec.topic, context))) throw new Error("Only a domain root can own a Batch");
       if (batch.status.phase !== "preparing" || batch.status.assess) throw new Error("Batch must be created preparing");
     },
     update(previous, current, context) {

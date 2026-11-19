@@ -13,7 +13,7 @@ import { resourceRef } from "../input/state.ts";
 import { readNotes } from "../note/query.ts";
 import { dueNotePressure, refreshNotePressure } from "../note/pressure.ts";
 import { commitStatus } from "../status.ts";
-import { isGateTopic, isProcessingRoot } from "../topic/boundary.ts";
+import { isGateTopic, isRootTopic } from "../topic/boundary.ts";
 import { topicPolicy, type TopicPolicy } from "../topic/config.ts";
 import { maintenanceAgenda, ensureCapacityInputs } from "./maintenance.ts";
 import { reviewEvidence } from "../input/review.ts";
@@ -38,7 +38,7 @@ async function cancelObsolete(context: PluginContext, topic: TopicResource, poli
       matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
     const input = pending.items[0];
     if (!input || input.status.assess?.executionId) continue;
-    let obsolete = origin === "aide:review" && !isProcessingRoot(topic);
+    let obsolete = origin === "aide:review" && !isRootTopic(topic);
     const evidence = reviewEvidence(input.spec);
     const work = chiefWorkload(topic);
     const workloadDue = topicReview(topic.spec.review).enabled && (work.completed - work.reviewed >= policy.review.completedInputs
@@ -70,13 +70,13 @@ async function cancelObsolete(context: PluginContext, topic: TopicResource, poli
 export async function reconcileSecretary(context: PluginContext, initial: Readonly<TopicResource>, policy: TopicPolicy = topicPolicy(context.instance.config.topic)) {
   if (initial.metadata.deletionTimestamp) return;
   let topic = initial;
-  if (!isProcessingRoot(topic)) await reconcileBatches(context, topic);
-  const next = isProcessingRoot(topic) ? await prepareInputs(context, topic, policy) : policy.trigger.intervalSeconds * 1000;
+  if (!isRootTopic(topic)) await reconcileBatches(context, topic);
+  const next = isRootTopic(topic) ? await prepareInputs(context, topic, policy) : policy.trigger.intervalSeconds * 1000;
   if (isGateTopic(topic)) return { requeueAfterMs: next };
   await refreshNotePressure(context, topic);
   await cancelObsolete(context, topic, policy);
   await ensureCapacityInputs(context, topic);
-  if (!isProcessingRoot(topic)) return { requeueAfterMs: next };
+  if (!isRootTopic(topic)) return { requeueAfterMs: next };
   topic = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(topic)))!;
   const schedule = idleReviewSchedule(topic, policy.review);
   if (Object.keys(schedule.patch).length) topic = await context.resources.patchStatus(topic, schedule.patch);

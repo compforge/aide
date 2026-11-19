@@ -1,9 +1,13 @@
+import { assessChiefInput, chiefPreviews } from "../plugins/personal/chief/inputs.ts";
+import { readChiefInput } from "../plugins/personal/execution/agent/read-input.ts";
+import { topicTools } from "../plugins/personal/chief/agent/topic-tools.ts";
 import { inputDetail } from "../src/api/inputs.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { secretaryFixture } from "./secretary-fixture.ts";
 import { cancelBatch } from "../plugins/personal/batch/reconcile.ts";
 import { prepareInputs } from "../plugins/personal/secretary/batching.ts";
+import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
 import { batchById, batchMembers } from "../plugins/personal/batch/members.ts";
 import { assessBatch } from "../plugins/personal/batch/assess.ts";
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
@@ -27,9 +31,23 @@ test("Deferred Batch seals its members and Chief completes only the Batch", asyn
   assert.deepEqual((await batchMembers(f.resources, batch)).map(i => i.metadata.name), ["a", "b"]);
   await reconcileChief(f.context, f.execution("one", async () => {
     assert.ok(f.aide.topics.inputStore.list().every(i => !i.status.assess?.executionId));
-    await assert.rejects(assessInput(f.resources, f.root(), "one", { inputId: "a", summary: "done" }), /assess_batch/);
-    await assessBatch(f.resources, f.root(), "one", { batchId: batch.metadata.uid, summary: "whole task checked" });
-    await assessBatch(f.resources, f.root(), "one", { batchId: batch.metadata.uid, summary: "duplicate completion" });
+    await assert.rejects(assessInput(f.resources, f.root(), "one", { inputId: "a", summary: "done" }), /assess the containing item/);
+    const [item] = chiefPreviews(ready.inputs, 4000);
+    assert.equal(item!.inputId, batch.metadata.uid);
+    const store = f.aide.personal.store, id = item!.inputId;
+    const list = topicTools(store, f.root).find(tool => tool.name === "list_inputs")!;
+    const listed = await list.execute("list", {}, undefined, undefined, {} as never);
+    const page = JSON.parse((listed.content[0] as { text: string }).text);
+    assert.deepEqual(page.items.map((i: { id: string }) => i.id).sort(), [id, "later"].sort());
+    const read = readChiefInput(store, f.root(), id, 0, 8000);
+    assert.ok("text" in read);
+    assert.match(read.text, /evidence a/); assert.match(read.text, /evidence b/);
+    assert.doesNotMatch(read.text, /Scheduling batch/);
+    assert.deepEqual(await assessChiefInput(f.resources, f.root(), "one", { inputId: id, summary: "whole task checked" }, "first"), { assessed: id });
+    await assessChiefInput(f.resources, f.root(), "one", { inputId: id, summary: "duplicate completion" }, "second");
+    const completed = readChiefInput(store, f.root(), id, 0, 8000);
+    assert.ok("status" in completed);
+    assert.equal(completed.status?.result?.summary, "whole task checked");
     assert.equal(f.aide.topics.inputStore.get("a")!.status.assess?.completedAt, undefined);
   }), f.root(), f.policy);
   assert.equal((await batchById(f.resources, batch.metadata.uid))!.status.phase, "completed");
@@ -53,6 +71,20 @@ for (const attention of [InputAttention.Normal, InputAttention.Immediate]) test(
   await prepareInputs(f.context, f.root(), f.policy, Date.parse(first.metadata.creationTimestamp) + 700_000);
   assert.equal((await f.resources.list(BATCH_TYPE)).length, 0);
   assert.equal((await preparedIntake(f.resources, f.root())).inputs.length, 2);
+});
+
+test("Gate accepts individual Inputs even when Deferred materials reach the batch threshold", async t => {
+  const f = await secretaryFixture(t), gate = f.aide.topics.resource("gate")!;
+  const topic = resourceRef(gate);
+  for (const [name, attention] of [["first", InputAttention.Deferred], ["second", InputAttention.Deferred], ["coordination", InputAttention.Normal]] as const) {
+    await f.resources.create(INPUT_TYPE, { name, spec: { origin: "chief", originId: "fixture", text: name, attention },
+      status: { topic, assess: { topic }, route: { completedAt: new Date().toISOString(), result: { topics: [topic], reason: "Gate input" } } } });
+  }
+  await reconcileSecretary(f.context, gate, f.policy);
+  assert.equal((await f.resources.list(BATCH_TYPE)).length, 0);
+  assert.deepEqual((await preparedIntake(f.resources, gate, true)).inputs.map(i => i.metadata.name), ["coordination"]);
+  await assert.rejects(f.resources.create<BatchSpec, BatchStatus>(BATCH_TYPE, { name: "gate-batch",
+    spec: { topic, attention: InputAttention.Normal, oldestAt: gate.metadata.creationTimestamp }, status: { phase: "preparing" } }), /Only a domain root/);
 });
 
 test("Single Deferred ages into a Batch independently of Chief activity", async t => {
@@ -143,7 +175,7 @@ test("Business assessment racing Secretary cannot claim a grouped Input", async 
     if (!raced) { raced = true; await prepareInputs(f.context, f.root(), f.policy); }
     return f.resources.commit(writes);
   } };
-  await assert.rejects(assessInput(resources, f.root(), "busy", { inputId: "a", summary: "stale claim" }), /assess_batch|Batch member/);
+  await assert.rejects(assessInput(resources, f.root(), "busy", { inputId: "a", summary: "stale claim" }), /assess the containing item|Batch member/);
   assert.equal(f.aide.topics.inputStore.get("a")!.status.assess?.completedAt, undefined);
 });
 
@@ -192,8 +224,8 @@ test("Batch handoff preserves each source authority and guards shared Work once"
     await assert.rejects(assessBatch(f.resources, f.root(), "handoff", { batchId: batch.metadata.uid, summary: "bad authority",
       workRequests: [{ inputId: "a", workUid: work.uid!, request: { action: "pause" } }] }), /Source facts/);
     assert.equal((await batchById(f.resources, batch.metadata.uid))!.status.phase, "running");
-    const requests = ["a", "b"].map(inputId => ({ inputId, workUid: work.uid!, request: { action: "context" as const } }));
-    await assessBatch(f.resources, f.root(), "handoff", { batchId: batch.metadata.uid, summary: "Delegated evidence", workRequests: requests });
+    const requests = ["a", "b"].map(sourceInputId => ({ sourceInputId, workUid: work.uid!, request: { action: "context" as const } }));
+    await assessChiefInput(f.resources, f.root(), "handoff", { inputId: batch.metadata.uid, summary: "Delegated evidence", workRequests: requests }, "call");
     for (const id of ["a", "b"]) {
       const input = f.aide.topics.inputStore.get(id)!;
       assert.ok(input.status.handle?.[work.uid!]); assert.equal(input.status.assess?.completedAt, undefined);

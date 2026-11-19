@@ -17,7 +17,7 @@ Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为
 | Chief 完成量达到阈值，或待回顾活动等待达到时限 | 创建 `aide:review` Input；本轮覆盖请求创建时的完成水位 |
 | 静默检查到期且没有待办 | 只更新检查时间与退避，不创建 Input、不触发 Agent |
 
-每个普通 Topic 检查自己的直属容量；维护请求交给其当前 root Chief 处理。root 负责子树认识维护和业务批次准备。Gate 只参与业务批次准备，不产生知识维护或静默回顾请求。具体范围见[容量与维护请求](#容量与维护请求)和 [Gate](gate.md)。
+每个普通 Topic 检查自己的直属容量；维护请求交给其当前 root Chief 处理。领域 root 负责子树认识维护和业务批次准备。Gate 的单聊与协调请求逐条研判。具体范围见[容量与维护请求](#容量与维护请求)和 [Gate](gate.md)。
 
 ## Reconciler
 
@@ -67,7 +67,7 @@ Topic 配置区分 `trigger.intervalSeconds`（默认 60 秒，固定唤醒 Reco
 
 ## 与 Chief 及其它角色协作
 
-Chief Reconcile 关注抽到的非 Deferred Input／Batch，按其 origin、attention 和权限选择工具并触发 Agent，把当前待办处理好。Secretary 关注更多资源事实，它的工作产物是新的 Input 或就绪 Batch。Chief 角色内部使用 Agent 作判断，通过 `assess_input` 或 `assess_batch` 提交持久化结果；完成结果、Chief 工作量与本次 Review 覆盖水位在同一事务中提交。Chief 不决定下一次维护何时发生，也不在执行结束时重置秘书的退避。
+Chief Reconcile 关注抽到的非 Deferred Input／Batch，按其 origin、attention 和权限选择工具并触发 Agent，把当前待办处理好。Secretary 关注更多资源事实，它的工作产物是新的 Input 或就绪 Batch。Chief 角色内部使用 Agent 作判断，通过 `assess_input` 提交持久化结果；完成结果、Chief 工作量与本次 Review 覆盖水位在同一事务中提交。Chief 不决定下一次维护何时发生，也不在执行结束时重置秘书的退避。
 
 Secretary 观察 Chief 已持久化的完成事实，后续需求产生新 Input。结果写入与重试由 [Chief](chief.md#完成与重试) 负责，Batch 成员结果由 Input Reconcile 投影；这些完成路径无需秘书再次确认。
 

@@ -3,7 +3,7 @@ import { InputAttention, inputAttention, assessmentRetryDue } from "../input/mod
 import type { Input } from "../input/state.ts";
 import { preparedInputs } from "./queue.ts";
 import type { TopicResource } from "../topic/model.ts";
-import { isProcessingRoot } from "../topic/boundary.ts";
+import { isRootTopic } from "../topic/boundary.ts";
 import { BATCH_TYPE, type Batch, type BatchSpec, type BatchStatus } from "../batch/model.ts";
 import { expandBatch } from "../batch/admission.ts";
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
@@ -14,9 +14,8 @@ import { immediate, eligible, canActivate } from "../execution/input.ts";
 /** Chief selects one prepared Deferred Batch or independent Inputs. Immediate always takes priority. */
 export interface PreparedIntake { inputs: readonly Input[]; batch?: Batch }
 export async function preparedIntake(resources: ResourceReader, topic: TopicResource, businessOnly = false, retryDelayMs = 60_000): Promise<PreparedIntake> {
-  if (!isProcessingRoot(topic)) return { inputs: [] };
   const inputs = await preparedInputs(resources, topic, 10, businessOnly, retryDelayMs);
-  if (inputs[0] && inputAttention(inputs[0].spec) === InputAttention.Immediate) return { inputs };
+  if (!isRootTopic(topic) || (inputs[0] && inputAttention(inputs[0].spec) === InputAttention.Immediate)) return { inputs };
   const active = await resources.page<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "active", value: topic.metadata.uid }, limit: 1 });
   if (active.items.length) return { inputs };
   const batch = (await resources.page<BatchSpec, BatchStatus>(BATCH_TYPE,
@@ -43,6 +42,7 @@ export async function submitChiefPending(context: PluginContext, execution: Reco
       ? { requeueAfterMs: 100 } : undefined;
   }
 
+  if (!isRootTopic(owner)) return;
   const batch = (await preparedInputs(context.resources, owner, 8, false, topicPolicy(context.instance.config.topic).trigger.intervalSeconds * 1000)).filter(i => isInternalInput(i.spec));
   for (const input of batch) {
     if (!eligible(input, owner) || !canActivate(input.spec, owner)) continue;

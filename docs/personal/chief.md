@@ -30,7 +30,7 @@ root 按 Immediate → 已准备的 Deferred Batch → Normal → aide:triage �
 
 ### 完成与重试
 
-Chief 通过 `assess_input` 或 `assess_batch` 持久化结果。成功写入终态即完成；写入失败或执行结束仍无终态时，释放占用后重试原 Input／Batch。完成回执、Chief 工作量和 Review 覆盖水位在同一事务中提交。每个成功 Input／Batch 计一次，包含内部维护，Batch 成员投影不重复计数。计数如何触发新 Review 见 [Secretary](secretary.md#工作量与时间窗口)。
+Chief 通过 `assess_input` 持久化结果。成功写入终态即完成；写入失败或执行结束仍无终态时，释放占用后重试原 Input／Batch。完成回执、Chief 工作量和 Review 覆盖水位在同一事务中提交。每个成功 Input／Batch 计一次，包含内部维护，Batch 成员投影不重复计数。计数如何触发新 Review 见 [Secretary](secretary.md#工作量与时间窗口)。
 
 Chief 不为 Secretary 增加结果确认阶段。Batch 的终态由 Input Reconcile 投影到成员；Work 办理和 Output 投递继续遵循各自的完成契约。失败恢复见 [Input](input.md#归属与-chief-通知) 和 [Batch](batch.md)。
 
@@ -42,7 +42,7 @@ Chief 按 `plugins.personal.topic.idleMs` 释放静默的原生会话，保留 T
 
 ### 与 Reconciler 的协作
 
-Chief Agent 负责判断，Personal Route 负责话题归位。Chief 的接收 Controller 与 agent Controller 分别通知新材料和调用 Chief；assess_input 确认独立 Input，assess_batch 确认整批任务，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
+Chief Agent 负责判断，Personal Route 负责话题归位。Chief 的接收 Controller 与 agent Controller 分别通知新材料和调用 Chief；assess_input 确认一项输入的全部材料，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
 
 所有 Topic 共用 Chief 配置。Chief 的 Host session 工厂根据调用 scope 的 ResourceRef 校验 Topic UID，装配限定该会话范围的 WorkService 与工具。工具每次执行都重新确认当前 execution，不捕获过期 verbs。
 
@@ -91,7 +91,7 @@ Chief 注册以下业务工具，并按上述 Input 范围向每次模型请求�
 - read_input 按页读取会话关联的 Input 原文与证据，补足大输入的预览。
 - say 产生独立 Output；答复是新的 Input，不挂起 Harness 等待。
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
-- assess_batch 完成一个固定成员的 Deferred Batch，成员研判回执由 Input Reconcile 投影；可按原成员身份交办 Work，不能把整批完成等同于 Work 完成。
+- 对固定成员组成的输入只调用一次 assess_input，成员研判回执由 Input Reconcile 投影；可按原成员身份交办 Work，不能把整批完成等同于 Work 完成。
 - assess_input 原子保存独立 Input 的简短研判回执，并建立 Work handle；不改写 Topic.summary / recent，不值得通知的观察可以静默完成。
 - list_notes 查询 recent 之外仍保留的具体事项；move_note 在责任树内调整事项归属，保留内容与年龄；超出数量或篇幅软预算时使用 upsert_note 整合信息，确认目标保存后用 prune_note 削减来源，或用 retire_note 退役无独立价值的整篇 Note。
 - summarize_topic 只修订长期有效、低频变化的认识；只确认子版本时可省略 summary。upsert_note 独立维护近期事项，以同一 noteId 连接多次输入的进展，不要求改写 summary。

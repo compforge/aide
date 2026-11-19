@@ -81,7 +81,7 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
     }
     for (const name of ["list_topics", "read_topic", "list_notes", "read_note", "list_work", "read_work", "read_input", "delegate_request"]) assert.ok(names.includes(name), name);
     assert.ok(names.includes("assess_input"));
-    for (const name of ["bash", "write", "edit", "upsert_note", "summarize_topic", "retire_note"]) assert.ok(!names.includes(name), name);
+    for (const name of ["assess_batch", "bash", "write", "edit", "upsert_note", "summarize_topic", "retire_note"]) assert.ok(!names.includes(name), name);
     if (phase === 0) switch (gateStep++) {
       case 0: return { tool: "list_topics", args: {} };
       case 1: return { tool: "read_topic", args: { uid: firstUid } };

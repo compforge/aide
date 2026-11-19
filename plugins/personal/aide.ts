@@ -4,7 +4,8 @@ import { batchById } from "./batch/members.ts";
 import { expandBatch } from "./batch/admission.ts";
 import { isGateInput } from "./gate/input.ts";
 import { ensureGateTopic } from "./gate/topic.ts";
-import { isProcessingRoot } from "./topic/boundary.ts";
+import { chiefPreviews } from "./chief/inputs.ts";
+import { isGateTopic, isProcessingRoot } from "./topic/boundary.ts";
 import { MailSender } from "./stream/sender.ts";
 import { Addresses } from "./address/service.ts";
 import { invalidateAssignment } from "./input/assignment.ts";
@@ -177,6 +178,7 @@ export class Personal {
       if (!invocation) return { accepted: false, reason: "not_running" };
       const ids = [...new Set(args.inputIds ?? [args.inputId])];
       if (ids[0] !== args.inputId) throw new Error("Chief batch inputId must identify its first Input");
+      if (args.batchId && isGateTopic(topic)) return { accepted: false };
       const scheduled = args.batchId ? await batchById(resources, args.batchId) : undefined;
       if (args.batchId && (!scheduled || scheduled.spec.topic.uid !== topic.metadata.uid || scheduled.status.phase !== "ready")) return { accepted: false };
       const inputs = ids.map(id => this.topics.inputStore.get(id));
@@ -207,7 +209,8 @@ export class Personal {
       this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid, inputIds: batch.map(i => i.metadata.name),
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
       const budget = topicPolicy(this.options.topic).contextChars;
-      const prompt = `New Inputs:\n${JSON.stringify({ batchId: scheduled?.metadata.uid, inputId: args.inputId, inputIds: ids })}\n${batch.map(i => inputPreview(i, Math.floor((budget - 2000) / batch.length))).join("\n\n")}\n${scheduled ? "Complete this Batch with assess_batch; do not assess member Inputs individually." : "Assess each original Input separately."} Leave unfinished prior tasks pending.`;
+      const items = chiefPreviews(batch, budget - 2000);
+      const prompt = `New Inputs:\n${JSON.stringify({ inputId: items[0]!.inputId, inputIds: items.map(i => i.inputId) })}\n${items.map(i => i.description).join("\n\n")}\nAssess each listed inputId once with assess_input. Leave unfinished prior tasks pending.`;
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
           operation: args.operation, invocationId: invocation.invocationId,
