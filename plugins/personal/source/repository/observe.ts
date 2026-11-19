@@ -1,8 +1,9 @@
+import { Repository, repositoryId } from "@compforge/aide-connector/forge";
 import { patchStatus } from "../../status.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ConnectorClient, PluginContext, Resource } from "@compforge/aide-plugin";
 import { digest } from "../../identity.ts";
-import { pullRequestSpec, pullRequestSourceName, type PullRequestWatch } from "../pull-request/config.ts";
+import { pullRequestSpec, pullRequestSourceName, type PullRequestSourceSpec, type PullRequestWatch } from "../pull-request/config.ts";
 import { PULL_REQUEST_SOURCE_TYPE } from "../pull-request/definition.ts";
 import { repositorySourceName, type RepositorySourceSpec } from "./config.ts";
 import { configureSource } from "../configure.ts";
@@ -33,25 +34,30 @@ class RepositoryObservation {
     const policyKey = digest(policies);
     const desired = (this.resource.status.snapshot?.value ?? []).flatMap(repo => policies.map(w => pullRequestSpec(w, this.resource, repo)));
     let offset = this.resource.status.handoff?.policyKey === policyKey ? this.resource.status.handoff.offset : 0;
-    const end = Math.min(offset + HANDOFF_BATCH_SIZE, desired.length);
     const startedAt = performance.now();
-    this.context.logger.info("Repository handoff batch started", { attributes: {
-      watchId: this.resource.spec.id, offset, end, total: desired.length } });
-    while (offset < end) {
+    const children = await this.context.resources.list<PullRequestSourceSpec, unknown>(PULL_REQUEST_SOURCE_TYPE,
+      { namespace: this.resource.metadata.namespace, matchIndex: { name: "repositorySource", value: this.resource.metadata.uid } });
+    const existing = new Map(children.map(child => [child.metadata.name, child.spec]));
+    let configured = 0;
+    while (offset < desired.length) {
       const spec = desired[offset]!;
       const name = pullRequestSourceName(spec);
-      this.context.logger.info("Repository handoff child started", { attributes: {
-        watchId: this.resource.spec.id, offset, end, path: spec.repository!.path, childName: name } });
+      if (isDeepStrictEqual(existing.get(name), spec)) {
+        offset++;
+        continue;
+      }
+      if (configured === HANDOFF_BATCH_SIZE) break;
       if (await configureSource(this.context.resources, PULL_REQUEST_SOURCE_TYPE, name, spec, this.resource.metadata.namespace)) {
         this.context.logger.info("Repository discovered; PullRequest Source created", { attributes: { repositorySource: this.resource.spec.id, watchId: spec.id, forge: spec.forge, path: spec.repository!.path } });
       }
+      configured++;
       offset++;
       await this.save({ handoff: { offset, policyKey } });
     }
     this.context.logger.info("Repository handoff batch finished", { attributes: {
-      watchId: this.resource.spec.id, offset, total: desired.length, elapsedMs: Math.round(performance.now() - startedAt) } });
+      watchId: this.resource.spec.id, offset, total: desired.length, configured, elapsedMs: Math.round(performance.now() - startedAt) } });
     if (offset < desired.length) return false;
-    await this.save({ handoff: null });
+    if (this.resource.status.handoff) await this.save({ handoff: null });
     return true;
   }
   async run(): Promise<number> {
@@ -78,10 +84,10 @@ class RepositoryObservation {
       return delay;
     }
     if (page.nextCursor !== undefined && page.nextCursor === refresh.cursor) throw new Error("Repository pagination did not advance");
-    const items = new Map(refresh.items.map(repo => [repo.path, repo]));
+    const items = new Map(refresh.items.map(repo => [repositoryId(repo), repo]));
     for (const repo of page.items) {
       if (repo.forge.name !== this.resource.spec.forge) throw new Error("Repository page belongs to another Forge");
-      items.set(repo.path, repo);
+      items.set(new Repository(repo).id(), repo);
     }
     if (page.nextCursor !== undefined) {
       await this.save({ refresh: { ...refresh, items: [...items.values()], cursor: page.nextCursor }, issues: [], error: null, retryAt: null });
