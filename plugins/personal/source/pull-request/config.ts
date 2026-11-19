@@ -50,7 +50,8 @@ export function pullRequestSpec(watch: PullRequestWatch, parent?: Resource<Repos
   const { id, author, intervalMs, initialLookbackMs } = watch;
   if ("forge" in watch) return { ...inputClassification(watch), id, forge: watch.forge, author, intervalMs, initialLookbackMs, connectionRevision };
   if (!parent || !repository || parent.spec.id !== watch.repositories || repository.forge.name !== parent.spec.forge) throw new Error("PullRequest repository scope does not match its configured Source");
-  return { ...inputClassification(parent.spec), ...inputClassification(watch), id, forge: parent.spec.forge, author, intervalMs, initialLookbackMs, repository, connectionRevision: parent.spec.connectionRevision,
+  return { ...inputClassification(parent.spec), ...inputClassification(watch), id, forge: parent.spec.forge, author, intervalMs, initialLookbackMs,
+    repository: { forge: repository.forge, path: repository.path }, connectionRevision: parent.spec.connectionRevision,
     repositorySource: { name: parent.metadata.name, uid: parent.metadata.uid } };
 }
 export const pullRequestSourceName = (spec: PullRequestSourceSpec) => digest([

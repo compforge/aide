@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import type { Page, PageQuery, RepositorySnapshot } from "@compforge/aide-plugin";
+import type { Page, PageQuery, PluginContext, RepositorySnapshot } from "@compforge/aide-plugin";
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import definitions from "../plugins/personal/definitions.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
@@ -17,7 +17,7 @@ import { observeRepositories } from "../plugins/personal/source/repository/obser
 import type { RepositorySourceStatus } from "../plugins/personal/source/repository/state.ts";
 import { PullRequestWatchSchema, validateForgeSources, type PullRequestSourceSpec } from "../plugins/personal/source/pull-request/config.ts";
 import { PULL_REQUEST_SOURCE_TYPE } from "../plugins/personal/source/pull-request/definition.ts";
-import { pullRequestSourceActive } from "../plugins/personal/source/pull-request/observe.ts";
+import { pullRequestSourceActive, registerPullRequestSources } from "../plugins/personal/source/pull-request/observe.ts";
 import type { PullRequestSourceStatus } from "../plugins/personal/source/pull-request/state.ts";
 import { Aide } from "../src/app.ts";
 import { ConfigSchema } from "../src/config.ts";
@@ -61,6 +61,41 @@ test("repository inventory publishes after complete pagination and survives a re
   assert.equal(f.reads, 2); assert.deepEqual(f.children().map(c => c.metadata.uid).sort(), ids);
 });
 
+test("repository refresh wakes only observers whose membership changed", async t => {
+  const f = fixture(t);
+  const inventory = Array.from({ length: 72 }, (_, i) => repo(`org/r${i}`));
+  f.setRead(async () => ({ items: inventory }));
+  for (let second = 0; second < 4; second++) await f.observe(second);
+  const before = f.resource();
+  const registrations: Parameters<PluginContext["controllers"]["register"]>[0][] = [];
+  registerPullRequestSources({ resources: f.resources, instance: { config: {} },
+    controllers: { register: controller => { registrations.push(controller); } } } as PluginContext);
+  const handler = registrations[0]!.watches![0]!.handler;
+  assert.equal(await f.observe(61), 60_000);
+  const unchanged = f.resource();
+  assert.equal(unchanged.status.snapshot?.observedAt, at(61));
+  assert.deepEqual(await handler.update({ oldObject: before, newObject: unchanged }), []);
+  const reversed = [...inventory].reverse().map(item => ({ ...item, forkedFrom: "upstream/project" }));
+  f.setRead(async () => ({ items: reversed }));
+  assert.equal(await f.observe(122), 60_000);
+  const refreshed = f.resource();
+  assert.deepEqual(await handler.update({ oldObject: unchanged, newObject: refreshed }), []);
+  const replaced = [...reversed.slice(1), repo("org/new")];
+  f.setRead(async () => ({ items: replaced }));
+  assert.equal(await f.observe(183), 60_000);
+  const changed = f.resource();
+  const affected = f.children().filter(child => [reversed[0]!.path, "org/new"].includes(child.spec.repository!.path));
+  assert.equal(affected.length, 2);
+  const names = (await handler.update({ oldObject: refreshed, newObject: changed })).map(r => r.name).sort();
+  assert.deepEqual(names, affected.map(child => child.metadata.name).sort());
+  for (const child of affected) {
+    assert.equal(await pullRequestSourceActive({ resources: f.resources }, child, [f.policy], [f.watch]),
+      child.spec.repository!.path === "org/new");
+  }
+  const retired = await f.resources.patchStatus(changed, { retiredAt: at(184) });
+  assert.equal((await handler.update({ oldObject: changed, newObject: retired })).length, 73);
+});
+
 test("failed and incomplete refreshes keep the complete inventory and respect backoff", async t => {
   const f = fixture(t); await f.observe(); const snapshot = f.resource().status.snapshot;
   f.setRead(async () => ({ items: [repo("org/b")], nextCursor: "next" })); await f.observe(61);
@@ -84,7 +119,7 @@ test("child creation resumes after persistence before offset commit, with bounde
   } };
   await assert.rejects(observeRepositories({ resources: interrupted, logger }, f.resource(), f.connectors, [f.policy], at()), /handoff interrupted/);
   assert.equal(f.children().length, 1); const first = f.children()[0]!.metadata.uid;
-  f.restart(); assert.equal(await f.observe(1), 1000); assert.equal(f.children().length, 20);
+  f.restart(); assert.equal(await f.observe(1), 1000); assert.equal(f.children().length, 21);
   assert.equal(f.children().find(c => c.metadata.uid === first)?.metadata.uid, first);
   assert.equal(await f.observe(2), 58_000); assert.equal(f.children().length, 25);
   assert.equal(f.resource().status.handoff, null); assert.equal(f.reads, 1);

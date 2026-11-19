@@ -70,7 +70,7 @@ PullRequest 策略选择 repositories 引用或 forge 账号范围之一；每�
 一个 Forge 配置一个 RepositorySource，同一 Forge/author 只使用一条 PR 发现策略，避免重叠观察。
 未知 Connector、未知 RepositorySource 引用及重复范围在启动时拒绝。
 
-repositories 策略展开为每个 RepositoryKey + author 一个 PullRequestSource；forge 策略直接创建账号级
+repositories 策略展开为每个 Repository + author 一个 PullRequestSource；forge 策略直接创建账号级
 PullRequestSource。两者使用同一观察实现，分别传递 repocli 的 repository/account scope。
 GitHub 的账号级发现可覆盖向外部仓库提交的 PR。仓库枚举范围由 Connector 凭证和平台接口决定：
 当前 GitLab 使用 membership 项目，GitHub 使用 /user/repos；它们不保证覆盖该作者创建过 PR 的所有仓库。
@@ -92,11 +92,13 @@ refresh 保存本轮候选 items、cursor 和起始时间，handoff 保存完整
 分页中断保留旧快照和刷新进度；带覆盖缺口的结果不发布，保留旧快照并退避后重新枚举。
 冷启动必须完成第一份清单才创建 PR 观察任务。这里的完整表示分页成功遍历，并不承诺远端列表的原子时点一致性。
 
-发布清单时同时冻结 handoff；每次协调最多交接二十个观察任务。按确定身份幂等创建子资源，
+发布清单时同时冻结 handoff。按父资源 UID 查询已有观察任务，跳过配置相同的子资源，每次协调最多创建或更新二十个。
+按确定身份幂等创建子资源，
 创建成功后才推进 offset。创建后进程中断可安全重试；handoff 未完成期间不发起新一轮外部刷新。
 缓存仍有效时，重启也会对账新配置的 PR 策略，复用同一清单创建缺失的观察任务。
 
-新清单通过 Watch 唤醒关联的 PullRequestSource。仓库只有在完整清单中缺席才退出观察；
+清单保留 RepositorySnapshot，按 Repository.id() 比较成员。Watch 只唤醒成员资格变化的 PullRequestSource。
+刷新时间、仓库顺序或 fork 来源变化时，已有观察任务继续按各自的周期扫描。仓库只有在完整清单中缺席才退出观察；
 刷新失败、分页未完成或缓存到期都不会撤销原有成员。退出观察不表示 PR 已关闭或合并。
 移除配置、改变访问范围或删除父资源后，子观察任务停止外部请求，排空冻结 Input/batch 后标记 retiredAt，
 允许资源保留策略回收。重新启用且旧实例仍保留时可复用其状态。

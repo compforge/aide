@@ -1,3 +1,4 @@
+import { repositoryId } from "@compforge/aide-connector/forge";
 import { workInputClassification } from "../../disclosure.ts";
 import { patchStatus } from "../../status.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
@@ -160,8 +161,9 @@ export async function pullRequestSourceActive(context: Pick<PluginContext, "reso
   const parent = await context.resources.get<RepositorySourceSpec, RepositorySourceStatus>({ ...REPOSITORY_SOURCE_TYPE,
     namespace: resource.metadata.namespace, ...reference });
   if (!parent || parent.spec.id !== watch.repositories || parent.metadata.deletionTimestamp || parent.status.retiredAt || !repositories.some(w => isDeepStrictEqual(w, parent.spec))) return false;
+  const id = repositoryId(resource.spec.repository);
   return isDeepStrictEqual(pullRequestSpec(watch, parent, resource.spec.repository), resource.spec)
-    && Boolean(parent.status.snapshot?.value.some(repo => repo.path === resource.spec.repository!.path && repo.forge.name === resource.spec.forge));
+    && Boolean(parent.status.snapshot?.value.some(repo => repositoryId(repo) === id));
 }
 
 export function registerPullRequestSources(context: PluginContext) {
@@ -169,8 +171,12 @@ export function registerPullRequestSources(context: PluginContext) {
   const revisions = (context.instance.config.forgeConnectionRevisions ?? {}) as Record<string, string>;
   const repositories = ((context.instance.config.repositorySources ?? []) as Omit<RepositorySourceSpec, "connectionRevision">[])
     .map(w => ({ ...w, connectionRevision: revisions[w.forge] ?? "" }));
-  const requests = async (uid: string) => (await context.resources.list<PullRequestSourceSpec, PullRequestSourceStatus>(PULL_REQUEST_SOURCE_TYPE,
-    { matchIndex: { name: "repositorySource", value: uid } })).map(r => ({ name: r.metadata.name, namespace: r.metadata.namespace }));
+  const requests = async (uid: string, changed?: ReadonlySet<string>) => {
+    const children = await context.resources.list<PullRequestSourceSpec, PullRequestSourceStatus>(PULL_REQUEST_SOURCE_TYPE,
+      { matchIndex: { name: "repositorySource", value: uid } });
+    return children.filter(({ spec }) => !changed || (spec.repository && changed.has(repositoryId(spec.repository))))
+      .map(({ metadata }) => ({ name: metadata.name, namespace: metadata.namespace }));
+  };
   context.controllers.register<PullRequestSourceSpec, PullRequestSourceStatus>({ resourceType: PULL_REQUEST_SOURCE_TYPE, maxConcurrency: 2,
     sources: [{ type: "resource", sourceId: "configured-pull-requests", async start(source) {
       for (const watch of watches) if ("forge" in watch) {
@@ -186,8 +192,15 @@ export function registerPullRequestSources(context: PluginContext) {
       update: async ({ oldObject, newObject }) => {
         const before = oldObject as Resource<RepositorySourceSpec, RepositorySourceStatus>;
         const after = newObject as Resource<RepositorySourceSpec, RepositorySourceStatus>;
-        return isDeepStrictEqual(before.status.snapshot, after.status.snapshot) && before.status.retiredAt === after.status.retiredAt
-          ? [] : requests(after.metadata.uid);
+        if (Boolean(before.status.retiredAt) !== Boolean(after.status.retiredAt) ||
+            before.metadata.deletionTimestamp !== after.metadata.deletionTimestamp) return requests(after.metadata.uid);
+        const oldInventory = before.status.snapshot?.value, newInventory = after.status.snapshot?.value;
+        if (isDeepStrictEqual(oldInventory, newInventory)) return [];
+        const previous = new Set(oldInventory?.map(repositoryId));
+        const current = new Set(newInventory?.map(repositoryId));
+        const changed = new Set([...previous].filter(id => !current.has(id)));
+        for (const id of current) if (!previous.has(id)) changed.add(id);
+        return changed.size ? requests(after.metadata.uid, changed) : [];
       },
     } }],
     async reconcile(execution, resource) {

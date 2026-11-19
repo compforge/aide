@@ -1,5 +1,6 @@
 import { isForgeRateLimitError, type ForgeReader } from "@compforge/repocli";
 
+export { Repository, repositoryId } from "@compforge/harness-common";
 export type { RepositoryKey, RepositorySnapshot, PullRequestKey, PullRequestSnapshot } from "@compforge/harness-common";
 export type { ForgeComment, Page, PageQuery, PullRequestQuery, PullRequestReviewObservation, PullRequestScanQuery, PullRequestScanResult, PullRequestScanCursor, ForgeReadIssue } from "@compforge/repocli";
 
