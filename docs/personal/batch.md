@@ -23,7 +23,7 @@ Input Reconcile 监听 Batch 终态，按 batchId 将完成或失败回执投影
 
 Batch.status.phase 表达准备与调度阶段，status.assess 与 Input 使用同一执行、完成及错误回执结构；不另设 summary、error 或 finishedAt 同义字段。
 
-Chief 的首次 prompt、followUp、`list_inputs`、`read_input` 与 `assess_input` 共用一个 inputId。普通项沿用 Input name，组批项使用 Batch UID，列表按项分页，详情按页展开成员证据。多份材料中的 Work 交办通过 sourceInputId 指明原始来源。原生投递明确拒绝时仅将尚未完成的 Batch 退回 ready；结果不明时保留 running 和可重试错误，待执行结束后回到 ready；已提交的 Batch 完成回执不会被覆盖。只有 Topic Chief/Gate Reconcile 触发 Agent，Batch 不持有独立会话。
+Chief 的首次 prompt、followUp、`list_inputs`、`read_input` 与 `assess_input` 共用一个 inputId。普通项沿用 Input name，组批项使用 Batch UID，列表按项分页，详情按页展开成员证据。多份材料中的 Work 交办通过 sourceInputId 指明原始来源。原生投递明确拒绝时仅将尚未完成的 Batch 退回 ready；结果不明时保留 running 和可重试错误，待执行结束后回到 ready；已提交的 Batch 完成回执不会被覆盖。领域 root 拥有 Batch，由该领域的 Chief Reconcile 触发 Agent。
 
 ## 保留与恢复
 

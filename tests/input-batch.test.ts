@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { secretaryFixture } from "./secretary-fixture.ts";
 import { cancelBatch } from "../plugins/personal/batch/reconcile.ts";
 import { prepareInputs } from "../plugins/personal/secretary/batching.ts";
+import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
 import { batchById, batchMembers } from "../plugins/personal/batch/members.ts";
 import { assessBatch } from "../plugins/personal/batch/assess.ts";
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
@@ -70,6 +71,20 @@ for (const attention of [InputAttention.Normal, InputAttention.Immediate]) test(
   await prepareInputs(f.context, f.root(), f.policy, Date.parse(first.metadata.creationTimestamp) + 700_000);
   assert.equal((await f.resources.list(BATCH_TYPE)).length, 0);
   assert.equal((await preparedIntake(f.resources, f.root())).inputs.length, 2);
+});
+
+test("Gate accepts individual Inputs even when Deferred materials reach the batch threshold", async t => {
+  const f = await secretaryFixture(t), gate = f.aide.topics.resource("gate")!;
+  const topic = resourceRef(gate);
+  for (const [name, attention] of [["first", InputAttention.Deferred], ["second", InputAttention.Deferred], ["coordination", InputAttention.Normal]] as const) {
+    await f.resources.create(INPUT_TYPE, { name, spec: { origin: "chief", originId: "fixture", text: name, attention },
+      status: { topic, assess: { topic }, route: { completedAt: new Date().toISOString(), result: { topics: [topic], reason: "Gate input" } } } });
+  }
+  await reconcileSecretary(f.context, gate, f.policy);
+  assert.equal((await f.resources.list(BATCH_TYPE)).length, 0);
+  assert.deepEqual((await preparedIntake(f.resources, gate, true)).inputs.map(i => i.metadata.name), ["coordination"]);
+  await assert.rejects(f.resources.create<BatchSpec, BatchStatus>(BATCH_TYPE, { name: "gate-batch",
+    spec: { topic, attention: InputAttention.Normal, oldestAt: gate.metadata.creationTimestamp }, status: { phase: "preparing" } }), /Only a domain root/);
 });
 
 test("Single Deferred ages into a Batch independently of Chief activity", async t => {
