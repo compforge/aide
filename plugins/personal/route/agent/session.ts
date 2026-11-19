@@ -19,7 +19,7 @@ import { TOPIC_TYPE } from "../../topic/model.ts";
 import type { PiSessionFactory } from "../../../../src/host/harness/pi/adapter.ts";
 import type { Persons } from "../../person/service.ts";
 
-import { readLoopInput } from "../../execution/agent/read-input.ts";
+import { readRouteInput } from "../../execution/agent/read-input.ts";
 
 export function routeSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, log: Logger, persons: Persons): PiSessionFactory {
   const ref = scope.resourceRef;
@@ -39,7 +39,7 @@ export function routeSession(scope: ExecutionScope, config: PiConfig, store: Sto
         const page = topicCandidatePage(store, offset, query, parentUid);
         return { topics: page.items, total: page.total, catalogFingerprint: page.catalogFingerprint, fingerprint: page.fingerprint, nextOffset: page.nextOffset };
       },
-      input: (id, offset) => { const r = active(); return readLoopInput(store, resourceRef(r), id, offset); },
+      input: (id, offset) => { const r = active(); return readRouteInput(store, resourceRef(r), id, offset); },
       route: async (raw, toolCallId) => {
         const args = z.object({ inputId: z.string(), topicUids: z.array(z.string()).max(1), reason: z.string().min(1).max(4000) }).strict().parse(raw);
         const r = active();

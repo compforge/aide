@@ -1,7 +1,7 @@
 import { isInternalInput } from "./model.ts";
 import type { Resource } from "@compforge/aide-plugin";
 import type { InputSpec, InputStatus } from "./model.ts";
-import { inputPrinter } from "./printer.ts";
+import { describeInput } from "./printer.ts";
 import { z } from "zod";
 import { messagePreview } from "../source/message/prompt.ts";
 import { SOURCES } from "../source/definition.ts";
@@ -30,10 +30,10 @@ function communication(input: InputSpec): string {
  * @why Full observation snapshots belong to the Input, not every Route/Chief/Work model call.
  * @link docs/personal/input.md
  */
-export function inputPreview(input: Readonly<Resource<InputSpec, InputStatus>>, maxChars = 12000): string {
+export function inputPreview(input: Readonly<Resource<InputSpec, InputStatus>>, maxChars = 12000, material = false): string {
   const text = input.spec.origin === "source" && input.spec.originId === SOURCES.lark.id
     ? messagePreview(input.spec.observation) ?? input.spec.text : input.spec.text;
-  const body = communication(input.spec) + inputPrinter.describe({ ...input, spec: { ...input.spec, text, observation: undefined } });
+  const body = communication(input.spec) + describeInput({ ...input, spec: { ...input.spec, text, observation: undefined } }, material);
   const evidence = input.spec.observation === undefined ? "" : "\nAdditional observation evidence is available through read_input. Read it when needed for the decision; it is not included in this preview.";
   const truncated = "\n[Text truncated; use read_input for the complete Input.]";
   const budget = Math.max(0, maxChars - evidence.length);

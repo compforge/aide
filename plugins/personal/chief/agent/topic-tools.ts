@@ -1,3 +1,5 @@
+import { chiefInputs } from "../inputs.ts";
+import { batchForInput } from "../../batch/view.ts";
 import { noteDirectory } from "../../note/directory.ts";
 import { isRootTopic } from "../../topic/boundary.ts";
 import { noteFields } from "../../execution/agent/context-tools.ts";
@@ -56,7 +58,12 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
         const root = active(), topic = await readTopicInScope(store.client, root, topicUid);
         if (!topic) throw new Error("Topic is outside this root");
         const items = store.topics.inputStore.query("topic", topic.metadata.uid).filter(i => !i.metadata.deletionTimestamp && !isInternalInput(i.spec));
-        return result(contextPage(items.map(i => ({ id: i.metadata.name, topicUid: i.status.topic!.uid, text: i.spec.text.slice(0, 240), assessed: !!i.status.assess?.completedAt })), offset));
+        const catalog = Array.from(chiefInputs(items), ([id, materials]) => {
+          const first = materials[0]!, batch = batchForInput(store.resources, first);
+          return { id, topicUid: topic.metadata.uid, text: materials.map(i => i.spec.text.slice(0, 240)).join("\n").slice(0, 240),
+            assessed: !!(batch?.status.assess ?? first.status.assess)?.completedAt };
+        });
+        return result(contextPage(catalog, offset));
       } }),
     { name: "list_topics", inputOrigins: INPUT_ORIGINS, label: "List child topics", description: "List direct children within this root's subtree with summary and Note directories for discovery. Text ending in [truncated] is incomplete; notes.total counts active ordinary Notes. Use read_note(id) for bodies and list_notes with notes.listNotes for further discovery. Before relying on incomplete context or confirming absorbed versions, use read_topic(uid) and continue with offset=nextOffset until the needed context is read. Follow this list's nextOffset to discover remaining children.",
       parameters: Type.Object({ parentUid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),

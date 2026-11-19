@@ -291,7 +291,11 @@ test("Ten deferred Inputs activate one bounded business batch before full-quota 
   await prepareInputs(f.context, f.current(root), topicPolicy());
   await reconcileChief(f.context, f.execution("batch"), f.current(root), (await import("../plugins/personal/topic/config.ts")).topicPolicy({ maxUnfiledInput: 1 }));
   assert.equal(f.prompts.length, 1); assert.equal(f.aide.topics.inputStore.list().length, 10);
-  assert.doesNotMatch(f.prompts[0]!.prompt, /aide:triage/);
+  assert.doesNotMatch(f.prompts[0]!.prompt, /aide:triage|assess_batch|batchId/);
+  const activation = JSON.parse(f.prompts[0]!.prompt.split("Activation: ")[1]!.split("\n")[0]!);
+  const [group] = await f.resources.list(BATCH_TYPE);
+  assert.deepEqual(activation.inputIds, [group!.metadata.uid]);
+  assert.deepEqual(activation.inputs.map((i: { inputId: string }) => i.inputId), activation.inputIds);
   for (const input of f.aide.topics.inputStore.list()) await reconcileBatchMember(f.context, input);
   for (let i = 0; i < 10; i++) {
     const receipt = f.aide.topics.inputStore.get(`batch-${i}`)!.status.assess!;
@@ -333,6 +337,8 @@ for (const outcome of ["accepted", "rejected", "uncertain"] as const) test(`Defe
   if (outcome === "uncertain") await assert.rejects(submitted, /result unknown/); else await submitted;
   assert.equal(deliveries.length, 1); assert.equal(deliveries[0].operation, "followUp");
   const batch = (await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE))[0]!;
+  assert.deepEqual(JSON.parse(deliveries[0].prompt.split("\n")[1]).inputIds, [batch.metadata.uid]);
+  assert.doesNotMatch(deliveries[0].prompt, /assess_batch|batchId/);
   assert.equal(batch.status.phase, outcome === "rejected" ? "ready" : "running");
   assert.equal(batch.status.assess?.executionId, outcome === "rejected" ? undefined : "a");
   if (outcome === "accepted") assert.equal(batch.status.assess?.deliveryId, deliveries[0].messageId);

@@ -4,7 +4,8 @@ import { batchById } from "./batch/members.ts";
 import { expandBatch } from "./batch/admission.ts";
 import { isGateInput } from "./gate/input.ts";
 import { ensureGateTopic } from "./gate/topic.ts";
-import { isProcessingRoot } from "./topic/boundary.ts";
+import { chiefPreviews } from "./chief/inputs.ts";
+import { isGateTopic, isProcessingRoot } from "./topic/boundary.ts";
 import { MailSender } from "./stream/sender.ts";
 import { Addresses } from "./address/service.ts";
 import { invalidateAssignment } from "./input/assignment.ts";
@@ -207,7 +208,13 @@ export class Personal {
       this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid, inputIds: batch.map(i => i.metadata.name),
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
       const budget = topicPolicy(this.options.topic).contextChars;
-      const prompt = `New Inputs:\n${JSON.stringify({ batchId: scheduled?.metadata.uid, inputId: args.inputId, inputIds: ids })}\n${batch.map(i => inputPreview(i, Math.floor((budget - 2000) / batch.length))).join("\n\n")}\n${scheduled ? "Complete this Batch with assess_batch; do not assess member Inputs individually." : "Assess each original Input separately."} Leave unfinished prior tasks pending.`;
+      let prompt: string;
+      if (isGateTopic(topic)) {
+        prompt = `New Inputs:\n${JSON.stringify({ batchId: scheduled?.metadata.uid, inputId: args.inputId, inputIds: ids })}\n${batch.map(i => inputPreview(i, Math.floor((budget - 2000) / batch.length))).join("\n\n")}\n${scheduled ? "Complete this Batch with assess_batch; do not assess member Inputs individually." : "Assess each original Input separately."} Leave unfinished prior tasks pending.`;
+      } else {
+        const items = chiefPreviews(batch, budget - 2000);
+        prompt = `New Inputs:\n${JSON.stringify({ inputId: items[0]!.inputId, inputIds: items.map(i => i.inputId) })}\n${items.map(i => i.description).join("\n\n")}\nAssess each listed inputId once with assess_input. Leave unfinished prior tasks pending.`;
+      }
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
           operation: args.operation, invocationId: invocation.invocationId,

@@ -9,7 +9,7 @@ import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 import { preparedIntake } from "./intake.ts";
 import { batchWatch } from "../batch/reconcile.ts";
-import { inputPreview } from "../input/prompt.ts";
+import { chiefPreviews } from "./inputs.ts";
 import { finalizeExecution, runInput } from "../execution/loop.ts";
 import { submitChiefPending } from "./intake.ts";
 import { topicPolicy, type TopicPolicy } from "../topic/config.ts";
@@ -57,9 +57,9 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     const result = await collectTopic(context, initial, execution);
     return { ...result, requeueAfterMs: Math.min(result?.requeueAfterMs ?? Infinity, policy.trigger.intervalSeconds * 1000) };
   }
-  const prompt = `${instructions}\nActivation: ${JSON.stringify({ kind: batch ? "batch" : "input", batchId: batch?.metadata.uid, topicId: initial.spec.id,
-    inputId: input.metadata.name, inputIds: inputs.map(i => i.metadata.name), inputs: inputs.map(i => ({ inputId: i.metadata.name,
-      description: inputPreview(i, Math.floor((policy.contextChars - 3000) / inputs.length)) })), at: new Date().toISOString() })}\nRead full evidence with read_input. ${batch ? "Complete this Batch with assess_batch; do not assess its members separately." : "Assess each Input separately."}`;
+  const items = chiefPreviews(inputs, policy.contextChars - 3000);
+  const prompt = `${instructions}\nActivation: ${JSON.stringify({ kind: "input", topicId: initial.spec.id,
+    inputId: items[0]!.inputId, inputIds: items.map(i => i.inputId), inputs: items, at: new Date().toISOString() })}\nRead full evidence with read_input. Assess each listed inputId once with assess_input.`;
   await runInput(context, execution.withContext({ topicId: initial.spec.id, inputId: input.metadata.name,
     inputIds: inputs.map(i => i.metadata.name) }), initial, "chief", boundedPrompt(prompt, policy.contextChars),
     input.metadata.name, inputs.map(i => i.metadata.name), batch);
