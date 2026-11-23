@@ -24,8 +24,9 @@ export function retainRecent(entries: readonly Note[]): Note[] {
 }
 export const ContextFields = {
   contextWriter: NoteWriterSchema.optional(),
+  lastRetiredSummaryUid: z.string().optional(),
   summaryRevision: z.string().default(""),
 };
 /** @spec Long-lived, infrequently changing summary and recent matter Notes are maintained independently. */
-export interface ResourceContext { summaryRevision?: string; contextWriter?: NoteStatus["writer"] }
+export interface ResourceContext { lastRetiredSummaryUid?: string; summaryRevision?: string; contextWriter?: NoteStatus["writer"] }
 export interface ContextView extends ResourceContext { summary: string; summaryUid?: string; summaryNote?: import("./note/model.ts").NoteReference; recent: Note[] }

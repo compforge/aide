@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
 import { digest } from "../identity.ts";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "../topic/model.ts";
-import { understandingVersion, summaryVersion } from "../topic/tree.ts";
+import { understandingVersion } from "../topic/tree.ts";
 import { resourceRef } from "../input/state.ts";
 import { GroupSchema, type WeaveResource } from "./model.ts";
 
@@ -50,9 +50,7 @@ export async function groupTopics(resources: ResourceClient, weave: WeaveResourc
         status: { ...resource.status, reviewCheckedAt: null, idleReviewCount: 0, idleReviewReset: null, organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid,
           reviewedVersion: versions.get(resource.metadata.uid), toUid: parent.metadata.uid, reason: `Weave grouped under ${parent.spec.name ?? parent.spec.id}` } } })),
       { operation: "patchStatus", resource: parent, patch: { organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid, ...(group.parent ? { reviewedVersion: versions.get(parent.metadata.uid) } : {}), reason: "Weave combined related roots" }, weaveRevision: (parent.status.weaveRevision ?? 0) + 1,
-        ...(!group.parent ? { ...prepared.status,
-          absorbed: Object.fromEntries(children.map(t => [t.metadata.uid, versions.get(t.metadata.uid)!])),
-          absorbedSummaries: Object.fromEntries(children.map(t => [t.metadata.uid, summaryVersion(t)])) } : {}),
+        ...prepared.status,
         lastInputAt: (group.parent ? [parent, ...children] : children).map(t => t.status.lastInputAt ?? t.metadata.creationTimestamp).sort().at(-1),
       } },
       { operation: "patchStatus", resource: weave, patch: {} },

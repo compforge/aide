@@ -8,7 +8,6 @@ import { topicReview } from "../topic/review.ts";
 /** Transient preparation used to build task text and atomically reserve cooldowns. */
 export interface ReviewPreparation {
   weaveRevision: number;
-  absorption: { uid: string; parentUid: string; version: string }[];
   notePressure: NotePressureTopic[];
 }
 

@@ -1,16 +1,13 @@
 import { digest } from "../identity.ts";
-import { SensitivitySchema, VisibilitySchema } from "../disclosure.ts";
-import { PersonRefSchema } from "../person/model.ts";
-import { prepareSummary } from "../note/summary.ts";
+import { writeSummary, type SummaryResource } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
-import { WriterResourceSchema, SubjectSchema, NoteNatureSchema, MaxCharsSchema } from "../note/model.ts";
-import { readNotes } from "../note/query.ts";
+import { WriterResourceSchema, SubjectSchema } from "../note/model.ts";
 import { patchStatus } from "../status.ts";
 import { resourceRef } from "../input/state.ts";
-import { readTopicInScope, understandingVersion, summaryVersion } from "./tree.ts";
+import { readTopicInScope } from "./tree.ts";
 import { z } from "zod";
-import { SUMMARY_CHARS } from "../context.ts";
-import { upsertNote, NoteUpdateSchema } from "../note/service.ts";
+import type { InputOrigin } from "../input/model.ts";
+import { requireSummaryOrigin, upsertNote, NoteUpdateSchema } from "../note/service.ts";
 import { retryOnConflict, type ResourceClient } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 
@@ -26,64 +23,36 @@ export async function updateTopic(resources: ResourceClient, ref: Readonly<Topic
   });
 }
 
-export const TopicContextSchema = z.object({ nature: NoteNatureSchema.optional(), maxChars: MaxCharsSchema.optional(), topicUid: z.string().optional(),
-  absorbed: z.array(z.object({ uid: z.string(), version: z.string() }).strict()).max(20).optional(),
-  sensitivity: SensitivitySchema.optional(), visibility: VisibilitySchema.optional(), version: z.string(), people: z.array(PersonRefSchema).optional(), summary: z.string().max(SUMMARY_CHARS).optional(),
-}).strict().refine(args => args.maxChars !== undefined || args.nature !== undefined || args.summary !== undefined || args.people !== undefined || args.sensitivity !== undefined || args.visibility !== undefined || !!args.absorbed?.length, "Supply summary, classification or reviewed child versions");
-export type TopicContextUpdate = z.infer<typeof TopicContextSchema>;
-export const TopicNoteSchema = NoteUpdateSchema.safeExtend({ topicId: z.string().min(1).optional() });
+export const TopicNoteSchema = NoteUpdateSchema.safeExtend({ topicId: z.string().min(1).optional(), summaryOf: SubjectSchema.optional() });
 export type TopicNoteUpdate = z.infer<typeof TopicNoteSchema>;
-
-async function targetTopic(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, topicUid?: string) {
-  const current = await resources.get<TopicSpec, TopicStatus>(resourceRef(owner));
-  if (!current || current.metadata.uid !== owner.metadata.uid || current.metadata.deletionTimestamp
-    || current.status.execution?.id !== executionId) throw new Error("Chief execution is no longer active");
-  const target = await readTopicInScope(resources, current, topicUid);
-  if (!target) throw new Error("Topic is outside this root");
-  return { current, target };
-}
-
-/**
- * @spec Long-lived summary and child review receipts can change independently; neither appends a matter Note.
- * @spec Reviewed child versions are checked atomically before they can be reclaimed.
- * @case tests/notes.test.ts
- * @link docs/personal/chief.md#研判与上下文
- */
-export async function summarizeTopic(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, maxChars: number) {
-  const args = TopicContextSchema.parse(raw);
-  const { current, target } = await targetTopic(resources, owner, executionId, args.topicUid);
-  if (contentVersion(target) !== args.version) throw new Error("Topic context changed; read_topic and merge again");
-  const absorbed = { ...target.status.absorbed }, absorbedSummaries = { ...target.status.absorbedSummaries };
-  const children = await Promise.all((args.absorbed ?? []).map(async ref => {
-    const child = (await resources.page<TopicSpec, TopicStatus>(TOPIC_TYPE, { limit: 1, matchIndex: { name: "uid", value: ref.uid } })).items[0];
-    if (!child || child.metadata.deletionTimestamp || child.spec.parentRef?.uid !== target.metadata.uid || understandingVersion(child, await readNotes(resources, child.metadata.uid, "subject")) !== ref.version) throw new Error("Child understanding changed; read and review again");
-    absorbed[ref.uid] = ref.version;
-    absorbedSummaries[ref.uid] = summaryVersion(child);
-    return child;
-  }));
-  const writer = { resource: WriterResourceSchema.parse(resourceRef(current)), executionId };
-  const prepared = [args.summary, args.people, args.sensitivity, args.visibility, args.nature, args.maxChars].every(v => v === undefined) ? { writes: [], status: {} } : await prepareSummary(resources, target, { nature: args.nature, maxChars: args.maxChars ?? (!target.status.summaryRevision ? maxChars : undefined), text: args.summary, people: args.people, sensitivity: args.sensitivity, visibility: args.visibility }, writer, args.version);
-  const committed = await resources.commit([...prepared.writes, { operation: "patch", resource: target, patch: { type: "json", value: [
-    ...(target.status.summaryRevision === undefined ? [] : [{ op: "test" as const, path: "/status/summaryRevision", value: target.status.summaryRevision }]),
-    ...Object.entries(prepared.status).map(([key, value]) => ({ op: "add" as const, path: `/status/${key}`, value })),
-    { op: "add", path: "/status/contextWriter", value: { resource: WriterResourceSchema.parse(resourceRef(current)), executionId } },
-    ...children.flatMap(child => [
-      { op: "add" as const, path: `/status/absorbed/${child.metadata.uid}`, value: absorbed[child.metadata.uid] },
-      { op: "add" as const, path: `/status/absorbedSummaries/${child.metadata.uid}`, value: absorbedSummaries[child.metadata.uid] },
-    ]),
-  ] } }]);
-  const updated = committed.at(-1) as TopicResource;
-  return { version: contentVersion(updated), understandingVersion: understandingVersion(updated, await readNotes(resources, updated.metadata.uid, "subject")) };
-}
 
 /**
  * @spec Editing an existing Note preserves its subject; only move_note relocates it.
  * @spec A new Note defaults to the active Chief root; topicId may select a Topic in that tree.
  * @link docs/personal/note.md
  */
-export async function upsertTopicNote(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, callId: string, maxChars = 4000) {
-  const { current } = await targetTopic(resources, owner, executionId);
-  const { topicId, ...args } = TopicNoteSchema.parse(raw);
+export async function upsertTopicNote(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, callId: string, maxChars = 4000, origin: InputOrigin = "chief") {
+  const current = await resources.get<TopicSpec, TopicStatus>(resourceRef(owner));
+  if (!current || current.metadata.uid !== owner.metadata.uid || current.metadata.deletionTimestamp || current.status.execution?.id !== executionId)
+    throw new Error("Chief execution is no longer active");
+  const { topicId, summaryOf, ...args } = TopicNoteSchema.parse(raw);
+  if (summaryOf) {
+    requireSummaryOrigin(origin, summaryOf.kind);
+    if (topicId || args.noteId || args.subject || args.closedAt || args.followup !== undefined)
+      throw new Error("Supply summaryOf to initialize a summary, or noteId to edit an existing Note");
+    const target = await resources.get<unknown, SummaryResource["status"]>(summaryOf);
+    if (!target || target.metadata.uid !== summaryOf.uid || target.metadata.deletionTimestamp) throw new Error("Summary owner changed; read it again");
+    if (target.status.summaryRevision && !args.version) throw new Error("Summary already exists; read its Note and edit by noteId and version");
+    if (summaryOf.kind === "Topic" && !await readTopicInScope(resources, current, target.metadata.uid)) throw new Error("Topic is outside this root");
+    const { version, ...update } = args;
+    if (version !== undefined && version !== contentVersion(target)) throw new Error("Summary owner version conflict");
+    const writer = { resource: WriterResourceSchema.parse(resourceRef(current)), executionId };
+    const result = await writeSummary(resources, target, { ...update, maxChars: update.maxChars ?? (target.status.summaryRevision ? undefined : maxChars) }, writer, contentVersion(target),
+      target.kind === "Person" ? { updatedBy: "chief", updatedAt: new Date().toISOString() } : {});
+    const note = result.summaryNote!;
+    return { noteId: note.id, uid: note.uid, version: note.version, sensitivity: note.sensitivity, visibility: note.visibility,
+      nature: note.nature, maxChars: note.maxChars, chars: update.text!.length, overBudget: update.text!.length > (note.maxChars ?? maxChars) };
+  }
   if (topicId && args.noteId) throw new Error("topicId applies only to new Notes; use move_note to change an existing Note subject");
   if (topicId && args.subject) throw new Error("Choose topicId or subject, not both");
   if (topicId) {
@@ -91,5 +60,5 @@ export async function upsertTopicNote(resources: ResourceClient, owner: Readonly
     if (!target || !await readTopicInScope(resources, current, target.metadata.uid)) throw new Error("Topic is outside this root");
     args.subject = resourceRef(target) as typeof args.subject;
   }
-  return upsertNote(resources, current, { ...args, ...(!args.noteId && args.maxChars === undefined ? { maxChars } : {}) }, callId);
+  return upsertNote(resources, current, { ...args, ...(!args.noteId && args.maxChars === undefined ? { maxChars } : {}) }, callId, undefined, origin);
 }

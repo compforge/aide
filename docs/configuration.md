@@ -291,7 +291,7 @@ plugins:
 
 `trigger` 只配置定时协调机制；`review` 配置 Reconcile 的业务检查策略。Chief Harness 只配置模型和能力包，不接受业务调度字段。`intervalSeconds`、`idleSeconds` 和 `maxIdleSeconds` 均为 1–2147483 的整数秒；`factor` 大于 1，上限不小于基础等待；`completedInputs` 是至少为 2 的整数。
 
-定时唤醒不会直接调用模型。Secretary 按 deferred 的数量和等待阈值将 Deferred 积压组成 Batch；回顾检查待吸收的子主题认识及材料/子节点整理压力；需要判断时生成已绑定 root 的维护 Input，无事可做时只记录检查时间并增加退避次数。默认配置的空检查依次等待 15、30、60、120 分钟，之后保持 120 分钟；期间的 Reconcile 唤醒间隔仍为 60 秒。
+定时唤醒不会直接调用模型。Secretary 按 deferred 的数量和等待阈值将 Deferred 积压组成 Batch；回顾检查待梳理 Note、工作量和结构变化，容量检查关注材料和直属子节点；需要判断时生成已绑定 root 的维护 Input，无事可做时只记录检查时间并增加退避次数。默认配置的空检查依次等待 15、30、60、120 分钟，之后保持 120 分钟；期间的 Reconcile 唤醒间隔仍为 60 秒。
 
 Immediate／Normal Input 直接复用 Chief 的接纳与执行路径；Secretary 根据处理量、等待时间和 pressure 生成维护 Input。Deferred 达到 count 条或最老等待 maxWaitSeconds 后归为独立 Batch，按 Normal 交给 Chief；Batch 计一次工作量。Task／Routine 的状态变化不计 Chief 工作量。没有待回顾活动时只做退避检查；Review 自身计数但不独自启动下一轮定时需求。维护遇到容量不足会推迟，已持久化业务仍可处理。窗口、去重与退避契约见 [Secretary](personal/secretary.md)。
 
@@ -411,7 +411,7 @@ plugins:
 
 Topic 阈值按直接归属判断，由空闲 Chief 决定如何整理；Weave 的 maxRoots 统计普通 root，Default 单独兜底，允许无合理归并方案时超标。超过目标时，未变化但已检查的 root 在 reviewIntervalMs 后重查；独立子树有 15 分钟观察期。来源 topicKey 仍保留确定性定位语义。长期设计见 [Topic](personal/topic.md)。
 
-Topic 容量阈值：maxUnfiledInput 默认 40，统计直属无 topicKey 的业务 Input（包含已研判），maxChildren 默认 8，maxWork 保持默认 8。maxInput 保留配置但暂不参与策略。每个 Topic 超限时通过 aide:triage / aide:organize Input 请求 root；每种请求去重，完成后按 capacityCooldownSeconds 冷却。静默回顾使用 aide:curate，独立遵循 review.backoff。详见 [Topic 内置请求](personal/secretary.md#容量与维护请求)。
+Topic 容量阈值：maxUnfiledInput 默认 40，统计直属无 topicKey 的业务 Input（包含已研判），maxChildren 默认 8，maxWork 保持默认 8。maxInput 保留配置但暂不参与策略。每个 Topic 超限时通过 aide:organize Input 请求 root；每种请求去重，完成后按 capacityCooldownSeconds 冷却。静默回顾使用 aide:curate，独立遵循 review.backoff。详见 [Topic 内置请求](personal/secretary.md#容量与维护请求)。
 
 ### Gate
 

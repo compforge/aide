@@ -9,7 +9,6 @@ import { Aide } from "../src/app.ts";
 import { httpChannel } from "../src/api/index.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
-import { understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { browseTopicChildren } from "../plugins/personal/topic/children.ts";
 import type { TopicChildrenView } from "../src/api/types.ts";
@@ -23,17 +22,16 @@ test("Topic children API pages direct children and respects parent identity and 
   const parent = await store.ensure("组织/a?b#c", undefined, "组织");
   const attach = (value: TopicResource, owner: TopicResource) => store.resources.replace(TOPIC_TYPE, value.metadata.name,
     { ...value.spec, parentRef: resourceRef(owner) }, value.status);
-  const removeChild = (value: TopicResource, owner: TopicResource) => {
-    store.resources.patchStatus(TOPIC_TYPE, owner.metadata.name, { absorbed: { [value.metadata.uid]: understandingVersion(value) } });
+  const removeChild = (value: TopicResource) => {
     store.resources.requestDeletion(TOPIC_TYPE, value.metadata.name);
   };
   const children: TopicResource[] = [];
   for (let i = 0; i < 21; i++) children.push(attach(await store.ensure(`child-${String(i).padStart(2, "0")}`), parent));
   const grandchild = attach(await store.ensure("grandchild"), children[0]!);
   const deleted = attach(await store.ensure("deleted"), children[1]!);
-  removeChild(deleted, children[1]!);
+  removeChild(deleted);
   const gone = attach(await store.ensure("gone"), parent);
-  removeChild(gone, parent);
+  removeChild(gone);
   // Model GC removing an old parent while its UID-pinned child is still awaiting collection.
   const old = await store.ensure("recreated");
   attach(await store.ensure("stale"), old);

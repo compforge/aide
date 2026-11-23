@@ -13,6 +13,7 @@ export async function moveNote(resources: ResourceClient, actor: TopicResource, 
   const args = MoveNoteSchema.parse(raw);
   const note = await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: args.noteId });
   if (!note || note.metadata.deletionTimestamp || note.status.retired || noteVersion(note) !== args.version) throw new Error("Note content version conflict; read_note again");
+  if (note.spec.summaryOf) throw new Error("A Summary stays with its owner; use split_note to extract material");
   if (!actor.status.execution) throw new Error("Note move requires an active Chief");
   if (JSON.stringify(note.spec.subject) === JSON.stringify(args.subject)) return { noteId: args.noteId, version: noteVersion(note) };
   const updated = await resources.replace(note, { ...note.spec, subject: args.subject }, { ...note.status,

@@ -1,3 +1,4 @@
+import type { InputOrigin, InputRelation } from "../../plugins/personal/input/model.ts";
 import { emptyHarnessState } from "../host/harness/state.ts";
 import { outputWaitLabels } from "../../plugins/personal/output/view.ts";
 import { topicHistory, type HistorySelection } from "../../plugins/personal/topic/history.ts";
@@ -17,9 +18,9 @@ export interface TopicBlock extends BaseBlock {
   generation?: string;
   detail?: string;
   inputId?: string;
-  origin?: "channel" | "source" | "chief" | "aide:curate" | "aide:followup" | "aide:triage" | "aide:organize";
+  origin?: InputOrigin;
   originId?: string;
-  relation?: import("../../plugins/personal/input/model.ts").InputRelation;
+  relation?: InputRelation;
   sender?: import("@compforge/aide-plugin").ResourceRef;
   receivers?: import("@compforge/aide-plugin").ResourceRef[];
   source?: import("../../plugins/personal/address/model.ts").AddressRef;

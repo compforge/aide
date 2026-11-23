@@ -3,16 +3,14 @@ import { assessChiefInput, chiefPreviews, type ChiefAssessment } from "../inputs
 import { isGateTopic } from "../../topic/boundary.ts";
 import type { MailSender } from "../../stream/sender.ts";
 import { Addresses } from "../../address/service.ts";
-import { addressTools } from "../../address/tools.ts";
+import { addressReadTools } from "../../address/tools.ts";
 import { readNote } from "../../note/service.ts";
-import { WriterResourceSchema } from "../../note/model.ts";
 import { topicTools } from "./topic-tools.ts";
 import { inputPreview } from "../../input/prompt.ts";
 import { Background as TopicBackground } from "./background.ts";
 import type { PiConfig } from "../../../../src/host/harness/pi/config.ts";
-import { summarizeTopic, upsertTopicNote } from "../../topic/state.ts";
+import { upsertTopicNote } from "../../topic/state.ts";
 import { say } from "../../output/action.ts";
-import { resourceRef } from "../../input/state.ts";
 import { immediate } from "../../execution/input.ts";
 import type { ExecutionScope } from "../../../../src/protocol/verbs.ts";
 import type { TopicSpec, TopicStatus } from "../../topic/model.ts";
@@ -23,7 +21,7 @@ import type { Store } from "../../work/store.ts";
 import { TOPIC_TYPE } from "../../topic/model.ts";
 import { domainHandoffTools } from "../../handoff/tools.ts";
 import { Handoffs } from "../../handoff/service.ts";
-import { BUSINESS_INPUT_ORIGINS } from "./input-tools.ts";
+import { BUSINESS_INPUT_ORIGINS, INPUT_ORIGINS } from "./input-tools.ts";
 import { chiefTools } from "./chief-tools.ts";
 import { createChiefAgent } from "./agent.ts";
 import type { PiSessionFactory } from "../../../../src/host/harness/pi/adapter.ts";
@@ -63,17 +61,12 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
     }, (id, offset) => {
       const c = active();
       return readChiefInput(store, c, id, offset, policy.maxChars);
-    }, assess, async input => {
-      const c = active();
-      const result = await summarizeTopic(plugins.resourceClient("personal"), c, c.status.execution!.id, input,
-        policy.maxChars);
-      log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
-      return result;
-    }, notes => mailSender.cite(active().status.execution!.id, notes));
+    }, assess, notes => mailSender.cite(active().status.execution!.id, notes));
+    let inputOrigin: import("../../input/model.ts").InputOrigin = "chief";
     return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, inputBinding: {
       read: () => {
         const c = active();
-        return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "aide:curate",
+        return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "chief",
           inputs: [...store.topics.inputStore.query("assessExecution", c.status.execution!.id).map(i => ({
             id: i.metadata.name, deliveryId: i.status.assess?.deliveryId ?? `input:${i.metadata.uid}`, initial: !i.status.assess?.deliveryId && i.status.assess?.startedAt === c.status.execution!.startedAt,
             origin: i.spec.origin, immediate: immediate(i.spec), text: inputPreview(i, Math.floor(policy.contextChars / 8)),
@@ -90,13 +83,16 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
         const input = store.topics.inputStore.get(id);
         return input?.status.batchId ? undefined : input?.spec.origin;
       },
-      changed: (task, tools) => log.info({ topicId, executionId: task.executionId, inputOrigin: task.origin,
-        inputIds: task.inputs.map(i => i.id), tools, toolCount: tools.length }, "Chief Input tools selected"),
-    }, work: new WorkService(store, topicId, log), persons: persons, tools: [...tools, ...domainHandoffTools(new Handoffs(store, log), active).map(t => ({ ...t, inputOrigins: BUSINESS_INPUT_ORIGINS })), ...addressTools(new Addresses(store.resources.storage.home), active, ref => store.topics.outputStore.deliveryCapability(ref)), ...topicTools(store, active, log)], background: () => new TopicBackground(store, active(), topicId), readNote: id => readNote(plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
+      changed: (task, tools) => {
+        inputOrigin = task.origin;
+        log.info({ topicId, executionId: task.executionId, inputOrigin: task.origin,
+        inputIds: task.inputs.map(i => i.id), tools, toolCount: tools.length }, "Chief Input tools selected");
+      },
+    }, work: new WorkService(store, topicId, log), persons: persons, tools: [...tools, ...domainHandoffTools(new Handoffs(store, log), active).map(t => ({ ...t, inputOrigins: BUSINESS_INPUT_ORIGINS })), ...addressReadTools(new Addresses(store.resources.storage.home), active, ref => store.topics.outputStore.deliveryCapability(ref)).map(tool => ({ ...tool, inputOrigins: INPUT_ORIGINS })), ...topicTools(store, active, log, () => inputOrigin)], background: () => new TopicBackground(store, active(), topicId), readNote: id => readNote(plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
       const c = active();
-      const result = await upsertTopicNote(plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId, policy.maxChars);
+      const result = await upsertTopicNote(plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId, policy.maxChars, inputOrigin);
       log.info({ topicId, targetTopicId: input.topicId, noteId: result.noteId, version: result.version, sensitivity: result.sensitivity, visibility: result.visibility }, "Topic Note updated");
       return result;
-    }, contextWriter: () => { const c = active(); return { resource: WriterResourceSchema.parse(resourceRef(c)), executionId: c.status.execution!.id }; }, beforeWorkMutation: () => { active(); } });
+    }, beforeWorkMutation: () => { active(); } });
   };
 }

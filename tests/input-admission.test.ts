@@ -291,7 +291,7 @@ test("Ten deferred Inputs activate one bounded business batch before full-quota 
   await prepareInputs(f.context, f.current(root), topicPolicy());
   await reconcileChief(f.context, f.execution("batch"), f.current(root), (await import("../plugins/personal/topic/config.ts")).topicPolicy({ maxUnfiledInput: 1 }));
   assert.equal(f.prompts.length, 1); assert.equal(f.aide.topics.inputStore.list().length, 10);
-  assert.doesNotMatch(f.prompts[0]!.prompt, /aide:triage|assess_batch|batchId/);
+  assert.doesNotMatch(f.prompts[0]!.prompt, /aide:organize|assess_batch|batchId/);
   const activation = JSON.parse(f.prompts[0]!.prompt.split("Activation: ")[1]!.split("\n")[0]!);
   const [group] = await f.resources.list(BATCH_TYPE);
   assert.deepEqual(activation.inputIds, [group!.metadata.uid]);

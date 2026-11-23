@@ -1,12 +1,10 @@
-import { contentVersion } from "../../context-write.ts";
-import { summaryDescription, noteFields } from "../../execution/agent/context-tools.ts";
 import { Type, type TSchema } from "typebox";
 import { INPUT_ORIGINS, type ChiefToolDefinition } from "./input-tools.ts";
 import type { Persons } from "../../person/service.ts";
 const tool = <T extends TSchema>(definition: ChiefToolDefinition<T>): ChiefToolDefinition<T> => definition;
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 /** @spec Chief revises understanding, preserving user corrections in summary; never changes identities or Me marks. */
-export function personTools(persons: Persons, beforeMutation?: () => void, writer?: () => import("../../note/model.ts").NoteStatus["writer"]): ChiefToolDefinition[] {
+export function personTools(persons: Persons): ChiefToolDefinition[] {
   return [
     tool({ name: "list_persons", inputOrigins: INPUT_ORIGINS, label: "List persons", description: "Find known people across topics. Names are not unique. Read a person before revising their summary.",
       parameters: Type.Object({}), async execute() { return result((await persons.list()).map((p) => ({ id: p.metadata.name, name: p.spec.name, isMe: p.isMe }))); } }),
@@ -17,8 +15,5 @@ export function personTools(persons: Persons, beforeMutation?: () => void, write
         // @spec An unmatched lookup does not prove deletion; wrong identifier kinds can produce the same result.
         catch (error) { if (!String(error).includes("Unknown Person")) throw error; return result({ found: false, id: args.id, message: "No Person matched the supplied id/uid. This does not establish deletion. Use ref.name as id and ref.uid separately, or list_persons; original message evidence remains available." }); }
       } }),
-    tool({ name: "summarize_person", inputOrigins: ["aide:curate"], label: "Summarize person", description: `${summaryDescription} For this Person, retain stable responsibilities, background, views, preferences, relationships and collaboration style. Distinguish their own statements, others' assessments and your inferences; retain the applicable context and supporting evidence. Merge with valid understanding from other domains, preserving explicit user corrections; on a version conflict, reread and merge. Other people's statements and Aide suggestions do not establish this Person's intentions. Preserve explicit user corrections. Temporary plans and interactions belong in Notes linked through people. Never changes identities or Me marks.`,
-      parameters: Type.Object({ id: Type.String({ minLength: 1 }), uid: Type.String({ minLength: 1 }), version: Type.String({ minLength: 1, description: "summaryVersion from read_person" }), summary: Type.String({ maxLength: 16000 }), people: noteFields.people, sensitivity: noteFields.sensitivity, visibility: noteFields.visibility }),
-      async execute(_id, args, signal) { signal?.throwIfAborted(); beforeMutation?.(); const updated = await persons.summarize(args.id, args.uid, args.version, args.summary, writer?.(), args.people, { sensitivity: args.sensitivity, visibility: args.visibility }); return result({ version: contentVersion(updated) }); } }),
   ];
 }

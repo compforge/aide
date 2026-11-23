@@ -20,8 +20,8 @@ import { SnapshotMessages, triggerMessages, type Snapshot } from "./snapshot.ts"
 import { ReplayTimeoutSchema, settleMs } from "./config.ts";
 
 export const replayTools = new Set([
-  "read_input", "assess_input", "say", "summarize_topic", "list_topics", "read_topic", "group_topics", "route_input",
-  "list_persons", "read_person", "summarize_person", "upsert_note", "list_work", "read_work", "list_connectors",
+  "read_input", "assess_input", "say", "list_topics", "read_topic", "group_topics", "route_input",
+  "list_persons", "read_person", "upsert_note", "list_work", "read_work", "list_connectors",
   "read_message", "read_chat_messages", "read_thread_messages", "memory_search", "session_search",
 ]);
 

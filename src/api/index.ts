@@ -1,3 +1,4 @@
+import { INPUT_ORIGINS } from "../../plugins/personal/input/model.ts";
 import { HANDOFF_TYPE, handoffSummary, type HandoffSpec, type HandoffStatus } from "../../plugins/personal/handoff/model.ts";
 import { AddressRefSchema } from "../../plugins/personal/address/model.ts";
 import { browseAddressNotes } from "../../plugins/personal/address/notes.ts";
@@ -66,7 +67,7 @@ const OutputListSchema = PageSchema.extend({
 }).strict().refine(q => !q.from || !q.to || q.from <= q.to, "Start must precede end");
 const OutputDetailSchema = z.object({ id: z.string().min(1).max(200), uid: z.string().min(1).max(250).optional() }).strict();
 const InputListSchema = PageSchema.extend({
-  q: z.string().trim().max(200).optional(), origin: z.enum(["channel", "source", "chief", "aide:curate", "aide:followup", "aide:triage", "aide:organize"]).optional(),
+  q: z.string().trim().max(200).optional(), origin: z.enum(INPUT_ORIGINS).optional(),
   originId: z.string().max(200).optional(), connector: z.string().max(200).optional(), sourceUid: z.string().max(200).optional(),
   state: z.enum(["pending", "completed", "failed"]).optional(), errors: z.enum(["true", "false"]).transform(v => v === "true").optional(),
 }).strict();
@@ -461,7 +462,7 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
           default: "默认主题不能删除。",
           gate: "Gate 入口不能删除。",
           children: "主题还有子主题，请先处理子主题。",
-          unabsorbed: "父主题尚未吸收该主题的最新理解，暂时不能删除。",
+          knowledge: "该主题仍有知识，需先确认可释放当前版本。",
         };
         log.info({ topicId, revision, reason: result.reason }, "Topic deletion rejected");
         json(response, result.reason === "missing" ? 404 : 409, { error: errors[result.reason] });

@@ -1,5 +1,6 @@
 import { receiveDomain } from "./address-fixture.ts";
 import { isRootTopic } from "../plugins/personal/topic/boundary.ts";
+import { resourceRef } from "../plugins/personal/input/state.ts";
 import { summaryText, prepareSummary } from "../plugins/personal/note/summary.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { committedStatus } from "./fixtures/resource-write.ts";
@@ -81,7 +82,7 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
     }
     for (const name of ["list_topics", "read_topic", "list_notes", "read_note", "list_work", "read_work", "read_input", "delegate_request"]) assert.ok(names.includes(name), name);
     assert.ok(names.includes("assess_input"));
-    for (const name of ["assess_batch", "bash", "write", "edit", "upsert_note", "summarize_topic", "retire_note"]) assert.ok(!names.includes(name), name);
+    for (const name of ["assess_batch", "bash", "write", "edit", "upsert_note", "retire_note"]) assert.ok(!names.includes(name), name);
     if (phase === 0) switch (gateStep++) {
       case 0: return { tool: "list_topics", args: {} };
       case 1: return { tool: "read_topic", args: { uid: firstUid } };
@@ -628,16 +629,16 @@ test("an entirely Aide-defined provider performs a real SDK request with explici
 test("Chief profiles people through tools and refreshes shared user corrections every turn", { timeout: 30_000 }, async (t) => {
   const writer = await setup(t, (_request, index) => index === 0
     ? { tool: "read_person", args: { id: me.metadata.name } }
-    : index === 1 ? { tool: "summarize_person", args: { id: me.metadata.name, uid: me.metadata.uid, version: contentVersion(me), summary: "Prefers concise Chinese answers; explicit statement, 2026-10-21." } }
     : { text: "已更新" }, "chief");
   const me = (await writer.persons.findIdentity(LOCAL_ME))!;
-  const turn = await writer.run("我更喜欢简洁中文，记一下。", "person-write");
+  await writer.persons.summarize(me.metadata.name, me.metadata.uid, contentVersion(me), "Prefers concise Chinese answers; explicit statement, 2026-10-21.");
+  const turn = await writer.run("我有什么偏好？", "person-read");
   assert.equal(turn.stopReason, "end_turn");
   assert.match((await writer.persons.findIdentity(LOCAL_ME))!.summaryText, /concise Chinese/);
   assert.equal(existsSync(writer.personFile), false);
   const context = (request: Record<string, unknown>) => JSON.stringify(request.messages);
   await writer.run("现在呢", "person-refresh");
-  assert.match(context(writer.requests[2]!), /concise Chinese/, "The Person update is visible on the next tool turn of the same invocation");
+  assert.match(context(writer.requests[1]!), /concise Chinese/, "The Person update is visible on the next tool turn of the same invocation");
   assert.match(context(writer.requests.at(-1)!), /concise Chinese/);
   const reader = await setup(t, () => ({ text: "明白" }), "chief", undefined, writer.persons);
   await reader.run("新话题", "shared");
@@ -798,7 +799,7 @@ test("Route exposes only routing, catalog and shared-memory retrieval tools", as
     assert.match(JSON.stringify(request.messages), /You are Route/);
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
     for (const name of ["route_input", "list_topics", "read_input", "memory_search"]) assert.ok(names.includes(name), name);
-    for (const name of ["say", "assess_input", "create_work", "bash", "summarize_person", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
+    for (const name of ["say", "assess_input", "create_work", "bash", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
     return { text: answer };
   }, "route");
   const result = await fixture.run(JSON.stringify({ inputs: [{ id: "one", text: "event" }], topics: [] }), "route-one");
@@ -1014,7 +1015,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
     for (const tool of [`read_${kind}`, "read_input", "read_topic", "list_addresses", "read_address", "say", `report_${kind}`, "upsert_note", `summarize_${kind}`]) assert.ok(names.includes(tool));
     assert.equal(names.includes("create_work"), false);
-    assert.equal(names.includes("summarize_address"), false, "Work cannot edit shared Address summaries");
+    assert.equal(names.includes("release_topic"), false);
     switch (index % 8) {
       case 0: return { tool: `read_${kind}`, args: {} };
       case 1: return { tool: "read_input", args: { inputId } };
@@ -1312,9 +1313,8 @@ test("Weave queues a review Input after busy Chief business without mixing tools
     if (index === 0) return { tool: "assess_input", args: { inputId: "first", summary: "Reviewed" }, pause };
     if (index === 1) return { text: "Business finished" };
     if (index === 2) {
-      const parent = aide.topics.resource("parent")!, child = aide.topics.resource("child")!;
-      return { tool: "summarize_topic", args: { version: contentVersion(parent), summary: "Combined understanding",
-        absorbed: [{ uid: child.metadata.uid, version: understandingVersion(child) }] } };
+      const parent = aide.topics.resource("parent")!;
+      return { tool: "upsert_note", args: { summaryOf: resourceRef(parent), version: contentVersion(parent), text: "Combined understanding" } };
     }
     if (index === 3) return { tool: "assess_input", args: { inputId: aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!.metadata.name, summary: "Reviewed tree change" } };
     return { text: "Done" };
@@ -1347,6 +1347,7 @@ test("Weave queues a review Input after busy Chief business without mixing tools
   assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Topic structure changed/);
   assert.equal(aide.invocations().filter(i => i.topicId === "parent").length, 1);
   assert.equal(aide.topics.resource("parent")!.status.notifiedWeaveRevision, 1);
+  assert.equal(summaryText(aide.topics.resources, aide.topics.resource("parent")!), "Combined understanding");
   assert.ok(aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!.status.assess?.completedAt);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
   assert.equal([...state.harnessInputs.values()].filter(i => i.delivery === "followUp").length, 1);

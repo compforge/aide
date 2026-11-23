@@ -8,7 +8,6 @@ import { join } from "node:path";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { browseTopics } from "../plugins/personal/topic/browse.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
@@ -87,7 +86,6 @@ test("Topic parent filtering excludes grandchildren and locates deep links witho
   assert.equal(browseTopics(store, { selectedId: "grandchild", pageSize: 1 }).page, 2);
   assert.equal(browseTopics(store, { q: "' OR 1=1 --" }).total, 0);
   const deleting = store.resource("child-00")!;
-  store.resources.patchStatus(TOPIC_TYPE, parent.metadata.name, { absorbed: { [deleting.metadata.uid]: understandingVersion(deleting) } });
   store.resources.requestDeletion(TOPIC_TYPE, deleting.metadata.name);
   assert.equal(browseTopics(store).items.find(i => i.id === "parent")!.childCount, 20, "Deleting children are excluded");
   child(store, store.resource("child-01")!, store.resource("other")!);

@@ -40,7 +40,7 @@ plugins:
 
 分类在生成 Input 及其持久化待提交计划时确定；重试复用同一计划。Input 详情页与 Agent 预览展示来源分类。Input 元数据不直接授权发送；Chief 生成 Note 的分类仍由现有披露策略消费。
 
-Note 正文、people、sensitivity、visibility 可以独立修改，也可以一次提交。upsert_note 更新时只需给出要改的字段，省略保留原值；新建必须提供正文。摘要 Note 通过同一接口修改，事务内同步所属对象的摘要指纹。summarize_topic 可只更新分类，也可同时确认 absorbed 子主题版本，两种效果都必须落盘。Person 摘要允许 topic/root 分类；范围无法解析只影响对外投递，不妨碍内部认识更新。
+Note 正文、people、sensitivity、visibility 可以独立修改，也可以一次提交。upsert_note 更新时只需给出要改的字段，省略保留原值；新建必须提供正文。摘要 Note 通过同一接口修改，事务内同步所属对象的摘要指纹。已有摘要可按 Note 版本独立更新分类。Person 摘要允许 topic/root 分类；范围无法解析只影响对外投递，不妨碍内部认识更新。
 
 - people 使用 Note.people；不另设来源人物字段。
 - topic 使用 Note 当前 subject 对应 Topic 的显式 `spec.people`。Task/Routine 通过所属 Topic 解析；Person 没有隐式所属 Topic。

@@ -23,6 +23,10 @@ import { NOTE_TYPE, noteVersion, type NoteSpec, type NoteStatus } from "../plugi
 import { reconcileNote } from "../plugins/personal/note/reconcile.ts";
 import { collectTopic } from "../plugins/personal/chief/session.ts";
 import { ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
+import { chiefTools } from "../plugins/personal/chief/agent/chief-tools.ts";
+import { chiefNoteTools } from "../plugins/personal/chief/agent/note-tools.ts";
+import { toolsForInput } from "../plugins/personal/chief/agent/input-tools.ts";
 import { topicTools } from "../plugins/personal/chief/agent/topic-tools.ts";
 import { reclamationVersion } from "../plugins/personal/topic/retention.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
@@ -58,6 +62,95 @@ test("Note discovery covers retained history beyond recent with bounded search p
     token = page.continue;
   } while (token);
   assert.equal(scanned, 45); assert.equal(found, 1);
+});
+
+test("Chief Note writes honor the selected Input for new and existing summaries", async t => {
+  const f = await setup(t);
+  const write = (origin: import("../plugins/personal/input/model.ts").InputOrigin, args: unknown) =>
+    upsertTopicNote(f.resources, f.read(), "live", args, "call", 4000, origin);
+  const create = { summaryOf: resourceRef(f.read()), text: "Verified scope" };
+  for (const origin of ["channel", "chief", "source", "aide:followup"] as const)
+    await assert.rejects(write(origin, create), /read-only/);
+  const summary = await write("aide:organize", create);
+  for (const origin of ["channel", "chief", "source", "aide:followup"] as const)
+    await assert.rejects(write(origin, { noteId: summary.noteId, version: summary.version, text: "temporary claim" }), /read-only/);
+  assert.equal((await readNote(f.resources, summary.noteId)).text, create.text);
+  const edited = await write("aide:curate", { noteId: summary.noteId, version: summary.version, text: "" });
+  assert.equal(edited.uid, summary.uid);
+  assert.equal((await readNote(f.resources, summary.noteId)).text, "");
+  const person = await f.aide.persons.observe({ provider: "test", scope: "knowledge", id: "operator" });
+  const personal = { summaryOf: resourceRef(person), text: "Verified role" };
+  await assert.rejects(write("aide:organize", personal), /read-only/);
+  const profile = await write("aide:curate", personal);
+  await assert.rejects(write("aide:organize", { noteId: profile.noteId, version: profile.version, text: "New role" }), /read-only/);
+});
+
+test("organize splits a mixed Note across Topics through its admitted tools", async t => {
+  const f = await setup(t);
+  const initial = await f.aide.topics.ensure("metrics");
+  const child = await f.resources.replace(initial, { ...initial.spec, parentRef: resourceRef(f.root) }, initial.status);
+  const incident = "The oncall review is pending.", method = "Measure acknowledgement time from the first page.";
+  const source = await f.note({ text: incident + " " + method }, "mixed");
+  const tools = [...chiefTools(emptyConnectors), ...chiefNoteTools(f.note), ...topicTools(f.aide.personal.store, f.read, log, () => "aide:organize")];
+  const available = toolsForInput(tools, "aide:organize");
+  for (const name of ["upsert_note", "prune_note", "retire_note", "split_note", "move_note", "move_input", "move_work", "create_topic", "move_topic"])
+    assert.ok(available.includes(name), name);
+  const curate = toolsForInput(tools, "aide:curate");
+  assert.ok(!curate.includes("move_topic"));
+  assert.ok(curate.includes("upsert_note") && available.includes("upsert_note"));
+  const execute = (name: string, args: Record<string, unknown>) =>
+    tools.find(tool => tool.name === name && available.includes(name))!.execute(name, args, undefined, undefined, {} as never);
+  for (const origin of ["chief", "source", "channel", "aide:followup"] as const)
+    assert.ok(!toolsForInput(tools, origin).includes("split_note"));
+  const args = { ...source, text: incident, reason: "File the method under metrics", parts: [
+    { subject: resourceRef(child), text: method, nature: "procedural" }] };
+  const outside = await f.aide.topics.ensure("outside-split");
+  await assert.rejects(execute("split_note", { ...args, parts: [...args.parts, { text: "Another part", subject: resourceRef(outside) }] }), /outside/);
+  assert.equal((await f.get(source.noteId)).spec.text, incident + " " + method);
+  assert.equal((await listNotes(f.resources, { subject: child.metadata.uid })).items.length, 0);
+  const scoped = await f.note({ text: incident + " " + method, visibility: "topic" }, "scoped");
+  await assert.rejects(execute("split_note", { ...args, ...scoped }), /disclosure audience/);
+  assert.equal((await f.get(scoped.noteId)).spec.text, incident + " " + method);
+  await Promise.all([execute("split_note", args), execute("split_note", args)]);
+  await execute("split_note", args);
+  const destination = (await listNotes(f.resources, { subject: child.metadata.uid })).items;
+  assert.equal(destination.length, 1);
+  assert.equal((await readNote(f.resources, destination[0]!.id)).text, method);
+  assert.equal(destination[0]!.nature, "procedural");
+  const remaining = await readNote(f.resources, source.noteId);
+  assert.equal(remaining.text, incident);
+  assert.equal(remaining.subject.uid, f.root.metadata.uid);
+});
+
+test("splitting and retiring a Summary preserve role, historical citations and the replacement identity", async t => {
+  const f = await setup(t);
+  const create = (text: string) => upsertTopicNote(f.resources, f.read(), "live", { summaryOf: resourceRef(f.read()), text }, "summary", 4000, "aide:curate");
+  const run = (name: string, args: Record<string, unknown>) =>
+    topicTools(f.aide.personal.store, f.read, log, () => "aide:curate").find(t => t.name === name)!.execute("call", args, undefined, undefined, {} as never);
+  const original = await create("Long-lived scope. A temporary responsibility.");
+  await run("split_note", { noteId: original.noteId, version: original.version, text: "Long-lived scope.", reason: "Track the temporary assignment separately",
+    parts: [{ text: "A temporary responsibility.", nature: "episodic" }] });
+  const active = await readNote(f.resources, original.noteId);
+  assert.equal(active.uid, original.uid);
+  assert.equal(f.read().status.summaryRevision, active.version);
+  const list = async (isSummary: boolean) => (await listNotes(f.resources, { subject: f.root.metadata.uid, isSummary })).items.map(n => n.id);
+  assert.deepEqual(await list(true), [active.id]);
+  assert.equal((await list(false)).length, 1);
+  const args = { noteId: active.id, version: active.version, reason: "Scope was superseded" };
+  await assert.rejects(run("move_note", { ...args, subject: resourceRef(f.read()) }), /stays with its owner/);
+  await run("retire_note", args);
+  assert.deepEqual(await list(true), []);
+  assert.equal(f.read().status.summaryRevision, "");
+  const historical = await readNote(f.resources, active.uid);
+  assert.equal(historical.text, active.text);
+  assert.equal(historical.version, active.version);
+  assert.ok(historical.retired);
+  const replacement = await create("Updated scope");
+  assert.notEqual(replacement.noteId, active.id);
+  assert.notEqual(replacement.uid, active.uid);
+  await run("retire_note", args);
+  assert.deepEqual(await list(true), [replacement.noteId]);
+  assert.equal(f.read().status.summaryRevision, replacement.version);
 });
 
 test("move_note preserves matter identity and age, rejects stale versions and cross-root moves", async t => {
@@ -220,7 +313,7 @@ test("recent Note projection reads at most 40 objects and no full list", async t
 test("Note nature and maxChars are optional metadata; budgets are soft for ordinary and summary Notes", async t => {
   const f = await setup(t);
   const { upsertNote } = await import("../plugins/personal/note/service.ts");
-  const { summarizeTopic } = await import("../plugins/personal/topic/state.ts");
+  const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
   const { contentVersion } = await import("../plugins/personal/context-write.ts");
   const created = await f.note({ text: "知".repeat(600), nature: "procedural", maxChars: 256 }, "budget");
   const note = await readNote(f.resources, created.noteId);
@@ -229,7 +322,7 @@ test("Note nature and maxChars are optional metadata; budgets are soft for ordin
   assert.equal(updated.overBudget, true); assert.equal(updated.chars, 600);
   const latest = await readNote(f.resources, created.noteId);
   assert.equal(latest.text, note.text); assert.equal(latest.maxChars, 256);
-  await summarizeTopic(f.resources, f.read(), "live", { summary: "长".repeat(600), nature: "semantic", maxChars: 256, version: contentVersion(f.read()) }, 256);
+  await upsertTopicNote(f.resources, f.read(), "live", { summaryOf: resourceRef(f.read()), text: "长".repeat(600), nature: "semantic", maxChars: 256, version: contentVersion(f.read()) }, "summary", 256, "aide:curate");
   const summary = (await listNotes(f.resources, { subject: f.root.metadata.uid })).items.find(n => n.summaryOf)!;
   assert.equal(summary.maxChars, 256); assert.equal(summary.nature, "semantic");
   assert.equal((await readNote(f.resources, summary.id)).text.length, 600);
@@ -260,7 +353,7 @@ test("prune and retire enforce versions, active ownership and summary lifetime w
   await assert.rejects(f.note({ noteId: source.noteId, version: retired.version, text: "revive" }, "revive"), /retired/);
   const summary = await writeSummary(f.resources, f.read(), { text: "Stable summary with repeated detail", maxChars: 256 }, { resource: resourceRef(f.read()) as typeof before.spec.subject & { kind: "Topic" }, executionId: "live" });
   const summaryRef = { noteId: summary.summaryNote!.id, version: summary.summaryNote!.version };
-  await assert.rejects(retireNote(f.resources, f.read(), { ...summaryRef, reason: "discard" }), /subject still exists/);
+  await assert.rejects(retireNote(f.resources, f.read(), { ...summaryRef, reason: "discard" }), /read-only/);
   const summaryPruned = await pruneNote(f.resources, f.read(), { ...summaryRef, text: "Stable summary", reason: "Remove duplication" }, "prune-summary");
   assert.equal(f.read().status.summaryRevision, summaryPruned.version);
   const outsider = await f.aide.topics.ensure("outside-retire");
@@ -340,7 +433,7 @@ async function completePressure(f: Awaited<ReturnType<typeof setup>>, pressure: 
   if (executionId) await f.resources.patchStatus(f.read(), { execution: { id: executionId, startedAt: new Date().toISOString() } });
   const review = await createMaintenanceInput(f.context, f.read(), new Date().toISOString(),
     await maintenanceAgenda(f.resources, []), "aide:curate", "note_pressure", { cooldownSeconds: 60, instructions: "Review pressure",
-      plan: { weaveRevision: 0, absorption: [], notePressure: pressure } });
+      plan: { weaveRevision: 0, notePressure: pressure } });
   if (executionId) await assessInput(f.resources, f.read(), executionId, { inputId: review.metadata.name, summary: "Pressure reviewed" });
 }
 

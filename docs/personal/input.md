@@ -17,8 +17,8 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 | 信息 | 含义 |
 | --- | --- |
 | sensitivity、visibility | 可选的来源分类；未填表示尚未定级，由 Chief 根据内容判断；不是投递授权 |
-| text、observation | 来源内容与证据；外部观察保留事实，内置 Input 保存回顾、分理、组织请求及触发证据 |
-| origin、originId、originRef | channel / source / chief / aide:curate / aide:followup / aide:triage / aide:organize 分类、来源定义与可选产生资源引用 |
+| text、observation | 来源内容与证据；外部观察保留事实，内置 Input 保存梳理、跟进、组织请求及触发证据 |
+| origin、originId、originRef | channel / source / chief / aide:curate / aide:followup / aide:organize 分类、来源定义与可选产生资源引用 |
 | sender、relation | 可选的发送 Person 引用，以及输入相对于 Me 的关系 |
 | source | 可选 AddressRef，固定资源 UID，表示事情发生或可以联络的场合 |
 | replyToMessageId | 可选原消息回复坐标，不参与 Address 身份 |

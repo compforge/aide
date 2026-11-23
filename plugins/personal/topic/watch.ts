@@ -1,7 +1,7 @@
 import { isProcessingRoot, isGateParent } from "./boundary.ts";
 import { isDeepStrictEqual } from "node:util";
 import { INPUT_TYPE } from "../input/model.ts";
-import { readTopicRoot, summaryVersion } from "./tree.ts";
+import { readTopicRoot } from "./tree.ts";
 import { resourceRef } from "../input/state.ts";
 import type { PluginContext, Watch } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource } from "./model.ts";
@@ -17,8 +17,7 @@ export function topicWatch(context: PluginContext): Watch {
     delete: async ({ object }) => rootRequests(object as TopicResource),
     update: async ({ oldObject, newObject }) => {
       const a = oldObject as TopicResource, b = newObject as TopicResource;
-      if (summaryVersion(a) !== summaryVersion(b) || JSON.stringify(a.status.absorbed) !== JSON.stringify(b.status.absorbed)
-        || a.spec.parentRef?.uid !== b.spec.parentRef?.uid || a.status.weaveRevision !== b.status.weaveRevision
+      if (a.spec.parentRef?.uid !== b.spec.parentRef?.uid || a.status.weaveRevision !== b.status.weaveRevision
         || !isDeepStrictEqual(a.status.notePressure, b.status.notePressure)
         || a.metadata.deletionTimestamp !== b.metadata.deletionTimestamp) return rootRequests(b, a);
       return a.status.execution?.id !== b.status.execution?.id || a.status.lastInputAt !== b.status.lastInputAt

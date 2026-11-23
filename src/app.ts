@@ -70,7 +70,7 @@ export class Aide {
     ...Object.values(SOURCES).map((definition) => [`source:${definition.id}`, definition] as const),
   ]);
   inputDefinition(origin: Pick<InputSpec, "origin" | "originId">) {
-    if (["aide:curate", "aide:followup", "aide:triage", "aide:organize"].includes(origin.origin)) return { id: origin.origin, label: ({ "aide:curate": "梳理", "aide:followup": "跟进", "aide:triage": "分理", "aide:organize": "组织" } as Record<string, string>)[origin.origin]!, icon: iconFor("harness:chief") };
+    if (["aide:curate", "aide:followup", "aide:organize"].includes(origin.origin)) return { id: origin.origin, label: ({ "aide:curate": "梳理", "aide:followup": "跟进", "aide:organize": "组织" } as Record<string, string>)[origin.origin]!, icon: iconFor("harness:chief") };
     if (origin.origin === "chief" && ["personal.gate", "personal.handoff"].includes(origin.originId)) return { id: origin.originId, label: "Gate 请求", icon: iconFor("harness:chief") };
     if (origin.origin === "chief" && origin.originId === "personal.chief") return { id: origin.originId, label: "Chief 请求", icon: iconFor("harness:chief") };
     const definition = this.inputDefinitions.get(`${origin.origin}:${origin.originId}`);

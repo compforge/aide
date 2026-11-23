@@ -22,7 +22,7 @@ export async function pageNotes(reader: ResourceReader, uid: string, index: "sub
 }
 
 export const NoteQuerySchema = z.object({ subject: z.string().min(1).optional(), people: z.string().min(1).optional(),
-  addresses: z.string().min(1).optional(), q: z.string().max(500).optional(), continue: z.string().optional(), limit: z.number().int().min(1).max(20).default(20) }).strict();
+  addresses: z.string().min(1).optional(), isSummary: z.boolean().optional(), q: z.string().max(500).optional(), continue: z.string().optional(), limit: z.number().int().min(1).max(20).default(20) }).strict();
 /** @spec Scan at most one indexed page per request, including empty search pages; continue preserves coverage beyond recent.
  * @link docs/personal/note.md
  */
@@ -31,6 +31,8 @@ export async function listNotes(reader: ResourceReader, raw: unknown) {
   const page = await reader.page<NoteSpec, NoteStatus>(NOTE_TYPE, { namespace: "v1", limit: args.limit, continue: args.continue,
     ...(args.subject ? { matchIndex: { name: "subject", value: args.subject } } : args.addresses ? { matchIndex: { name: "addresses", value: args.addresses } } : args.people ? { matchIndex: { name: "people", value: args.people } } : {}) });
   const items = page.items.filter(n => !n.metadata.deletionTimestamp && !n.status.retired && (!args.people || [...n.spec.people].some(p => p.uid === args.people))
+    && (args.isSummary === undefined || !!n.spec.summaryOf === args.isSummary)
+    && (!args.addresses || [...n.spec.addresses].some(a => a.uid === args.addresses))
     && (!args.q || [n.spec.name, n.spec.text].join(" ").toLowerCase().includes(args.q.toLowerCase()))).map(n => ({ ...noteView(n), text: n.spec.text.slice(0, 500), truncated: n.spec.text.length > 500 }));
   return { items, scanned: page.items.length, continue: page.metadata.continue, resourceVersion: page.metadata.resourceVersion };
 }

@@ -1,16 +1,9 @@
-import { INPUT_ORIGINS, type ChiefToolDefinition } from "../chief/agent/input-tools.ts";
 import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
 import { Addresses } from "./service.ts";
 import { ADDRESS_TYPE, AddressRefSchema } from "./model.ts";
-import { writeSummary } from "../note/summary.ts";
-import { WriterResourceSchema } from "../note/model.ts";
-import { resourceRef } from "../input/state.ts";
 import type { Resource } from "@compforge/aide-plugin";
-import { disclosureFields, summaryDescription } from "../execution/agent/context-tools.ts";
-import { PersonRefsSchema } from "../person/model.ts";
-import { SensitivitySchema, VisibilitySchema } from "../disclosure.ts";
 const ref = Type.Object({ apiVersion: Type.Literal(ADDRESS_TYPE.apiVersion), kind: Type.Literal("Address"), namespace: Type.Literal("v1"), name: Type.String(), uid: Type.String() });
 const result = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v) }], details: {} });
 type DeliveryCapability = (ref: import("./model.ts").AddressRef) => { configured?: boolean; reason?: string };
@@ -26,18 +19,4 @@ export function addressReadTools(addresses: Addresses, active: Active, delivery?
   { name: "read_address", label: "Read address", description: "Read a communication place, its mute setting, known participants, summary Note and related Note directory. Use read_note for the Note bodies. Use this context to choose where and how to respond. delivery.configured reports the Host route configuration, not external delivery success or authorization. It grants no new authority.", parameters: Type.Object({ address: ref }),
     async execute(_id, args) { active(); const ref = z.object({ address: AddressRefSchema }).parse(args).address; const { recent: _recent, ...view } = addresses.view(ref); return result({ ...view, notes: addresses.noteDirectory(ref), ...(delivery ? { delivery: delivery(ref) } : {}) }); } },
   ];
-}
-export function addressTools(addresses: Addresses, active: Active, delivery?: DeliveryCapability): ChiefToolDefinition[] {
-  return [...addressReadTools(addresses, active, delivery).map(tool => ({ ...tool, inputOrigins: INPUT_ORIGINS })),
-  { name: "summarize_address", inputOrigins: ["aide:curate"], label: "Understand address", description: `${summaryDescription} Describe this place's purpose, discussion scope, roles and communication conventions. Ground conventions in evidence and retain their applicable context and uncertainty. Read the current summary and merge with valid understanding from other domains, preserving explicit user corrections; on a version conflict, reread and merge. Keep individual discussions and their progress in matter Notes. Cannot change muted or grant authority. Associate recent matter Notes with addresses through upsert_note.`,
-    parameters: Type.Object({ address: ref, version: Type.String(), text: Type.Optional(Type.String({ maxLength: 16000 })), ...disclosureFields,
-      people: Type.Optional(Type.Array(Type.Object({ apiVersion: Type.String(), kind: Type.Literal("Person"), namespace: Type.Literal("v1"), name: Type.String(), uid: Type.String() }))) }),
-    async execute(_id, args) {
-      const actor = active();
-      const input = z.object({ address: AddressRefSchema, version: z.string(), text: z.string().max(16000).optional(), people: PersonRefsSchema().optional(), sensitivity: SensitivitySchema.optional(), visibility: VisibilitySchema.optional() }).parse(args);
-      const { address, version, ...update } = input;
-      await writeSummary(addresses.client, addresses.read(address), update,
-        { resource: WriterResourceSchema.parse(resourceRef(actor)), executionId: actor.status.execution!.id }, version);
-      return result(addresses.view(address));
-    } }];
 }

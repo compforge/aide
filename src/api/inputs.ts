@@ -4,7 +4,7 @@ import { outputWaitLabels } from "../../plugins/personal/output/view.ts";
 import { inputSessions } from "../../plugins/personal/observation/job.ts";
 import type { ResourceRef, ResourceNamespace } from "@compforge/aide-plugin";
 import { browseInputs, inputFacets, type InputBrowseQuery } from "../../plugins/personal/input/browse.ts";
-import type { Attempt, Assessment, Handling } from "../../plugins/personal/input/model.ts";
+import type { Attempt, Assessment, Handling, InputSpec } from "../../plugins/personal/input/model.ts";
 import type { ChannelService } from "../channel/service.ts";
 import { inputPrinter } from "../../plugins/personal/input/printer.ts";
 
@@ -15,7 +15,7 @@ export interface InputTimelineEntry {
   id: string; at?: string; stage: "receive" | "route" | "assess" | "handle" | "output";
   title: string; text?: string; status?: string; consumer?: InputConsumer; executionId?: string;
 }
-function definition(aide: ChannelService, input: { origin: "channel" | "source" | "chief" | "aide:curate" | "aide:followup" | "aide:triage" | "aide:organize"; originId: string }) {
+function definition(aide: ChannelService, input: Pick<InputSpec, "origin" | "originId">) {
   try { return aide.inputDefinition(input).label; }
   catch { return `${input.origin} / ${input.originId}`; }
 }

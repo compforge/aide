@@ -5,7 +5,7 @@ import { personRefs } from "../plugins/personal/person/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { personRef, type PersonRef } from "../plugins/personal/person/model.ts";
 import { upsertNote, readNote } from "../plugins/personal/note/service.ts";
-import { summarizeTopic } from "../plugins/personal/topic/state.ts";
+import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
 import { summaryVersion } from "../plugins/personal/topic/tree.ts";
 import { ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
 import assert from "node:assert/strict";
@@ -119,7 +119,7 @@ test("an existing Note can be selected as summary and edited through the shared 
   ]);
   const selected = f.aide.topics.resource("summary")!;
   assert.equal((await readSummary(f.client, selected))!.metadata.name, entry.noteId);
-  await summarizeTopic(f.client, selected, "chief", { version: contentVersion(selected), summary: note.text, people }, 16000);
+  await upsertTopicNote(f.client, selected, "chief", { summaryOf: resourceRef(selected), version: contentVersion(selected), text: note.text, people }, "summary", 16000, "aide:curate");
   const linked = f.aide.topics.resource("summary")!;
   assert.notEqual(summaryVersion(linked), summaryVersion(selected), "people changes invalidate dependent understanding");
   const read = await readNote(f.client, (await readSummary(f.client, linked))!.metadata.uid);
@@ -262,19 +262,7 @@ test("Person summaries accept topic and root classifications", async t => {
   }
 });
 
-/** @case Supplying absorbed receipts must never swallow a simultaneous classification-only edit. */
-test("Topic review receipts and summary classification commit together", async t => {
-  const f = await fixture(t);
-  const actor = await f.client.patchStatus(f.topic, { execution: { id: "review", startedAt: new Date().toISOString() } });
-  const owner = await writeSummary(f.client, actor, { text: "Durable finding", sensitivity: "L1" });
-  const child = await f.client.create(TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(owner) }, status: {} });
-  const { understandingVersion } = await import("../plugins/personal/topic/tree.ts");
-  const version = understandingVersion(child as import("../plugins/personal/topic/model.ts").TopicResource, []);
-  await summarizeTopic(f.client, owner, "review", { version: contentVersion(owner), sensitivity: "L2", visibility: "root", absorbed: [{ uid: child.metadata.uid, version }] }, 4000);
-  const current = f.aide.topics.resource("summary")!, note = (await readSummary(f.client, current))!;
-  assert.equal(current.status.absorbed![child.metadata.uid], version);
-  assert.equal(note.spec.text, "Durable finding"); assert.equal(note.spec.sensitivity, "L2"); assert.equal(note.spec.visibility, "root");
-});
+
 
 
 test("summary and Topic people are sets; a permutation does not change summary understanding", async t => {

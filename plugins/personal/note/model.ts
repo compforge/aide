@@ -38,6 +38,7 @@ export const NoteStatusSchema = z.object({ updatedAt: z.string().datetime(), wri
   curationRoot: z.string().optional(), pendingSince: z.iso.datetime().optional(),
   curated: z.object({ inputUid: z.string(), material: z.string() }).strict().optional(),
   followupInputId: z.string().optional(), askedFollowupId: z.string().optional(),
+  splitFrom: z.object({ uid: z.string(), version: z.string() }).strict().optional(),
   retired: ReductionReceiptSchema.optional(),
   pruned: ReductionReceiptSchema.optional(),
   // Retired scheduling fields are accepted only to normalize existing stored resources.

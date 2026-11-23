@@ -11,11 +11,10 @@ import { chiefWorkload } from "../topic/workload.ts";
 import { digest } from "../identity.ts";
 import { followupInputId, type NoteResource } from "../note/model.ts";
 class ObsoleteNoteRequest extends Error {}
-type MaintenanceOrigin = "aide:curate" | "aide:followup" | "aide:triage" | "aide:organize";
+type MaintenanceOrigin = "aide:curate" | "aide:followup" | "aide:organize";
 
 const maintenanceTask: Record<MaintenanceOrigin, string> = {
-  "aide:triage": "Triage this Topic's direct unfiled Inputs and Work. File completed materials into coherent children, creating a child when needed. Never replay completed assessments.",
-  "aide:organize": "Organize this Topic's direct children. Establish meaningful groups or detach independent subtrees.",
+  "aide:organize": "Organize the Topic tree and file Inputs, Work and Notes within its scope. Recheck all direct capacity limits. Preserve processing receipts when filing material.",
   "aide:curate": "Curate ordinary Notes and durable understanding. Classify and consolidate related material, verify closure, and correct summaries only where warranted.",
   "aide:followup": "Verify the scheduled question against current evidence and related Work.",
 };
@@ -26,7 +25,7 @@ const maintenanceTask: Record<MaintenanceOrigin, string> = {
  * @link docs/personal/secretary.md#容量与维护请求
  */
 export async function createMaintenanceInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" = "idle", preparation?: { notes?: { noteId: string; version: string }[]; note?: NoteResource; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" = "idle", preparation?: { notes?: { noteId: string; version: string }[]; note?: NoteResource; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
   const target = resourceRef(topic);
   const maintenance = preparation?.plan, instructions = preparation?.instructions ?? "";
   const input = await retryOnConflict(async () => {

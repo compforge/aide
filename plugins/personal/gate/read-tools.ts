@@ -48,7 +48,7 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
           notes: noteDirectory(store.resources.storage, uid), lastInputAt: value.status.lastInputAt }, offset) });
       } }),
     tool({ name: "list_notes", label: "Find Notes", description: "Find retained Notes across Topics, including summaries. Filter subject UID or name/body q; each request scans at most 20 records. Follow continue even on empty matching pages. Previews are incomplete.",
-      parameters: Type.Object({ subject: Type.Optional(text), people: Type.Optional(text), addresses: Type.Optional(text), q: Type.Optional(Type.String({ maxLength: 500 })), continue: Type.Optional(text), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }),
+      parameters: Type.Object({ subject: Type.Optional(text), people: Type.Optional(text), addresses: Type.Optional(text), isSummary: Type.Optional(Type.Boolean()), q: Type.Optional(Type.String({ maxLength: 500 })), continue: Type.Optional(text), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }),
       async execute(_id, args) { return result(await listNotes(store.client, args)); } }),
     tool({ name: "read_note", label: "Read Note", description: "Read a complete Note with provenance, nature and uid/version for citations. The returned URL opens the evidence in Gate.",
       parameters: Type.Object({ noteId: text }),

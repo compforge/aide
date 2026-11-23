@@ -9,7 +9,6 @@ import { Aide } from "../src/app.ts";
 import { InputAttention, inputAttention } from "../plugins/personal/input/model.ts";
 import { InputSpecSchema } from "../plugins/personal/input/definition.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
-import { understandingVersion, summaryVersion } from "../plugins/personal/topic/tree.ts";
 import { fakeOptions, type Agent } from "./fake-harness.ts";
 
 function setup(t: { after(fn: () => Promise<void>): void }, agent: Partial<Agent> = {}) {
@@ -47,7 +46,6 @@ for (const target of ["root", "child"]) test(`Deferred ${target} inputs wait ind
   if (target === "child") {
     const child = await aide.topics.ensure("child");
     await client.replace(child, { ...child.spec, parentRef: resourceRef(root) }, child.status);
-    await client.patchStatus(root, { absorbed: { [child.metadata.uid]: understandingVersion(child) }, absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
   }
   await aide.start();
   await submit("early", target); await aide.settled();
@@ -101,18 +99,15 @@ test("Deferred backlog survives restart with review disabled and timer reviews r
   } finally { await restarted.close(); }
 });
 
-test("Child understanding activates a review Input while Deferred business stays pending", async t => {
+test("A child summary edit leaves Deferred business pending", async t => {
   const { aide, client, submit, prompts } = setup(t);
   const root = await aide.topics.ensure("root"), child = await aide.topics.ensure("child");
   await client.replace(child, { ...child.spec, parentRef: resourceRef(root) }, child.status);
-  await client.patchStatus(root, { absorbed: { [child.metadata.uid]: understandingVersion(child) }, absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
   await aide.start(); await submit("deferred", "child"); await aide.settled();
   assert.equal(prompts.length, 0);
   await patchSummary(client, aide.topics.resource("child")!, { summary: "New understanding" });
   await aide.settled();
-  assert.equal(prompts.length, 1);
-  assert.match(prompts[0]!, /aide:curate/);
-  assert.doesNotMatch(prompts[0]!, /fact deferred/);
+  assert.equal(prompts.length, 0);
   assert.equal(aide.topics.inputStore.get("deferred")!.status.assess!.completedAt, undefined);
 });
 

@@ -118,7 +118,7 @@ test("Maintenance counts direct ownership and Route includes bounded activity fr
   await f.input("one"); await f.input("two");
   const tree = () => readTopicSubtree(f.resources, resourceRef(f.root()));
   let agenda = await maintenanceAgenda(f.resources, await tree(), { maxUnfiledInput: 1 });
-  assert.equal(agenda.reason, "organize_material"); assert.equal(agenda.topics[0]!.uid, f.root().metadata.uid);
+  assert.equal(agenda.reason, "organize_capacity"); assert.equal(agenda.topics[0]!.uid, f.root().metadata.uid);
   await moveMaterial(f.resources, f.root(), { kind: "Input", id: "two", topicUid: child.metadata.uid, reason: "Specific subject" });
   agenda = await maintenanceAgenda(f.resources, await tree(), { maxUnfiledInput: 1 });
   assert.equal(agenda.reason, "review", "moving one material resolves direct pressure without changing tree totals");
@@ -241,7 +241,7 @@ test("Maintenance reads only threshold witnesses through indexed pages", async t
       const page = await f.resources.page(...args); decoded += page.items.length; return page;
     } } as ResourceClient;
   const agenda = await maintenanceAgenda(reader, [f.root()], { maxUnfiledInput: 2 });
-  assert.equal(agenda.reason, "organize_material");
+  assert.equal(agenda.reason, "organize_capacity");
   assert.equal(agenda.topics[0]!.inputs, 3);
   assert.equal(agenda.topics[0]!.truncated, true);
   assert.equal(decoded, 3);

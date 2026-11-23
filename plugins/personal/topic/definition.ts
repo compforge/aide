@@ -6,7 +6,7 @@ import { PersonRefsSchema } from "../person/model.ts";
 import { validateSummary } from "../note/summary.ts";
 import { candidateVersion } from "../weave/candidates.ts";
 import { NoteWriterSchema } from "../note/model.ts";
-import { canReclaimTopic, reclamationVersion } from "./retention.ts";
+import { knowledgeReleased, canReclaimTopic, reclamationVersion } from "./retention.ts";
 import { isDeepStrictEqual } from "node:util";
 import { notes } from "../note/query.ts";
 import { requireContentWriter } from "../context-write.ts";
@@ -66,12 +66,12 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   type: TOPIC_TYPE, indexVersion: 7,
   schema: { spec: z.object({ maxNotes: z.number().int().min(1).max(999).optional(), id: z.string(), address: AddressRefSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     people: PersonRefsSchema(1000).optional(), review: TopicReviewSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
-    status: z.object({ conditions: ConditionsSchema, summaryDependencies: z.record(z.string(), z.string()).optional(), organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
+    status: z.object({ conditions: ConditionsSchema, organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
       weaveReview: z.object({ version: z.string(), at: z.string().datetime() }).strict().optional(),
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
       chiefWorkload: ChiefWorkloadSchema.optional(),
-      maintenanceRequests: z.partialRecord(z.enum(["aide:curate", "aide:followup", "aide:triage", "aide:organize"]), z.object({ checkedAt: z.string().datetime(), inputId: z.string(), fingerprint: z.string(), attempts: z.number().int().nonnegative().max(14) }).strict()).optional(),
+      maintenanceRequests: z.partialRecord(z.enum(["aide:curate", "aide:followup", "aide:organize"]), z.object({ checkedAt: z.string().datetime(), inputId: z.string(), fingerprint: z.string(), attempts: z.number().int().nonnegative().max(14) }).strict()).optional(),
       notePressure: NotePressureSchema.optional(),
       // Discard the retired queue when decoding older Topic resources.
       noteReviewQueue: z.unknown().optional(),
@@ -79,7 +79,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       assignmentRefresh: z.object({ version: z.string(), cursor: z.string(), complete: z.boolean() }).strict().optional(),
       yieldToInput: z.boolean().optional(),
       idleReviewReset: z.object({ at: z.string().datetime(), previousCount: z.number().int().nonnegative() }).strict().nullable().optional(),
-      lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).default({}), absorbedSummaries: z.record(z.string(), z.string()).default({}),
+      lastInputAt: z.string().datetime().optional(),
       reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict().transform(({ noteReviewQueue: _queue, ...status }) => status) },
   validator: { create: (resource, context) => { validateSummary(resource, context); validateDefault(resource, context); guardTopicOrganization(resource, context); }, update: (previous, current, context) => {
     guardContext(previous, current, context);
@@ -92,15 +92,6 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     if (reviewed && JSON.stringify(previous.status.organization) !== JSON.stringify(current.status.organization)
       && understandingVersion(previous, notes(context, previous.metadata.uid, "subject")) !== reviewed)
       throw new Error("Topic understanding changed before organization");
-    if (JSON.stringify(previous.status.absorbed) !== JSON.stringify(current.status.absorbed)) {
-      if (current.status.contextWriter) requireContentWriter(current, current.status.contextWriter, context);
-      for (const [uid, version] of Object.entries(current.status.absorbed ?? {})) {
-        if (previous.status.absorbed?.[uid] === version) continue;
-        const child = context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, uid);
-        if (!child || child.metadata.deletionTimestamp || child.spec.parentRef?.uid !== current.metadata.uid || understandingVersion(child, notes(context, uid, "subject")) !== version)
-          throw new Error("Child understanding changed; read and review again");
-      }
-    }
     if (previous.spec.id !== current.spec.id || previous.spec.topicKey !== current.spec.topicKey) throw new Error("Topic identity is immutable");
     if (!isProcessingRoot(current) && current.status.execution && current.status.execution.id !== previous.status.execution?.id)
       throw new Error("Only a root Topic can start Chief");
@@ -119,10 +110,8 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     const pending = context.page(INPUT_TYPE, { limit: 1, matchIndex: { name: "assessPending", value: resource.metadata.uid } }).items.length;
     if (pending) throw new TopicDeletionBlocked("busy", "Topic has pending Input");
     if (WORK_TYPES.some(type => context.page(type, { limit: 1, matchIndex: { name: "topic", value: resource.metadata.uid } }).items.length)) throw new TopicDeletionBlocked("work", "Topic still owns Work");
-    if (resource.spec.parentRef && !isRootTopic(resource)) {
-      const parent = context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, resource.spec.parentRef.uid);
-      if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource, notes(context, resource.metadata.uid, "subject"))) throw new TopicDeletionBlocked("unabsorbed", "Parent must absorb Topic understanding before deletion");
-    }
+    if (!isRootTopic(resource) && !knowledgeReleased(resource, context))
+      throw new TopicDeletionBlocked("knowledge", "Release this Topic's current knowledge before deletion");
   } },
   indexes: { domain: r => !r.metadata.deletionTimestamp && !isGateTopic(r) ? ["domain"] : [], address: r => !r.metadata.deletionTimestamp && r.spec.address ? [r.spec.address.uid] : [], uid: r => [r.metadata.uid], default: r => r.spec.default && !r.metadata.deletionTimestamp ? ["default"] : [],
     topicKey: r => r.metadata.deletionTimestamp || !r.spec.topicKey ? [] : [r.spec.topicKey],

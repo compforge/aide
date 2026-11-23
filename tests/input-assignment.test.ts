@@ -15,7 +15,8 @@ import { assignInput, registerInputs } from "../plugins/personal/input/assignmen
 import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../plugins/personal/input/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
-import { ensureCapacityInputs } from "../plugins/personal/secretary/maintenance.ts";
+import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
+import { ensureOrganizationInput, type maintenanceAgenda } from "../plugins/personal/secretary/maintenance.ts";
 import { topicPolicy } from "../plugins/personal/topic/config.ts";
 import { assessInput } from "../plugins/personal/chief/assess.ts";
 import { runInput } from "../plugins/personal/execution/loop.ts";
@@ -154,35 +155,46 @@ test("Refresh resumes bounded pages after interruption and a second root change"
   assert.ok(f.aide.topics.inputStore.list().every(i => i.status.assess!.topic!.uid === third.metadata.uid));
 });
 
-test("Child capacity creates deduplicated built-in Inputs assigned to root and excludes keyed and internal material", async t => {
+test("Concurrent material and child pressure share one root assignment until all limits clear", async t => {
   const f = await fixture(t);
   for (let i = 0; i < 4; i++) await f.input(`keyed-${i}`, f.child, "source:key");
   await f.input("unfiled-one");
-  await ensureCapacityInputs(f.context, f.read(f.child));
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 0);
+  await ensureOrganizationInput(f.context, f.read(f.child));
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize").length, 0);
   await f.input("unfiled-two");
   for (const name of ["grand-a", "grand-b"]) await createWithSummary(f.resources, TOPIC_TYPE, { name,
     spec: { id: name, parentRef: resourceRef(f.child) }, status: { summary: "", receipts: [] } });
-  await Promise.allSettled([ensureCapacityInputs(f.context, f.read(f.child)), ensureCapacityInputs(f.context, f.read(f.child))]);
-  await ensureCapacityInputs(f.context, f.read(f.child));
-  await ensureCapacityInputs(f.context, f.read(f.child));
-  const internal = f.aide.topics.inputStore.list().filter(i => i.spec.origin.startsWith("aide:"));
-  assert.deepEqual(internal.map(i => i.spec.origin).sort(), ["aide:organize", "aide:triage"]);
-  for (const request of internal) {
-    assert.equal(request.status.topic!.uid, f.child.metadata.uid);
-    assert.equal(request.status.assess!.topic!.uid, f.root.metadata.uid);
-    assert.equal("maintenance" in request.spec, false);
-  }
+  await Promise.all([ensureOrganizationInput(f.context, f.read(f.child)), ensureOrganizationInput(f.context, f.read(f.child))]);
+  const requests = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize");
+  assert.equal(requests().length, 1);
+  const request = requests()[0]!;
+  assert.equal(request.status.topic!.uid, f.child.metadata.uid);
+  assert.equal(request.status.assess!.topic!.uid, f.root.metadata.uid);
+  assert.equal(request.spec.observation!.trigger, "capacity");
+  const agenda = request.spec.observation!.facts as Awaited<ReturnType<typeof maintenanceAgenda>>;
+  assert.equal(agenda.affectedTopics, 1);
+  const facts = agenda.topics[0]!;
+  assert.equal(facts.children, 2);
+  assert.equal(facts.childUids.length, 2);
+  assert.equal(facts.inputs, 2);
+  assert.deepEqual(facts.inputIds.sort(), ["unfiled-one", "unfiled-two"]);
   assert.equal((await nextInputs(f.resources, f.read(f.root), 8))[0]!.spec.origin, "source");
   assert.equal(f.aide.topics.inputStore.query("unfiled", f.child.metadata.uid).length, 2);
+
+  for (const [maxUnfiledInput, maxChildren] of [[2, 1], [1, 2], [2, 2]] as const) {
+    await reconcileSecretary(f.context, f.read(f.child), topicPolicy({ maxUnfiledInput, maxChildren }));
+    assert.equal(requests().length, 1);
+    const assessment = f.aide.topics.inputStore.get(request.metadata.name)!.status.assess!;
+    assert.equal(assessment.result?.disposition, maxUnfiledInput === 2 && maxChildren === 2 ? "cancelled" : undefined);
+  }
 });
 
-test("maxInput is inert and exactly-at-threshold material does not trigger triage", async t => {
+test("maxInput is inert and exactly-at-threshold material does not trigger organization", async t => {
   const f = await fixture(t);
   (f.context.instance.config as { topic: unknown }).topic = topicPolicy({ maxInput: 1, maxUnfiledInput: 2 });
   await f.input("one"); await f.input("two");
-  await ensureCapacityInputs(f.context, f.read(f.child));
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 0);
+  await ensureOrganizationInput(f.context, f.read(f.child));
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize").length, 0);
 });
 
 

@@ -7,7 +7,7 @@ import pino from "pino";
 import type { PluginContext, ResourceClient, ResourceListOptions, ResourceType } from "@compforge/aide-plugin";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { readTopicSubtree, readTopicRoot, pendingAbsorption, understandingVersion, summaryVersion } from "../plugins/personal/topic/tree.ts";
+import { readTopicSubtree, readTopicRoot } from "../plugins/personal/topic/tree.ts";
 import { resourceRef, topicScope } from "../plugins/personal/input/state.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
 import { relatedWork, topicParts } from "../plugins/personal/background.ts";
@@ -50,8 +50,6 @@ test("Topic reads follow the parent index in topological order within the select
   assert.equal(queried.length, allowed.size);
   assert.equal((await readTopicRoot(reader, resourceRef(leaf)))!.metadata.uid, root.metadata.uid);
   assert.deepEqual(await readTopicSubtree(reader, { ...resourceRef(root), uid: "stale-uid" }), []);
-  const reviewed = pendingAbsorption([...topics].reverse(), topics[0]!);
-  assert.equal(reviewed[0]!.uid, leaf.metadata.uid, "knowledge review remains bottom-up");
   assert.deepEqual(new Set(f.aide.topics.scope(root.metadata.uid).map(topic => topic.metadata.uid)), allowed);
 
   await f.attach(a, other);
@@ -59,7 +57,6 @@ test("Topic reads follow the parent index in topological order within the select
   assert.deepEqual(new Set(f.aide.topics.scope(other.metadata.uid).map(topic => topic.spec.id)), new Set(["other", "a", "leaf"]));
   assert.equal((await readTopicRoot(f.resources, resourceRef(leaf)))!.metadata.uid, other.metadata.uid);
   const latestLeaf = f.current(leaf);
-  await f.resources.patchStatus(f.current(a), { absorbed: { [leaf.metadata.uid]: understandingVersion(latestLeaf) } });
   await f.resources.delete(TOPIC_TYPE, latestLeaf.metadata.name, "v1", { uid: latestLeaf.metadata.uid, resourceVersion: latestLeaf.metadata.resourceVersion });
   assert.deepEqual(new Set((await readTopicSubtree(f.resources, resourceRef(other))).map(topic => topic.spec.id)), new Set(["other", "a"]));
 });
@@ -78,9 +75,6 @@ test("Chief reads its Topic tree and related Work through scoped indexes", async
     await routeByRules(context, fact);
     await f.aide.work(topic.spec.id).create({ kind: "task", title: topic.spec.id, instruction: "Inspect evidence", trigger: null }, fact.metadata.name, `call-${topic.spec.id}`);
   }
-  // Absorb current child understanding so this quiet read has no inference work.
-  await f.resources.patchStatus(f.current(root), { absorbed: { [child.metadata.uid]: understandingVersion(f.current(child)) },
-    absorbedSummaries: { [child.metadata.uid]: summaryVersion(f.current(child)) } });
   const childWork = f.aide.work(child.spec.id).list()[0]!;
   const store = f.aide.personal.store, originalList = store.resources.list.bind(store.resources);
   const allowed = new Set([root.metadata.uid, child.metadata.uid, root.spec.id, child.spec.id, childWork.uid!]);

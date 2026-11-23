@@ -13,7 +13,7 @@ Note 为主题与人物的长期认识、主题组织提供依据，提炼主线
 | metadata.name / uid | 稳定 Note ID 和具体资源实例 |
 | spec.name | 可维护的事项或知识名称，最长 200 字符；读取与更新使用稳定 ID |
 | spec.subject | 必填的 Topic / Task / Routine / Person / Address UID 引用；subject 表示认识的关联对象，people 表示相关人物 |
-| spec.summaryOf | 可选的摘要对象引用，与 subject 一致；按对象 UID 索引，每个对象至多一份摘要 Note |
+| spec.summaryOf | 可选的摘要对象引用，与 subject 一致；按对象 UID 索引，每个对象至多一份活跃摘要 Note |
 | spec.people | 涉及的人物引用，按 UID 去重；默认空数组 |
 | spec.addresses | 涉及的 Address UID 集合，近期记录按此关联分页，不改变 subject |
 | spec.sensitivity / visibility | 整条 Note 统一适用的敏感度与可见范围；定级和拆分规则见 [披露边界](disclosure.md#定级与-note-边界) |
@@ -25,6 +25,7 @@ Note 为主题与人物的长期认识、主题组织提供依据，提炼主线
 | status.writer | Agent 写入者资源和 executionId；用户编辑、配置合并与 Weave 创建摘要不伪造 Agent 执行身份 |
 | status.curated | 最近一次确认的材料指纹和梳理 Input UID，可回查该次完成回执 |
 | status.pruned / retired | 最近删减或整篇退役的时间、原因、执行身份；退役保留正文和原内容版本 |
+| status.splitFrom | 新篇记录拆分来源 Note 的 UID 和当时的内容版本 |
 | status.organization | 最近一次移动的来源、目标、原因与时间 |
 
 subject、people 和 addresses 均有索引；recentSubject / recentPeople / recentAddresses 另按 updatedAt 排序，recent 直接查询最新 40 条后应用字符预算，不加载全部历史。Topic 按自身 UID 查询 Note，相关 Work 的 Note 通过 Work 视图展示；Person 按 people 查询，同一 Note 可以出现在多个人物视图中。不是将正文复制进每个对象。普通事项没有配置 owner；subject / people 不阻止其所关联资源回收。Person 合并保留历史 people 引用，不将旧人物证据自动改写成目标人物。
@@ -47,15 +48,15 @@ Chief 按需整理事项，并将其中有长期价值的信息沉淀到相应�
 
 每份 summary Note 专属于 summaryOf 指向的一个对象，与 subject 一致；现有模型支持 Topic、Task、Routine、Person 和 Address。普通事项 Note 不设置 summaryOf，通过 subject、people、addresses 在相关对象的视图中展示同一份记录；这种相关性展示不改变 summary 的专属归属。对象不再保存内联 summary 字段，正文统一保存在 Note.spec.text。
 
-summaryOf 按对象 UID 建立索引，事务校验每个对象至多一份摘要 Note，读取无需扫描 Note 列表。已有同 subject 的 Note 可设置 summaryOf；一旦设置，该关联不可修改，归位工具只移动普通事项 Note。summarize_* 在没有摘要时创建 Note，内部名称 summary-<resource uid> 仅保证创建重试幂等，不用于识别摘要角色。之后修改正文或 people 均保持 Note UID；清空正文也保留身份。
+summaryOf 按对象 UID 建立索引，事务校验每个对象至多一份活跃摘要 Note，读取无需扫描 Note 列表。已有同 subject 的 Note 可设置 summaryOf；一旦设置，该关联不可修改，归位工具只移动普通事项 Note。首次为对象写摘要时创建 Note，内部名称按对象 UID 和上次退役摘要的 UID 生成，使同一轮创建可重试，每轮新摘要有独立 ID。之后修改正文或 people 均保持 Note UID；清空正文也保留身份。
 
-summarize_topic / summarize_task / summarize_routine / summarize_person 是维护摘要 Note 的便捷入口，支持 people；省略保留已有关联，[] 明确清空。upsert_note 也能编辑同一份 Note，自动原子同步对象上的内容指纹。只改 people 也改变内容版本，避免元数据变化绕过并发与依赖检查。用户仅修订正文时保留 people；Person 合并双方正文与 people，并保留历史人物引用，不猜测或重写来源。
+Chief 用 upsert_note 维护 Topic、Person 和 Address 摘要，Task 和 Routine 各自维护本工作摘要。工具支持 people，省略保留已有关联，[] 明确清空。读取对象的 summaryNote，以 id 和 version 更新已有摘要。首次写入提供 summaryOf 对象引用和正文。摘要与对象内容指纹在同一事务提交。只改 people 也改变内容版本，避免元数据变化绕过并发与依赖检查。用户仅修订正文时保留 people；Person 合并双方正文与 people，并保留历史人物引用，不猜测或重写来源。
 
 读取和常驻上下文提供正文与 summaryNote（id、uid、version、subject、summaryOf、people），部分列表另投影 summaryUid。自动上下文最多预览 8 个人物关联并标明省略数量；read_note 可按 Note ID 或 UID 读取完整内容与关联。Note 正文与分类可独立编辑，省略字段保留原值；摘要 Note 通过同一更新入口保持依赖指纹一致。upsert_note 的回执提供 noteId、uid、version：noteId 用于继续编辑，uid/version 可直接用于 say.notes 或 cite_output，调用方无需推断 UID。Stream.status.references 记录实际使用的 Note UID、读取版本和接纳时校验的正文指纹；summary Note 与普通 Note 使用相同的 sensitivity、visibility 和披露检查。
 
 recent 展示排除 summaryOf 非空的 Note，摘要通过独立位置展示；list_notes 仍可查到它。Note Reconcile 对摘要只修复对象上的派生内容指纹。
 
-**summaryOf 指向的具体对象仍存在时，Note 不参与普通容量回收。** retention.canEvict 在实际淘汰事务内按 UID 检查对象是否存在，包括已标记删除但尚未移除的对象；直接删除这份 Note 同样被拒绝。对象实际移除后，Note 成为普通容量候选，无需先清空 summaryOf；同名重建的新对象不会保护指向旧 UID 的 Note。没有独立摘要 TTL，也不按名称直接删除 Note。关联不构成反向保留引用，不阻止对象本身回收。
+**活跃摘要在其对象仍存在时受容量保护。** retention.canEvict 在实际淘汰事务内按 UID 检查对象是否存在，包括已标记删除但尚未移除的对象；直接删除这份 Note 同样被拒绝。对象实际移除后，Note 成为普通容量候选，无需先清空 summaryOf；同名重建的新对象不会保护指向旧 UID 的 Note。没有独立摘要 TTL，也不按名称直接删除 Note。关联不构成反向保留引用，不阻止对象本身回收。
 
 本模型使用新的资源 API 版本，不兼容旧的内联 summary 数据，不提供自动迁移或双写。
 
@@ -65,29 +66,31 @@ Chief 的 upsert_note 新建时可指定 topicId，目标必须在当前责任�
 
 不传 noteId 时创建，不需要版本；同一执行内相同 tool-call identity 使用同一 Note 名称，重试返回已有 Note，不能覆盖较新的进展。传 noteId 时必须提交该 Note 的 version，由 UID、完整 spec 和内容更新时间计算。不存在或已淘汰的 ID 拒绝更新。相同内容不刷新年龄或版本。
 
-list_notes 按 subject UID、people 中的 Person UID 和文本 q 查找活跃的 Note，默认排除退役记录。每次最多扫描一页索引结果，返回有界预览与 continue；搜索无匹配仍可能有下一页。它覆盖 recent 之外的 Note；Work Agent 的查询固定到自身。read_note 提供完整正文；显式读取退役 Note 时同时返回 retired 回执。
+list_notes 可组合 subject、people、addresses、文本 q 和 isSummary 条件。isSummary 省略时返回两类活跃 Note，true 只取摘要，false 只取普通 Note。每次最多扫描一页索引结果，返回有界预览与 continue；搜索无匹配仍可能有下一页。它覆盖 recent 之外的 Note；Work Agent 的查询固定到自身。read_note 提供完整正文；显式读取退役 Note 时同时返回 retired 回执。
 
 read_topic、read_task、read_routine、read_person 返回按更新时间排序的 recent 视图；read_note 按 Note ID 返回完整正文及版本。recent 最多 40 条、合计 16000 字符，是展示预算，不截断存储正文。常驻背景进一步缩减为 3 条、每条 500 字符。被截断时先 read_note 再修改，不能把预览当完整原文。
 
 Note 的替换只校验该 Note 的内容；摘要的编辑同时更新所总结对象的派生内容指纹。不同 Note 和调度字段互不构成编辑冲突。Note Validator 在事务内核验执行仍活跃、目标仍存在、当前归属仍在写入者范围内。Weave 挂靠后仍在收尾的旧 Chief 可完成自身剩余子树的内容写入，不能越过新的归属边界。
 
-summary 工具使用对象 UID 与 summaryRevision 计算内容版本，summaryRevision 本身包含 Note UID 与内容版本。Note 正文、summaryOf 与对象上的派生指纹在同一事务提交，JSON test 检查实际材料内容；contextWriter 记录执行依据，Note Validator 读取实际执行与祖先链。summaryRevision 仅为 Note 内容指纹的派生投影，供纯索引、Watch 和父子认知检查使用；常规编辑原子更新，Note Reconcile 修复独立资源更新后的投影，不要求历史作者仍在执行。Person 的 Web 资料整体编辑仍使用资源版本，summary 工具读取 read_person.summaryVersion。
+摘要写入使用对象 UID、summaryRevision 与上次退役摘要的 UID 计算对象内容版本，summaryRevision 本身包含 Note UID 与内容版本。Note 正文、summaryOf 与对象上的派生指纹在同一事务提交，JSON test 检查实际材料内容；contextWriter 记录执行依据，Note Validator 读取实际执行与祖先链。summaryRevision 仅为 Note 内容指纹的派生投影，供纯索引、Watch 和父子认知检查使用；常规编辑原子更新，Note Reconcile 修复独立资源更新后的投影，不要求历史作者仍在执行。Person 的 Web 资料整体编辑仍使用资源版本，summary 工具读取 read_person.summaryVersion。
 
-Topic understandingVersion 纳入其查询窗口中 Note 的 UID 和版本。子理解吸收、删除和 Weave 归组在事务中重新查询 Note 索引，避免独立 Note 的新增/修改绕过 Topic 版本检查。上下文预览与整理触发分别管理，具体流程见下节。
+Topic understandingVersion 纳入其查询窗口中 Note 的 UID 和版本。回收和 Weave 归组在事务中重新查询 Note 索引，避免独立 Note 的新增/修改绕过 Topic 版本检查。上下文预览与整理触发分别管理，具体流程见下节。
 
 ## 事项归位与提炼回顾
 
 move_note 接受 noteId、version、目标 subject 和 reason。当前 root Chief 可在责任树内移动 Note，来源和目标均在写入事务内校验，目标可以是 Topic / Task / Routine。移动保留 ID、正文、people 和内容更新时间，记录组织调整；subject 改变使内容版本变化。upsert_note 专注内容维护，已有 Note 的归位使用 move_note。
 
-Chief 消化 Input 时，把近期事项写成普通 Note。此时材料可能片面或重复，nature 可以暂缺。保留事实来源、适用范围和不确定性，让下一轮梳理能核对当时的判断。
+curate 从 Note 的内容出发整理证据和分类，organize 从 Topic 树的职责范围出发调整归属。两者都可拆分和移动普通 Note，也都可按需修订 Topic summary。前者核对已有认识是否符合证据，后者核对摘要是否准确描述调整后的 Topic。
 
 ## 梳理与跟进
 
+Chief 处理 Input 时，按需新建或更新普通 Note，记录当时对具体事项的理解。单条 Input 可能只反映一方的说法或某个阶段的进展，初次记录应保留来源、适用范围和待核实之处，`nature` 可以暂缺。后续 Input 围绕同一事项补充证据时，Chief 可以继续修订同一篇 Note。
+
 Secretary 把同一 root Topic 下有实质变化的普通 Note 放进同一份梳理议程。默认攒到 8 篇或最早一篇等满 15 分钟就申请一次 `aide:curate`。正文、归属、关联对象、披露范围、nature 或关闭状态变化都值得再看。改名、调整篇幅预算或设置下次核实时间沿用上次梳理结果。工作量、子摘要变化与预算压力也可以触发梳理。
 
-Chief 从议程出发查找相关 Note、Input 与 Work，核对原文和现有 Summary。为保留的内容选定 nature，拆开混杂的材料，合并重复的记录，先写目标再削减或退役来源。只有已关闭且结论适用于其他场合的经历才可为 Summary 增补长期认识。若新证据表明 Summary 把一次临时分工写成了长期职责，当轮即可修正或删去这句话。
+Chief 处理 `aide:curate` 时，对照相关 Input、Work 和其他 Note 核对事实，为保留的内容选定 `nature`，按需纠正早先的判断、拆开混杂的事项或合并重复记录。若现有内容和分类已经恰当，核对后即可确认当前版本。Chief 在 `assess_input.curatedNotes` 中提交实际梳理过的普通 Note 及其最终版本，包括拆分、合并的目标。梳理回执与 Input 完成状态在同一事务保存。未处理的材料和并发产生的新版本留待后续梳理。
 
-Chief 完成 `assess_input` 时用 `curatedNotes` 提交实际梳理过的普通 Note 和最终版本，包括拆分、合并的目标。Input 完成和版本回执在同一事务保存。未处理的 Note 和并发写入的新版本保留在后续议程中。
+梳理回执表明 Chief 已核对这篇 Note 的当前内容。事项仍在进行时，普通 Note 也可以准确记录已知事实和未决问题，供后续跟进。对于 episodic Note，`closedAt` 记录事项已有结论的时间。只有在事项关闭后，才考虑将有证据支持、适用于其他场合的结论提炼到相关对象的 Summary。若新证据表明已有 Summary 中的判断失实或适用范围过宽，Chief 可在本轮梳理时修正。
 
 `aide:followup` 承担“事事有回应”的跟进职责。当前入口是 episodic Note 上已约定核实的问题。
 
@@ -103,9 +106,11 @@ Topic Reconcile 在 Note 变化时检查压力，周期唤醒兜底。数量查�
 
 压力通过 `aide:curate`、`trigger=note_pressure` 安排 Chief 整理，独立于普通回顾开关；业务输入优先。Secretary 在创建请求时选取到期压力，已创建的请求保持快照，后来的需求留待下一次。请求创建时持久化冷却；完成结果不再修改压力调度。Secretary 根据剩余压力继续安排，同一需求逐步退避，新正文或预算变化恢复基础节奏。数量、长度降到预算内时清除压力。无法安全压缩时允许超额，并完成本轮回执。
 
-upsert_note 负责整合目标信息；prune_note 接受 noteId、version、完整的更短非空正文和 reason，只削减来源正文，保留元数据，也支持 summary 的原子指纹更新；retire_note 接受 noteId、version、reason，让整篇 Note 退出活跃使用。两种削减操作由 curate 中的 Chief 使用，事务内校验执行身份、当前归属与版本。仍有归属对象的 summary 禁止退役。
+upsert_note 负责整合目标信息；prune_note 接受 noteId、version、完整的更短非空正文和 reason，只削减来源正文，保留元数据，也支持 summary 的原子指纹更新；retire_note 接受 noteId、version、reason，让整篇 Note 退出活跃使用。Chief 在 curate 整理内容或 organize 调整归属时均可使用这两种削减操作，事务内校验执行身份、当前归属与版本。退役活跃摘要时，同一事务清除对象的 summaryRevision 并记录该摘要 UID。旧摘要保留原正文和内容版本，退出活跃摘要索引，新的摘要单独创建。
 
-信息移动始终先成功写入目标，再 prune 来源；来源没有独立价值才 retire。中断可以留下重复，不能先删来源再尝试保存目标。Agent 按重要性、稳定性、证据与未决问题决定合并、归位或沉淀，不为达到数量强行删除，也不通过抬高预算逃避整理。
+split_note 接受 noteId、version、reason、来源保留的更短非空正文 text 和新篇 parts。在同一事务写入来源、所有新篇和摘要对象指纹。来源保留 UID 与角色，新篇均为普通 Note，可以分别提供 name、nature 和 subject，继承来源的披露范围和人物、场合关联。重复相同请求返回已有 ID，复核后再提交梳理版本。
+
+合并到已有 Note 时先成功写入目标，再 prune 来源；来源没有独立价值才 retire。中断可以留下重复，不能先删来源再尝试保存目标。Agent 按重要性、稳定性、证据与未决问题决定合并、归位或沉淀，不为达到数量强行删除，也不通过抬高预算逃避整理。
 
 ## 生命周期与容量
 
@@ -128,7 +133,7 @@ Topic、Task、Routine 使用 aide.dev/v1alpha4，Person 使用 aide.dev/v1alpha
 
 摘要引用场景见 tests/summary-notes.test.ts；事项场景见 tests/note-knowledge.test.ts、tests/notes.test.ts、tests/topic-persons.test.ts 和 tests/pi-agent.test.ts：独立并发、同 Note 冲突、创建重试、过期执行、祖先归属竞争、悬空历史引用、容量回收、完整读取与真实工具路径。
 
-Secretary 创建 curate 请求时原子保存触发依据和请求冷却，并按 Topic／origin 的 pending 索引去重。定时与工作量回顾受开关控制，预算压力与子 summary 吸收独立于该开关。Note 压力按稳定材料身份、正文和预算生成需求指纹；改名与 updatedAt 不重置退避。完整 Note 版本继续用于读写与删除校验。
+Secretary 创建 curate 请求时原子保存触发依据和请求冷却，并按 Topic／origin 的 pending 索引去重。定时与工作量回顾受开关控制，预算压力独立于该开关。Note 压力按稳定材料身份、正文和预算生成需求指纹；改名与 updatedAt 不重置退避。完整 Note 版本继续用于读写与删除校验。
 
 Note Controller 修复 summary 派生指纹；Secretary 的 Note 协调器负责归类和跟进的时机。Topic 监听 Note 内容和退役状态变化以检查预算压力，周期检查兜底；预算内的普通 Note 变化不会立即调用模型。
 
