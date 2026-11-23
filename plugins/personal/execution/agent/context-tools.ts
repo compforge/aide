@@ -15,7 +15,6 @@ export const disclosureFields = {
   visibility: Type.Optional(Type.Union([Type.Literal("people"), Type.Literal("topic"), Type.Literal("root"), Type.Literal("any")], { description: "One disclosure scope for the entire Note; ordinary code, MR, requirement and environment facts are any unless explicitly restricted." })),
 };
 export const noteKnowledgeFields = {
-  summaryConflict: Type.Optional(Type.Union([Type.Null(), Type.String({ minLength: 1, maxLength: 1000, description: "On an ordinary Note identify evidence contradicting an existing summary for curation; clear with null once reconciled." })])),
   closedAt: Type.Optional(Type.String({ format: "date-time" })),
   followup: Type.Optional(Type.Union([Type.Null(), Type.Object({ question: Type.String({ minLength: 1, maxLength: 1000 }), checkAt: Type.String({ format: "date-time" }) }, { additionalProperties: false })])),
   nature: Type.Optional(Type.Union([Type.Literal("episodic"), Type.Literal("semantic"), Type.Literal("procedural")])),

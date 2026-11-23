@@ -295,7 +295,7 @@ plugins:
 
 Immediate／Normal Input 直接复用 Chief 的接纳与执行路径；Secretary 根据处理量、等待时间和 pressure 生成维护 Input。Deferred 达到 count 条或最老等待 maxWaitSeconds 后归为独立 Batch，按 Normal 交给 Chief；Batch 计一次工作量。Task／Routine 的状态变化不计 Chief 工作量。没有待回顾活动时只做退避检查；Review 自身计数但不独自启动下一轮定时需求。维护遇到容量不足会推迟，已持久化业务仍可处理。窗口、去重与退避契约见 [Secretary](personal/secretary.md)。
 
-未分类普通 Note 的等待时间由 `topic.unclassifiedAfterSeconds` 控制，默认 900 秒；即使关闭 Topic 的工作量回顾，分类、摘要冲突核实和显式的 Note 跟进仍会调度。
+`topic.curation.count` 指定触发梳理的普通 Note 数（1–8，默认 8），`topic.curation.maxWaitSeconds` 指定最早待梳理变更的等待时间（默认 900 秒）。满足任一条件即可调度。关闭 Topic 的工作量回顾后，普通 Note 的梳理与约定跟进仍可独立调度。
 
 修改基础等待、倍数或上限并重启后，按持久化时间事实与当前配置重新计算资格；最迟在下一次固定检查时应用，不从重启时重新等待，也不补跑历史周期。每个 Topic 通过 `spec.review.enabled` 开关后台回顾，关闭不停止定时协调、输入接纳或既有职责。完整契约见 [Topic 定时回顾](personal/secretary.md#工作量与时间窗口)。
 

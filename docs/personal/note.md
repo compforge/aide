@@ -23,6 +23,7 @@ Note 为主题与人物的长期认识、主题组织提供依据，提炼主线
 | metadata.creationTimestamp | 创建时间 |
 | status.updatedAt | 最近一次内容修改时间 |
 | status.writer | Agent 写入者资源和 executionId；用户编辑、配置合并与 Weave 创建摘要不伪造 Agent 执行身份 |
+| status.curated | 最近一次确认的材料指纹和梳理 Input UID，可回查该次完成回执 |
 | status.pruned / retired | 最近删减或整篇退役的时间、原因、执行身份；退役保留正文和原内容版本 |
 | status.organization | 最近一次移动的来源、目标、原因与时间 |
 
@@ -78,11 +79,17 @@ Topic understandingVersion 纳入其查询窗口中 Note 的 UID 和版本。子
 
 move_note 接受 noteId、version、目标 subject 和 reason。当前 root Chief 可在责任树内移动 Note，来源和目标均在写入事务内校验，目标可以是 Topic / Task / Routine。移动保留 ID、正文、people 和内容更新时间，记录组织调整；subject 改变使内容版本变化。upsert_note 专注内容维护，已有 Note 的归位使用 move_note。
 
-未分类普通 Note 可以延后归类，已分类 Note 的一般内容更新不逐条触发模型。写入 Agent 负责当次内容质量、分类与受众；后续在预算压力整理或定时回顾中按需检查、合并和提炼。summary 变化继续通过子 Topic 认识吸收路径处理。
+Chief 消化 Input 时，把近期事项写成普通 Note。此时材料可能片面或重复，nature 可以暂缺。保留事实来源、适用范围和不确定性，让下一轮梳理能核对当时的判断。
 
 ## 梳理与跟进
 
-Secretary 按 Note 创建时间和 `topic.unclassifiedAfterSeconds`（默认 900 秒）安排未分类普通 Note 的梳理，同一 subject 每次取最早的八条；同一领域内复用待处理的 `aide:curate` 请求。新证据与既有摘要冲突时，在普通 Note 的 `summaryConflict` 记录矛盾；Chief 核实、修订后显式清除。工作量、子摘要变化和预算压力同样可触发梳理。Chief 读取原文，把同一事项的材料归并，先写目标再削减来源，在一次梳理中修订有证据支持的长期认识。只有已关闭的经历可以贡献新的长期结论；原有 Summary 中无依据的概括可随时纠正。
+Secretary 把同一 root Topic 下有实质变化的普通 Note 放进同一份梳理议程。默认攒到 8 篇或最早一篇等满 15 分钟就申请一次 `aide:curate`。正文、归属、关联对象、披露范围、nature 或关闭状态变化都值得再看。改名、调整篇幅预算或设置下次核实时间沿用上次梳理结果。工作量、子摘要变化与预算压力也可以触发梳理。
+
+Chief 从议程出发查找相关 Note、Input 与 Work，核对原文和现有 Summary。为保留的内容选定 nature，拆开混杂的材料，合并重复的记录，先写目标再削减或退役来源。只有已关闭且结论适用于其他场合的经历才可为 Summary 增补长期认识。若新证据表明 Summary 把一次临时分工写成了长期职责，当轮即可修正或删去这句话。
+
+Chief 完成 `assess_input` 时用 `curatedNotes` 提交实际梳理过的普通 Note 和最终版本，包括拆分、合并的目标。Input 完成和版本回执在同一事务保存。未处理的 Note 和并发写入的新版本保留在后续议程中。
+
+`aide:followup` 承担“事事有回应”的跟进职责。当前入口是 episodic Note 上已约定核实的问题。
 
 普通 episodic Note 可写 `closedAt` 表示确认该事项已有结论，正文保存结果与依据。仍需核实的问题可写 `followup: {question, checkAt}`；明确传 null 取消，关闭时自动清除。Secretary 在约定时刻安排 `aide:followup`，Chief 核对最新 Note、Input 和关联 Work，已有 Work 跟进时沿用其安排。必要时通过 ask_me 私下核实。调度和询问回执分别与 Input 和 Output 原子保存，同一问题与核实时间只询问一次。新证据或新的约定可以更新核实计划。关闭的经历仍可读取、修订和提炼，退役单独处理。
 

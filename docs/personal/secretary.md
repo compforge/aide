@@ -45,8 +45,8 @@ Secretary 合并领域内的梳理需求，并为 episodic Note 的具体问题�
 | --- | --- |
 | aide:triage | maxUnfiledInput 或既有 maxWork 超限；批阅、分理和归集材料 |
 | aide:organize | maxChildren 超限；组织直属下属的分工与层次 |
-| aide:followup | 有明确问题和核实时间的 episodic Note 到期，核实进展 |
-| aide:curate | 未分类 Note 等待到期、已有摘要出现矛盾、Chief 完成量、未回顾活动等待，或子 summary／结构／Note 压力；回顾进展与知识 |
+| aide:followup | 跟进需要回应的事项；当前按开放 episodic Note 的问题与核实时间调度 |
+| aide:curate | 普通 Note 的改动达到批量或等待上限，或工作量、子摘要、结构与预算变化需要梳理；核对证据并维护近期事项与长期认识 |
 
 内置请求复用 Input，status.topic 指向目标节点，未领取时 status.assess.topic 收敛到当前 root，领取后保留实际负责人。origin 决定 Chief 的工具与处理路径，text 描述任务。Secretary 统一准备 Curate／Followup／Triage／Organize，每个节点、每种 origin 最多一条未完成请求；可重试失败仍处理原 Input。创建与请求记账原子提交，结果与完成水位原子提交，无需二次结算。`maintenanceRequests` 保留请求身份、时间、需求指纹与尝试次数；同一需求从 `capacityCooldownSeconds`（默认 60 秒）指数退避到 2 小时（基础冷却更长时保留基础冷却），新需求重新安排。已完成 Input 回收后仍可从 Topic 保留的事实继续调度。
 

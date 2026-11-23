@@ -31,10 +31,12 @@ export function followupInputId(note: NoteResource) {
   return "followup-" + createHash("sha256").update(JSON.stringify([note.metadata.uid, plan.question, plan.checkAt])).digest("hex");
 }
 export const NoteSpecSchema = z.object({ name: NoteNameSchema.optional(), subject: SubjectSchema, summaryOf: SubjectSchema.optional(), people: PersonRefsSchema().prefault([]),
-  addresses: AddressRefsSchema.prefault([]), nature: NoteNatureSchema.optional(), summaryConflict: z.string().trim().min(1).max(1000).optional(), closedAt: z.iso.datetime().optional(), followup: FollowupSchema.optional(), maxChars: MaxCharsSchema.optional(), text: z.string().max(16000), ...DisclosureFields }).strict();
+  addresses: AddressRefsSchema.prefault([]), nature: NoteNatureSchema.optional(), closedAt: z.iso.datetime().optional(), followup: FollowupSchema.optional(), maxChars: MaxCharsSchema.optional(), text: z.string().max(16000), ...DisclosureFields }).strict();
 export const NoteWriterSchema = z.object({ resource: WriterResourceSchema, executionId: z.string().min(1) }).strict();
 const ReductionReceiptSchema = z.object({ at: z.string().datetime(), reason: z.string().trim().min(1).max(2000), writer: NoteWriterSchema }).strict();
 export const NoteStatusSchema = z.object({ updatedAt: z.string().datetime(), writer: NoteWriterSchema.optional(),
+  curationRoot: z.string().optional(), pendingSince: z.iso.datetime().optional(),
+  curated: z.object({ inputUid: z.string(), material: z.string() }).strict().optional(),
   followupInputId: z.string().optional(), askedFollowupId: z.string().optional(),
   retired: ReductionReceiptSchema.optional(),
   pruned: ReductionReceiptSchema.optional(),
@@ -46,6 +48,16 @@ export const NoteViewSchema = NoteSpecSchema.extend({ nameMissing: z.boolean().o
 export type NoteSpec = Omit<z.infer<typeof NoteSpecSchema>, "sensitivity" | "visibility"> & import("../disclosure.ts").MaterialDisclosure;
 export type NoteStatus = z.infer<typeof NoteStatusSchema>;
 export type NoteResource = Resource<NoteSpec, NoteStatus>;
+/** @spec Display names, budgets and scheduled checks do not change the knowledge to curate. */
+export const noteMaterial = (s: NoteSpec) => createHash("sha256").update(JSON.stringify([
+  s.subject.uid, s.text, s.nature, s.closedAt, s.sensitivity ?? "L3", s.visibility ?? "people",
+  [...s.people].map(p => p.uid).sort(), [...s.addresses].map(a => a.uid).sort(),
+])).digest("hex");
+export function pendingCuration(note: NoteResource) {
+  if (!note.spec.summaryOf && !note.metadata.deletionTimestamp && !note.status.retired
+    && (!note.spec.nature || note.status.curated?.material !== noteMaterial(note.spec)))
+    return note.status.pendingSince ?? note.status.updatedAt;
+}
 /** A query projection; never embedded in another persisted Resource. */
 export interface Note extends Omit<NoteSpec, "people" | "addresses"> { nameMissing?: boolean; retired?: NoteStatus["retired"]; people: PersonRef[]; addresses: AddressRef[]; id: string; uid: string; version: string; createdAt: string; updatedAt: string }
 /** @spec A cited body stays valid across classification-only edits; the current classification is checked at delivery. */

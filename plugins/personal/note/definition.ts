@@ -4,7 +4,7 @@ import type { InputSpec, InputStatus } from "../input/model.ts";
 import { isGateTopic } from "../topic/boundary.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { requireOrganization, requireTopic } from "../topic/ownership.ts";
-import { followupInputId, noteVersion, noteMaxChars } from "./model.ts";
+import { pendingCuration, noteMaterial, followupInputId, noteVersion, noteMaxChars } from "./model.ts";
 import { requireContentWriter } from "../context-write.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { NOTE_TYPE, WriterResourceSchema, NoteSpecSchema, NoteStatusSchema, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
@@ -22,7 +22,6 @@ function validateAddresses(note: NoteResource, context: ResourceValidationContex
 function validate(note: NoteResource, context: ResourceValidationContext) {
   if ((note.spec.closedAt || note.spec.followup) && (note.spec.nature !== "episodic" || note.spec.summaryOf || note.spec.closedAt && note.spec.followup))
     throw new Error("Only ordinary episodic Notes can close or schedule an open question");
-  if (note.spec.summaryConflict && note.spec.summaryOf) throw new Error("Record conflicting evidence on an ordinary Note");
   if (note.metadata.deletionTimestamp) throw new Error("Note is being deleted");
   if (note.metadata.namespace !== "v1" || note.metadata.owner) throw new Error("Note requires the shared namespace and an independent lifecycle");
   const writer = note.status.writer;
@@ -38,8 +37,22 @@ function validate(note: NoteResource, context: ResourceValidationContext) {
   if (writer) requireContentWriter(subject, writer, context);
 }
 export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
-  type: NOTE_TYPE, indexVersion: 5, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
-  validator: { create: (note, context) => { if (note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts"); validateAddresses(note, context); validate(note, context); }, update: (before, after, context) => {
+  type: NOTE_TYPE, indexVersion: 6, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
+  validator: { create: (note, context) => { if (note.status.curated || note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts"); validateAddresses(note, context); validate(note, context); }, update: (before, after, context) => {
+    if (!equalResourceValue(before.status.curated, after.status.curated)) {
+      const receipt = after.status.curated;
+      const input = receipt && context.get<InputSpec, InputStatus>(INPUT_TYPE, receipt.inputUid);
+      const executionId = input?.status.assess?.executionId;
+      if (!input || input.spec.origin !== "aide:curate" || !input.status.assess?.completedAt || !executionId
+        || !input.status.assess.result?.curatedNotes?.some(n => n.noteId === before.metadata.name && n.version === noteVersion(before))
+        || !before.spec.nature || !pendingCuration(before) || receipt.material !== noteMaterial(before.spec)
+        || !equalResourceValue(before.spec, after.spec) || !equalResourceValue({ ...before.status, curated: receipt }, after.status))
+        throw new Error("Curation receipt requires the assessed Input and the reviewed Note material");
+      const subject = context.get(before.spec.subject, before.spec.subject.uid);
+      if (!subject) throw new Error("Note subject no longer exists");
+      requireContentWriter(subject, { resource: WriterResourceSchema.parse(input.status.topic), executionId }, context);
+      return;
+    }
     if (before.status.askedFollowupId !== after.status.askedFollowupId) {
       const id = followupInputId(before);
       const output = id && context.page<OutputSpec, unknown>(OUTPUT_TYPE, { limit: 1, matchIndex: { name: "followup", value: id } }).items[0];
@@ -122,8 +135,10 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
     knownSummary: r => r.spec.summaryOf && !r.metadata.deletionTimestamp && !r.status.retired && r.spec.text.trim() ? [r.spec.summaryOf.uid] : [],
     uid: r => [r.metadata.uid], subject: r => [r.spec.subject.uid], addresses: r => [...r.spec.addresses].map(a => a.uid), people: r => [...new Set([...r.spec.people].map(p => p.uid))] },
   orderedIndexes: {
-    curationSubject: r => r.spec.nature && !r.spec.summaryConflict || r.spec.summaryOf || r.status.retired || r.metadata.deletionTimestamp ? []
-      : [{ value: r.spec.subject.uid, order: r.metadata.creationTimestamp }],
+    pendingCuration: note => {
+      const since = pendingCuration(note);
+      return since ? [{ value: note.status.curationRoot ?? note.spec.subject.uid, order: since }] : [];
+    },
     oversizedSubject: r => !r.metadata.deletionTimestamp && !r.status.retired && r.spec.text.length > noteMaxChars(r.spec)
       ? [{ value: r.spec.subject.uid, order: r.metadata.uid }] : [],
     pressureSubject: r => r.spec.summaryOf || r.metadata.deletionTimestamp || r.status.retired ? [] : [{ value: r.spec.subject.uid, order: r.metadata.uid }],

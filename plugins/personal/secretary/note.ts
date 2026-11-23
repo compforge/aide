@@ -1,5 +1,5 @@
 import type { PluginContext } from "@compforge/aide-plugin";
-import { NOTE_TYPE, followupInputId, type NoteResource } from "../note/model.ts";
+import { NOTE_TYPE, followupInputId, noteVersion, pendingCuration, type NoteResource } from "../note/model.ts";
 import { noteRoot } from "../note/reconcile.ts";
 import { isRootTopic } from "../topic/boundary.ts";
 import { topicPolicy, type TopicPolicy } from "../topic/config.ts";
@@ -7,36 +7,44 @@ import { maintenanceAgenda } from "./maintenance.ts";
 import { tryCreateMaintenanceInput } from "./input.ts";
 import { digest } from "../identity.ts";
 
-/** @spec Secretary schedules the evidenced question once per check time. Silence alone only triggers classification.
+/** @spec Batch changed ordinary Notes by their current root. A scheduled question has its own deadline and receipt.
  * @link docs/personal/note.md
  */
 export async function prepareNoteMaintenance(context: PluginContext, note: NoteResource, policy: TopicPolicy, now = Date.now()) {
   if (note.metadata.deletionTimestamp || note.status.retired || note.spec.summaryOf) return;
+  const since = pendingCuration(note);
   const followup = note.spec.followup;
   const requestId = followupInputId(note);
-  const pendingCheck = followup && requestId && requestId !== note.status.followupInputId;
-  const curateAt = note.spec.summaryConflict ? now : note.spec.nature ? Infinity
-    : Date.parse(note.metadata.creationTimestamp) + policy.unclassifiedAfterSeconds * 1000;
-  const checkAt = pendingCheck ? Date.parse(followup.checkAt) : Infinity;
-  const due = Math.min(curateAt, checkAt);
-  if (!Number.isFinite(due)) return;
-  if (due > now) return { requeueAfterMs: Math.min(due - now + 1, 2_147_483_647) };
+  const checkAt = followup && requestId && requestId !== note.status.followupInputId ? Date.parse(followup.checkAt) : Infinity;
+  if (!since && !Number.isFinite(checkAt)) return;
   const topic = await noteRoot(context, note);
   if (!topic || !isRootTopic(topic)) return;
-  const agenda = await maintenanceAgenda(context.resources, [], policy);
-  const preparation = { cooldownSeconds: policy.capacityCooldownSeconds, instructions: "", note };
-  if (pendingCheck && checkAt <= now) {
-    preparation.instructions = `Check Note ${note.metadata.name}. Scheduled question: ${followup.question}. Read the current Note, related Work and new evidence. If the need has changed or Work is following it, finish silently.`;
-    await tryCreateMaintenanceInput(context, topic, followup.checkAt, agenda, "aide:followup", "question_due", preparation, policy, requestId);
-  } else {
-    const page = await context.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, {
-      matchIndex: { name: "curationSubject", value: note.spec.subject.uid }, limit: 8, direction: "asc" });
-    const ids = page.items.map(item => item.metadata.name);
-    if (!ids.length) return;
-    preparation.instructions = `Read these ordinary Notes. Assign missing nature, verify summaryConflict against evidence, correct or narrow existing summaries, then clear resolved flags with summaryConflict=null: ${JSON.stringify(ids)}.`;
-    await tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:curate", note.spec.summaryConflict ? "summary_conflict" : "unclassified", preparation, policy, digest(ids));
+  let next = checkAt;
+  const cooldown = policy.capacityCooldownSeconds;
+  if (followup && requestId && checkAt <= now) {
+    const instructions = `Check Note ${note.metadata.name}. Scheduled question: ${followup.question}. Read the current Note, related Work and new evidence. If the need has changed or Work is following it, finish silently.`;
+    await tryCreateMaintenanceInput(context, topic, followup.checkAt, await maintenanceAgenda(context.resources, [], policy),
+      "aide:followup", "question_due", { note, instructions, cooldownSeconds: cooldown }, policy, requestId);
+    next = now + cooldown * 1000;
   }
-  return { requeueAfterMs: policy.capacityCooldownSeconds * 1000 };
+  if (since) {
+    const { items } = await context.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, {
+      matchIndex: { name: "pendingCuration", value: topic.metadata.uid }, limit: 8, direction: "asc" });
+    // A Work or subtree may have moved since the last Note write. Recheck ownership before sharing its ID.
+    const roots = await Promise.all(items.map(item => noteRoot(context, item)));
+    const batch = items.filter((_, i) => roots[i]?.metadata.uid === topic.metadata.uid);
+    if (batch.length < 8 && !batch.some(item => item.metadata.uid === note.metadata.uid)) batch.push(note);
+    const oldest = Math.min(...batch.map(item => Date.parse(pendingCuration(item)!)));
+    const due = batch.length >= policy.curation.count ? now : oldest + policy.curation.maxWaitSeconds * 1000;
+    if (due <= now) {
+      const notes = batch.map(item => ({ noteId: item.metadata.name, version: noteVersion(item) }));
+      const instructions = `Start with these changed ordinary Notes, then look for related evidence and duplicates: ${notes.map(item => item.noteId).join(", ")}.`;
+      await tryCreateMaintenanceInput(context, topic, new Date(now).toISOString(), await maintenanceAgenda(context.resources, [], policy),
+        "aide:curate", "notes_changed", { notes, instructions, cooldownSeconds: cooldown }, policy, digest(notes));
+      next = Math.min(next, now + cooldown * 1000);
+    } else next = Math.min(next, due);
+  }
+  return { requeueAfterMs: Math.min(Math.max(1, next - now), 2_147_483_647) };
 }
 
 export function registerNoteMaintenance(context: PluginContext) {

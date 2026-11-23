@@ -25,6 +25,6 @@ export function validateReviewRequest(input: { spec: InputSpec; status: InputSta
   reviewEvidence(input.spec);
   const topic = requireTopic(input.status.topic, context);
   if (input.spec.originRef?.uid !== topic.metadata.uid) throw new Error("Internal Input target changed");
-  if (input.spec.origin === "aide:curate" && (!isRootTopic(topic) || (!topicReview(topic.spec.review).enabled && !["understanding", "note_pressure", "unclassified", "summary_conflict"].includes(String(input.spec.observation?.trigger)))))
+  if (input.spec.origin === "aide:curate" && (!isRootTopic(topic) || (!topicReview(topic.spec.review).enabled && !["understanding", "note_pressure", "notes_changed"].includes(String(input.spec.observation?.trigger)))))
     throw new Error("Review requires an eligible root Topic");
 }

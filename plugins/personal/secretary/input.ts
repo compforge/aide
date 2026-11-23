@@ -26,7 +26,7 @@ const maintenanceTask: Record<MaintenanceOrigin, string> = {
  * @link docs/personal/secretary.md#容量与维护请求
  */
 export async function createMaintenanceInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "idle" | "workload" | "understanding" | "note_pressure" | "unclassified" | "summary_conflict" | "question_due" = "idle", preparation?: { note?: NoteResource; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" = "idle", preparation?: { notes?: { noteId: string; version: string }[]; note?: NoteResource; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
   const target = resourceRef(topic);
   const maintenance = preparation?.plan, instructions = preparation?.instructions ?? "";
   const input = await retryOnConflict(async () => {
@@ -45,7 +45,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
     const spec: InputSpec = {
       origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
       text: `${maintenanceTask[origin]} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; ${origin === "aide:followup" ? "Ask only Me if checking available evidence leaves a consequential gap." : "Do not communicate or hand off business Work."} Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
-      observation: { ...(scheduledNote ? { noteId: scheduledNote.metadata.name, noteUid: scheduledNote.metadata.uid } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.note ? { review: {
+      observation: { ...(preparation?.notes ? { notes: preparation.notes } : {}), ...(scheduledNote ? { noteId: scheduledNote.metadata.name, noteUid: scheduledNote.metadata.uid } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
         completed: chiefWorkload(current).completed, weaveRevision: maintenance?.weaveRevision ?? 0,
         pressure: (maintenance?.notePressure ?? []).map(({ uid, pressure }) => ({ uid, version: pressure.version })),
       } } : {}) },
@@ -77,7 +77,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
         maintenanceRequests: { [origin]: { checkedAt: at, inputId, fingerprint,
           attempts: current.status.maintenanceRequests?.[origin]?.fingerprint === fingerprint
             ? Math.min(14, (current.status.maintenanceRequests[origin]?.attempts ?? 0) + 1) : 1 } },
-        ...(origin === "aide:curate" && !preparation?.note ? { reviewCheckedAt: at, idleReviewReset: null,
+        ...(origin === "aide:curate" && !preparation?.notes ? { reviewCheckedAt: at, idleReviewReset: null,
           chiefWorkload: { ...chiefWorkload(current), requestedThrough: chiefWorkload(current).completed, afterRequestSince: null } } : {}),
       } },
     ]); } catch (error) {
