@@ -1,3 +1,4 @@
+import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
 import { collectResources } from "./fixtures/resource-gc.ts";
 import { webAddress } from "../src/channel/address.ts";
 import { ADDRESS_TYPE } from "../plugins/personal/address/model.ts";
@@ -59,14 +60,17 @@ test("Person catalog resolves identities across sessions, preserves profiles acr
   assert.equal(f.aide.topicIds().includes("personal:persons"), false);
 });
 
-test("summarize_person guards shared summary versions while Input retention remains independent", async (t) => {
+test("Chief Note edits guard shared summary versions while Input retention remains independent", async (t) => {
   const f = await setup(t);
   const me = (await f.aide.persons.findIdentity(LOCAL_ME))!;
   const edited = await f.aide.persons.edit(me.metadata.name, me.metadata.uid, me.metadata.resourceVersion,
     me.spec, "不要再把别人的观点当成我的偏好。");
-  const tool = personTools(f.aide.persons).find((tool) => tool.name === "summarize_person")!;
-  await assert.rejects(tool.execute("stale", { id: me.metadata.name, uid: me.metadata.uid, version: contentVersion(me), summary: "stale" }, undefined, undefined, {} as never), /version conflict/);
-  await tool.execute("fresh", { id: me.metadata.name, uid: edited.metadata.uid, version: contentVersion(edited), summary: edited.summaryText + "明确表达：关注机器人的可靠性。" }, undefined, undefined, {} as never);
+  const resources = f.aide.runtime.plugins.resourceClient("personal");
+  const actor = await resources.patchStatus(await f.aide.topics.ensure("curation"), { execution: { id: "curate", startedAt: new Date().toISOString() } });
+  const update = (version: string, text: string) => upsertTopicNote(resources, actor, "curate", {
+    noteId: edited.summaryNote!.id, version, text }, "edit", 4000, "aide:curate");
+  await assert.rejects(update("stale", "stale"), /version conflict/);
+  await update(edited.summaryNote!.version, edited.summaryText + "明确表达：关注机器人的可靠性。");
   const current = (await f.aide.persons.findIdentity(LOCAL_ME))!;
   assert.deepEqual(current.spec.identities, me.spec.identities);
   assert.ok(current.summaryText.startsWith(edited.summaryText));

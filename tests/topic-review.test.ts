@@ -22,7 +22,6 @@ import { inputJob } from "../plugins/personal/observation/job.ts";
 import { idleReviewSchedule } from "../plugins/personal/secretary/review.ts";
 import { topicReview } from "../plugins/personal/topic/review.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/personal/topic/model.ts";
-import { summaryVersion, understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { reconcileAssignments } from "../plugins/personal/topic/assignment.ts";
 import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
 import { reconcileChief, reconcileChiefIntake } from "../plugins/personal/chief/reconcile.ts";
@@ -178,7 +177,7 @@ test(`${attention} business Input bypasses review backoff and needs no synthetic
 
 test("Due child knowledge creates a pre-routed review Input with independent receipt and observation", async t => {
   const f = await fixture(t);
-  await f.input("deferred"); await unabsorbedChild(f); await f.due();
+  await f.input("deferred"); await childWithPendingReview(f); await f.due();
   const activity = f.read().status.lastInputAt;
   await f.run();
   const input = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
@@ -193,16 +192,15 @@ test("Due child knowledge creates a pre-routed review Input with independent rec
   await f.run(); assert.equal(f.calls.length, 1);
 });
 
-for (const changed of ["summary", "structure", "notes"] as const)
+for (const changed of ["structure", "notes"] as const)
 test(`${changed} maintenance is selected from Topic data`, async t => {
   const f = await fixture(t);
   await f.resources.patchStatus(f.read(), { idleSince: new Date().toISOString(), idleReviewCount: 3 });
   if (changed === "structure") await f.resources.patchStatus(f.read(), { weaveRevision: 1 });
   else {
     const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.read()) },
-      status: { summary: changed === "summary" ? "New understanding" : "", receipts: [] } });
+      status: { summary: "", receipts: [] } });
     if (changed === "notes") {
-      await f.resources.patchStatus(f.read(), { absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
       await f.run({ review: backoff }); assert.equal(f.calls.length, 0);
       await f.resources.patchStatus(f.read(), { chiefWorkload: { completed: 1, reviewed: 0, pendingSince: past() } });
       await f.due();
@@ -218,9 +216,9 @@ test("Material pressure creates a bounded organization Input even without pendin
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal); await f.run();
   await f.due(); await f.run({ maxUnfiledInput: 1 });
   assert.equal(f.calls.length, 2);
-  const input = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!;
-  assert.equal((input.spec.observation!.facts as { reason: string }).reason, "organize_material");
-  assert.match(input.spec.text, /direct unfiled Inputs and Work/);
+  const input = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:organize")!;
+  assert.equal((input.spec.observation!.facts as { reason: string }).reason, "organize_capacity");
+  assert.equal(input.spec.observation!.trigger, "capacity");
 });
 
 test("Arrival racing an empty decision invalidates the inspected root and retries without advancing backoff", async t => {
@@ -239,7 +237,7 @@ test("Arrival racing an empty decision invalidates the inspected root and retrie
 });
 
 test("Review creation is fenced; reopening before admission consumes the existing Input once", async t => {
-  const f = await fixture(t); await f.input("deferred"); await unabsorbedChild(f); await f.due();
+  const f = await fixture(t); await f.input("deferred"); await childWithPendingReview(f); await f.due();
   await reconcileSecretary(f.context, f.read());
   const topic = f.read(), due = idleReviewSchedule(topic, backoff).dueAt;
   const agenda = await maintenanceAgenda(f.resources, [topic]);
@@ -260,7 +258,7 @@ test("Review creation is fenced; reopening before admission consumes the existin
 
 for (const mode of ["failure", "missing_receipt", "interrupted"] as const)
 test(`${mode} finalizes review waiting without replaying uncertain inputs`, async t => {
-  const f = await fixture(t); await f.input("deferred"); await unabsorbedChild(f); await f.due();
+  const f = await fixture(t); await f.input("deferred"); await childWithPendingReview(f); await f.due();
   if (mode === "interrupted") {
     await reconcileSecretary(f.context, f.read());
     await f.resources.patchStatus(f.read(), { execution: { id: "interrupted", startedAt: past() } });
@@ -290,7 +288,7 @@ test("A later execution failure preserves already completed Input receipts", asy
 for (const mode of ["failure", "missing_receipt"] as const)
 test(`${mode} review preserves deferred business and retries the same maintenance request`, async t => {
   const f = await fixture(t);
-  await f.input("old-deferred"); await unabsorbedChild(f); await f.due();
+  await f.input("old-deferred"); await childWithPendingReview(f); await f.due();
   f.hooks.skipAssessment = mode === "missing_receipt";
   await f.run({ review: backoff }, mode === "failure");
   const failed = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
@@ -319,7 +317,7 @@ test(`${mode} review preserves deferred business and retries the same maintenanc
   assert.deepEqual(f.aide.topics.inputStore.get("old-deferred")!.status, old.status, "failed business Input is not replayed");
 });
 
-for (const origin of ["aide:curate", "aide:triage", "aide:organize"] as const)
+for (const origin of ["aide:curate", "aide:organize"] as const)
 test(`${origin} deduplicates queued, active and retryable requests until completion`, async t => {
   const f = await fixture(t);
   const topic = f.read(), agenda = await maintenanceAgenda(f.resources, [topic]);
@@ -402,14 +400,14 @@ test("Business Inputs precede capacity maintenance even when idle review is disa
   await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Immediate);
   await f.run({ maxUnfiledInput: 1 });
-  assert.equal(f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!.status.assess?.executionId, undefined,
+  assert.equal(f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:organize")!.status.assess?.executionId, undefined,
     "Secretary can prepare maintenance while business retains priority");
   assert.ok(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt);
   assert.ok(f.aide.topics.inputStore.get("two")!.status.assess?.completedAt);
   assert.ok(f.calls[0]!.prompt.indexOf("two") < f.calls[0]!.prompt.indexOf("one"));
   await f.run();
   assert.equal(f.calls.length, 2);
-  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!;
+  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:organize")!;
   assert.ok(request.status.assess?.completedAt);
 });
 
@@ -437,20 +435,20 @@ test("Idle timer cannot bypass capacity cooldown when an organization pass makes
   await f.run({ maxUnfiledInput: 1 }); assert.equal(f.calls.length, 2);
   await f.due(); await f.run();
   assert.equal(f.calls.length, 2);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 1);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize").length, 1);
 });
 
 test("A persisted pressure request waits for business without duplicate maintenance", async t => {
   const f = await fixture(t);
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
   const agenda = await maintenanceAgenda(f.resources, [f.read()], { maxUnfiledInput: 1 });
-  const request = await createMaintenanceInput(f.context, f.read(), new Date().toISOString(), agenda, "aide:triage");
+  const request = await createMaintenanceInput(f.context, f.read(), new Date().toISOString(), agenda, "aide:organize");
   await f.run({ maxUnfiledInput: 1 });
   assert.equal(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.executionId, undefined);
   assert.ok(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt);
   await f.run();
   assert.ok(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.completedAt);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 1);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize").length, 1);
 });
 
 test("Failed capacity execution waits to retry while new business is processed next", async t => {
@@ -458,7 +456,7 @@ test("Failed capacity execution waits to retry while new business is processed n
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
   await f.run();
   await f.run({ maxUnfiledInput: 1 }, true);
-  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!;
+  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:organize")!;
   assert.equal(request.status.assess?.executionId, undefined);
   assert.equal(request.status.assess?.retryable, true);
   await f.input("later", InputAttention.Normal);
@@ -466,7 +464,7 @@ test("Failed capacity execution waits to retry while new business is processed n
   assert.ok(f.aide.topics.inputStore.get("later")!.status.assess?.completedAt);
   assert.ok(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt);
   assert.equal(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.executionId, request.status.assess?.executionId);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 1);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize").length, 1);
 });
 
 test("Chief activation keeps its character and admission budgets with large pending Inputs", async t => {
@@ -484,10 +482,9 @@ async function expireMaintenance(f: Awaited<ReturnType<typeof fixture>>) {
   f.advance(901_000);
 }
 
-async function unabsorbedChild(f: Awaited<ReturnType<typeof fixture>>) {
+async function childWithPendingReview(f: Awaited<ReturnType<typeof fixture>>) {
   const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "quiet-child",
     spec: { id: "quiet-child", parentRef: resourceRef(f.read()) }, status: { summary: "Stable child knowledge", receipts: [] } });
-  await f.resources.patchStatus(f.read(), { absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
   await f.resources.patchStatus(f.read(), { chiefWorkload: { completed: 1, reviewed: 0, pendingSince: past() } });
   return child;
 }
@@ -496,7 +493,7 @@ async function unabsorbedChild(f: Awaited<ReturnType<typeof fixture>>) {
 test("Acknowledging only the review backs off and unchanged material skips inference across due checks", async t => {
   const f = await fixture(t);
   await f.resources.replace(f.read(), { ...f.read().spec, name: "Stable root" }, f.read().status);
-  await unabsorbedChild(f);
+  await childWithPendingReview(f);
   await f.due(); await f.run();
   assert.equal(f.calls.length, 1);
   assert.equal(f.read().status.idleReviewCount ?? 0, 0);
@@ -508,54 +505,28 @@ test("Acknowledging only the review backs off and unchanged material skips infer
     assert.equal(f.calls.length, 1);
   }
   assert.equal(f.aide.topics.inputStore.list().length, 1);
-  assert.deepEqual(f.read().status.absorbed, {}, "Skipping inference is not a fabricated absorption receipt");
   await f.input("new-deferred"); await f.due(); await f.run();
   assert.equal(f.calls.length, 1, "Young Deferred waits for Secretary promotion, not review inference");
   assert.equal(f.aide.topics.inputStore.get("new-deferred")!.status.assess?.executionId, undefined);
   assert.equal(f.read().status.idleReviewCount, 1);
 });
 
-test("Unchanged summary maintenance skips inference without creating a one millisecond loop", async t => {
+test("A child summary can change without scheduling a parent review", async t => {
   const f = await fixture(t);
   const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "summary-child",
     spec: { id: "summary-child", parentRef: resourceRef(f.read()) }, status: { summary: "Stable knowledge", receipts: [] } });
   await f.run();
-  assert.equal(f.calls.length, 1);
-
-  assert.equal((await f.run())!.requeueAfterMs, 60000);
-  assert.equal(f.calls.length, 1);
   await patchSummary(f.resources, child, { summary: "New durable evidence" });
-  await expireMaintenance(f);
+  await f.due();
   await f.run();
-  assert.equal(f.calls.length, 2, "Changed child knowledge bypasses idle review backoff");
-});
-
-test("Completed absorption is progress even without a summary edit", async t => {
-  const f = await fixture(t), child = await unabsorbedChild(f);
-  await f.resources.patchStatus(f.read(), { idleReviewCount: 3 });
-  f.hooks.beforeAssess = async () => {
-    await f.resources.patchStatus(f.read(), { absorbed: { [child.metadata.uid]: understandingVersion(child) } });
-  };
-  await f.due(); await f.run();
-  assert.equal(f.read().status.idleReviewCount, 3);
-  assert.equal(f.read().status.chiefWorkload?.reviewed, 1);
-});
-
-test("Material arriving after review completion remains eligible for a new Input", async t => {
-  const f = await fixture(t), child = await unabsorbedChild(f);
-  f.hooks.afterAssess = async () => { await patchSummary(f.resources, child, { summary: "Changed while Chief was running" }); };
-  await f.due(); await f.run();
-  assert.equal(f.read().status.idleReviewCount ?? 0, 0, "completion reflects only material seen before its transaction");
-  f.hooks.afterAssess = undefined;
-  await expireMaintenance(f);
-  await f.run();
-  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.aide.topics.inputStore.list().length, 0);
 });
 
 for (const mode of ["failure", "missing_receipt"] as const)
 test(`A ${mode} does not certify maintenance material as reviewed`, async t => {
   const f = await fixture(t);
-  await unabsorbedChild(f);
+  await childWithPendingReview(f);
   if (mode === "missing_receipt") f.hooks.skipAssessment = true;
   await f.due(); await f.run({}, mode === "failure");
   assert.equal(f.read().status.chiefWorkload?.reviewed, 0);
@@ -563,7 +534,7 @@ test(`A ${mode} does not certify maintenance material as reviewed`, async t => {
 
 test("Restart retains reviewed material identity while new Normal input still activates Chief", async t => {
   const f = await fixture(t);
-  await unabsorbedChild(f);
+  await childWithPendingReview(f);
   await f.due(); await f.run();
   const version = f.read().status.chiefWorkload?.reviewed;
   await f.due(); await f.aide.close();
@@ -604,7 +575,7 @@ test(`ordinary Note creation and edits do not request review (idle review enable
 
 test("Internal review completion preserves accumulated backoff", async t => {
   const f = await fixture(t);
-  await unabsorbedChild(f);
+  await childWithPendingReview(f);
   await f.resources.patchStatus(f.read(), { idleReviewCount: 2 });
   await f.due(); await f.run();
   assert.equal(f.read().status.idleReviewCount, 2);
@@ -666,8 +637,8 @@ test("business inputs run ahead of Note pressure and resolved pressure requests 
 });
 
 /** @case Updating a Note during scheduled review cannot schedule another immediate review. */
-test("periodic review can revise child Notes without feedback while summary changes still wake Chief", async t => {
-  const f = await fixture(t), child = await unabsorbedChild(f);
+test("curation can revise child Notes and summaries without scheduling another review", async t => {
+  const f = await fixture(t), child = await childWithPendingReview(f);
   const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
   f.hooks.beforeAssess = async () => {
     await upsertTopicNote(f.resources, f.read(), f.read().status.execution!.id,
@@ -678,15 +649,15 @@ test("periodic review can revise child Notes without feedback while summary chan
   f.hooks.beforeAssess = undefined;
 
   await f.run();
-  assert.equal(f.calls.length, 1, "ordinary Note changes do not create a feedback loop even after absorption cooldown");
+  assert.equal(f.calls.length, 1, "ordinary Note changes do not create a feedback loop after cooldown");
   await patchSummary(f.resources, child, { summary: "New lasting understanding" });
   await expireMaintenance(f);
   await f.run();
-  assert.equal(f.calls.length, 2, "changed child summary still initiates understanding maintenance");
+  assert.equal(f.calls.length, 1);
 });
 
 test("Business arriving after a maintenance receipt resets review backoff", async t => {
-  const f = await fixture(t); await unabsorbedChild(f);
+  const f = await fixture(t); await childWithPendingReview(f);
   await f.resources.patchStatus(f.read(), { idleReviewCount: 3 });
   f.hooks.afterAssess = async () => {
     assert.equal(f.read().status.idleReviewCount, 3);

@@ -14,7 +14,6 @@ export interface TopicStatus extends ResourceContext {
   notePressure?: import("../note/pressure.ts").NotePressure;
   reclamation?: { version: string; reason: string; writer: NonNullable<import("../note/model.ts").NoteStatus["writer"]> };
   assignmentRefresh?: { version: string; cursor: string; complete: boolean };
-  summaryDependencies?: Record<string, string>;
   conditions?: import("../conditions.ts").Condition[];
   organization?: import("./ref.ts").Organization;
   lastInputAt?: string;
@@ -22,12 +21,10 @@ export interface TopicStatus extends ResourceContext {
   weaveRevision?: number;
   notifiedWeaveRevision?: number;
   lastError?: string | null;
-  absorbed?: Record<string, string>;
-  absorbedSummaries?: Record<string, string>;
   agent?: import("@compforge/aide-plugin").AgentStatus;
   chiefWorkload?: import("./workload.ts").ChiefWorkload;
   /** Secretary retains request identity and no-progress backoff independently of Input retention. */
-  maintenanceRequests?: Partial<Record<"aide:curate" | "aide:followup" | "aide:triage" | "aide:organize", { checkedAt: string; inputId: string; fingerprint: string; attempts: number }>>;
+  maintenanceRequests?: Partial<Record<"aide:curate" | "aide:followup" | "aide:organize", { checkedAt: string; inputId: string; fingerprint: string; attempts: number }>>;
   yieldToInput?: boolean;
   reviewCheckedAt?: string | null;
   idleReviewCount?: number;
@@ -37,7 +34,7 @@ export interface TopicStatus extends ResourceContext {
   receipts: Array<{ key: string; responseId: string }>;
 }
 export type TopicResource = Resource<TopicSpec, TopicStatus>;
-export type TopicDeletionBlock = "busy" | "work" | "default" | "gate" | "children" | "unabsorbed";
+export type TopicDeletionBlock = "busy" | "work" | "default" | "gate" | "children" | "knowledge";
 export type TopicDeletion = { deleted: true } | { deleted: false; reason: "missing" | "changed" | TopicDeletionBlock };
 /** The transactional validator owns deletion rules; callers can present expected refusals without duplicating them. */
 export class TopicDeletionBlocked extends Error {

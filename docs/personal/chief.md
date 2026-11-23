@@ -22,7 +22,7 @@ Input.assess 保存全局唯一研判和 Chief 接纳 executionId。Chief Reconc
 
 明确拒绝 steer / followUp 时恢复待通知状态。status.agent 保存 harness 和原生 sessionId，恢复由 SDK 承担。旧 Chief 自然结束后再释放成为子节点的原生句柄，不修改历史。
 
-root 按 Immediate → 已准备的 Deferred Batch → Normal → aide:triage → aide:organize → aide:followup → aide:curate 选择。Secretary 可在业务执行期间准备维护 Input；维护请求保持独立。Deferred 组批策略见 [Secretary](secretary.md#deferred-归组)，成员及准备契约见 [Batch](batch.md)。
+root 按 Immediate → 已准备的 Deferred Batch → Normal → aide:organize → aide:followup → aide:curate 选择。Secretary 可在业务执行期间准备维护 Input；维护请求保持独立。Deferred 组批策略见 [Secretary](secretary.md#deferred-归组)，成员及准备契约见 [Batch](batch.md)。
 
 维护只接纳本轮内部 Input，不消费业务回执。Immediate 可在维护期间 steer 同一 Chief，下一模型轮次切换工具；其它准备好的待办通过 followUp 排队，在实际取出时切换任务范围。工具与共享 session 的取舍见 [按 Input 选择工具](#按-input-选择工具)。运行中的 Batch 使用一个 deliveryId、一个原生消息和自身的接纳回执；成员通过 batchId 查询执行事实。
 
@@ -59,8 +59,7 @@ Chief Agent 负责判断，Personal Route 负责话题归位。Chief 的接收 C
 | channel / source / chief | say、cite_output、Work 创建和请求、文件与 CLI 操作；assess_input 可原子交接业务 Input |
 | aide:followup | 跟进需要回应的事项。当前核实 episodic Note 上到期的问题。有证据就记录结论，缺少决定性信息就通过 ask_me 私下询问 Me |
 | aide:curate | Note 回顾与归位、Topic/Person/Address summary、Topic 回收许可、Hermes memory/skill 写入 |
-| aide:triage | 创建 child、迁移 Input/Work/Note；只完成本轮维护 Input |
-| aide:organize | 创建或移动 Topic、维护 Topic summary；只完成本轮维护 Input |
+| aide:organize | 创建或移动 Topic，归位 Input、Work 和 Note。跨 Topic 的 Note 先写目标再削减或退役来源。职责范围变化时按需修订 Topic summary |
 
 同一批次可以包含工具能力相同的业务 Input；维护 Input 独立接纳，不与业务取工具并集。业务 Input 优先于内部维护，Immediate 可通过 steer 在下一次安全模型请求边界接入；已经开始的模型调用或工具不会被瞬间撤销。运行中仅 Immediate 使用 steer，其他可投递 Input 始终使用 followUp，业务和内部维护遵循同一规则；工具范围在 Pi 实际取出 followUp 开始处理时切换，排队本身不会打断当前任务。FollowUp 每次取一条，不同 origin 不合并工具列表。未确认完成的 Input 在执行结束后释放占用，记录可重试错误，等待角色 trigger 间隔后继续；已有终态结果保持不变。
 
@@ -94,8 +93,8 @@ Chief 注册以下业务工具，并按上述 Input 范围向每次模型请求�
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
 - 对固定成员组成的输入只调用一次 assess_input，成员研判回执由 Input Reconcile 投影；可按原成员身份交办 Work，不能把整批完成等同于 Work 完成。
 - assess_input 原子保存独立 Input 的简短研判回执，并建立 Work handle；不改写 Topic.summary / recent，不值得通知的观察可以静默完成。
-- list_notes 查询 recent 之外仍保留的具体事项；move_note 在责任树内调整事项归属，保留内容与年龄；超出数量或篇幅软预算时使用 upsert_note 整合信息，确认目标保存后用 prune_note 削减来源，或用 retire_note 退役无独立价值的整篇 Note。
-- summarize_topic 只修订长期有效、低频变化的认识；只确认子版本时可省略 summary。upsert_note 独立维护近期事项，以同一 noteId 连接多次输入的进展，不要求改写 summary。
+- list_notes 查询 recent 之外仍保留的具体事项；move_note 在责任树内调整事项归属，保留内容与年龄；超出数量或篇幅软预算时使用 upsert_note 整合信息，用 split_note 原子拆出新篇，合并到已有目标时确认保存后用 prune_note 削减来源，或用 retire_note 退役无独立价值的整篇 Note。
+- Chief 通过 upsert_note 记录近期事项。维护 Input 可以用同一工具修订摘要，只有认识或职责范围变化时才需要写入。
 
 提示词表达判断策略，工具边界保证持久化与会话范围。say 提问只产生 Output；用户是否回答不阻塞其它输入，已有 Work 的 waiting 状态表达具体工作的等待。
 
@@ -135,25 +134,25 @@ assistant / tool：结合新进展回答或交接，避免重复创建工作
 
 root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子节点没有独立 Chief，局部 summary 仍由当前 root Chief 维护。assess 保存单次处理事实，summary 仅在长期认识变化时修订；近期事项按同一事项维护 Note。静默处理一条 Input 不要求修订认识。
 
-原生会话通过 Harness 支持的方式初始化、持久化与恢复。新父 Topic 的 Chief 读取子主题认识，不拼接、改写子 Chief 的原生会话文件，不重放已完成 Input。模型请求前的业务背景使用 [Background](../harness/pi.md#当前业务背景) 通道；完整的吸收和回收约束见 [Topic](topic.md#主题认识与汇总)。
+原生会话通过 Harness 支持的方式初始化、持久化与恢复。新父 Topic 的 Chief 读取子主题认识，不拼接、改写子 Chief 的原生会话文件，不重放已完成 Input。模型请求前的业务背景使用 [Background](../harness/pi.md#当前业务背景) 通道；完整的知识维护和回收约束见 [Topic](topic.md#主题认识与汇总)。
 
 Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-hermes-memory](https://github.com/chandra447/pi-hermes-memory)，由 Pi 的扩展加载器显式加载。
 事项认识由 Note 承载，主题、人物、场合和工作的长期认识由各自 summary 承载，Topic tree 保存主题组织关系；Hermes 提供通用记忆与检索。职责与沉淀主线见 [Personal](README.md#从-input-到认识与成果)。
 
-Chief 在同一轮 `aide:curate` 中读取待整理 Note 的完整内容，通过 subject、people、addresses 判断哪些对象出现值得沉淀的长期认识，按需读取现有 summary 并调用 summarize_topic、summarize_person、summarize_address。Person 与 Address 的 summary 汇集多个领域的认识，更新保留其他领域的有效内容和用户修正，版本冲突时重新读取并合并。确认目标保存成功后，再判断来源 Note 是否需要削减或退役。整理沿用 Topic 的预算压力、认识吸收与定时 review；每轮处理当前议程内的材料，有长期认识变化时才更新对应 summary。各对象的内容职责见 [作为 summary 的 Note](note.md#作为-summary-的-note)。
+Chief 在同一轮 `aide:curate` 中读取待整理 Note 的完整内容，通过 subject、people、addresses 判断哪些对象出现值得沉淀的长期认识，按需读取现有 summary 并调用 upsert_note。Person 与 Address 的 summary 汇集多个领域的认识，更新保留其他领域的有效内容和用户修正，版本冲突时重新读取并合并。确认目标保存成功后，再判断来源 Note 是否需要削减或退役。整理沿用 Topic 的预算压力与定时 review；每轮处理当前议程内的材料，有长期认识变化时才更新对应 summary。各对象的内容职责见 [作为 summary 的 Note](note.md#作为-summary-的-note)。
 
 #### 人物认知
 
 Chief 每轮读取共享目录中的 Me，将姓名、用户明确修正和精简后的当前认识放入上下文。其它人物通过 list_persons / read_person 按需查询；工具读取完整资料和最新版本。Topic 背景中的[近期相关人物](chief.md#近期相关人物)只提供引用与名称，供 Chief 发现需要进一步读取的人物，不自动携带所有人的认识。
 
-summarize_person 接受人物 ID、uid、read_person 返回的 summaryVersion 以及修订后的长期 summary。近期计划、交往和参与事项通过统一 upsert_note 的 people 关联 Person，保留实际作者和确认状态，不从他人的表达推断本人意图。详见[有界认识与近期依据](README.md#有界认识与近期依据)。
+read_person 提供人物摘要 Note 的 id 和 version，供 curate 按需修订。近期计划、交往和参与事项通过统一 upsert_note 的 people 关联 Person，保留实际作者和确认状态，不从他人的表达推断本人意图。详见[有界认识与近期依据](README.md#有界认识与近期依据)。
 工具只更新人物认识，无法改写外部身份或 Me 标记。用户修正直接保存到同一个 summary，Chief 继续维护时应保留其含义。发生版本冲突时重新读取并合并；Web 编辑与其它会话更新在下一轮可见。用户的明确修正优先于历史推断和 Hermes 记忆。
 
 sent 提供本人表达的线索，仍需辨别引用与代发；received 和 observed 不代表本人认可或授权。混合讨论逐条核对作者。人物认知用于理解和服务，不产生新的执行委托，也不向其它聊天参与者披露私密画像。
 
 人物资料的唯一存储来源是 Person CRD，Web Persons 提供编辑入口。人物维护使用专用工具，普通文件工具和 Hermes 不承担这份资料的维护。
 
-连续上下文由 Pi SDK 管理历史、压缩与恢复。新输入只提供本次预览，普通输入 followup，immediate 使用 steer。assess_input 只在 Input 保存简短研判回执；summarize_topic 独立维护话题认识。常规静默观察不复制进 summary、recent 或长期记忆，持续事项通过同一 Note 维护，恶化或恢复时更新；主题、人物与工作的长期认识通过各自 summary 维护，Task / Routine 保存工作状态。原生会话或调用结束不能代替业务确认。
+连续上下文由 Pi SDK 管理历史、压缩与恢复。新输入只提供本次预览，普通输入 followup，immediate 使用 steer。assess_input 只在 Input 保存简短研判回执；upsert_note 在维护 Input 中按需修订话题认识。常规静默观察不复制进 summary、recent 或长期记忆，持续事项通过同一 Note 维护，恶化或恢复时更新；主题、人物与工作的长期认识通过各自 summary 维护，Task / Routine 保存工作状态。原生会话或调用结束不能代替业务确认。
 
 Hermes 提供 `memory_add`、`memory_replace`、`memory_remove`、`memory_search`、`session_search` 等工具。默认 policy-only 模式注入使用策略，按需检索记忆；固定用户要求、后台学习、纠错捕获、压缩前和退出时整理均沿用扩展自己的实现与配置。Topic summary 承载主题的长期认识，并作为判断新输入的背景；Hermes 的记忆与检索由扩展维护。Personal 通过 Harness 调用 Agent，由 Agent 使用相应工具维护认识。
 
@@ -208,9 +207,9 @@ Route、Chief、Weave 的列表在确定范围、排序和 offset 后，逐条�
 
 ### 研判与上下文
 
-assess_input 保存单次研判回执并原子交接 Work。summarize_topic 使用内容 version 修订长期认识，absorbed 使用直接子 Topic 的 understandingVersion；提交时校验 summary 旧值、当前执行与真实归属，并在事务内查询子 Note 版本。upsert_note 默认当前 Topic，可指定子树中的 subject，通过 people 关联人物；不同 Note 不互相锁住。完整规则见 [Note](note.md)。
+assess_input 保存单次研判回执并原子交接 Work。维护 Input 用 upsert_note 的 Note 版本修订长期认识，提交时校验版本、当前执行与真实归属。upsert_note 默认当前 Topic，可指定子树中的 subject，通过 people 关联人物；不同 Note 不互相锁住。完整规则见 [Note](note.md)。
 
-list_topics 提供摘要预览和普通 Note 名称目录，`notes.total` 表示活跃普通 Note 总数。read_topic 返回对象认识与目录，`nextOffset` 非空时继续读取；Note 正文通过 read_note 按 ID 获取，目录以外的发现使用 list_notes。确认 absorbed 版本前读取相关的完整证据。
+list_topics 提供摘要预览和普通 Note 名称目录，`notes.total` 表示活跃普通 Note 总数。read_topic 返回对象认识与目录，`nextOffset` 非空时继续读取；Note 正文通过 read_note 按 ID 获取，目录以外的发现使用 list_notes。变更摘要前读取相关的完整证据。
 
 maxChars 默认 4000，是普通 Note 与 summary Note 共用的篇幅软预算；单篇存储上限仍为 16000。maxNotes 默认 10，超过直属活跃普通 Note 数量或单篇篇幅预算时，按 [Note 整理](note.md#数量与篇幅驱动的整理) 安排 Chief。contextChars 默认 48000。近期依据仍受统一数量和字符预算约束。详情见[配置](../configuration.md#topic-消费策略)。
 
@@ -218,7 +217,7 @@ maxChars 默认 4000，是普通 Note 与 summary Note 共用的篇幅软预算�
 
 `tests/pi-agent.test.ts` 使用真实 Pi SDK、Hermes 扩展、临时 Markdown/SQLite 存储和模拟模型，验证 Chief 工具与策略注入、跨全新原生会话写入和召回，以及通用 Pi 不自动获得记忆工具。Adapter 的扩展启动/退出与失败处理也有契约验证。测试关闭扩展的自动模型整理，避免影响脚本化模型请求。
 
-同一测试还验证 Chief 通过真实 Pi 工具调用 read_person / summarize_person，以及续轮、跨会话和用户纠正后的刷新。人物目录与 Web API 的版本、身份和回收边界见 tests/person-catalog.test.ts。
+同一测试还验证 Chief 通过真实 Pi 工具调用 read_person，以及续轮、跨会话和用户纠正后的刷新。人物目录与 Web API 的版本、身份和回收边界见 tests/person-catalog.test.ts。
 `tests/person.test.ts` 与消息 Source 测试验证身份作用域、机器人与本人区分、关系持久化和混合上下文逐条归因。
 
 现有 Source → Chief → 用户决定 → Work 验证继续覆盖 Personal 装配。以上不能证明真实模型会正确选择值得保存的事实，或后台提炼、压缩后召回的实际质量；这些效果需要真实使用评估。真实 Channel 验收见 [E2E](../e2e.md)。

@@ -28,7 +28,7 @@ function validate(note: NoteResource, context: ResourceValidationContext) {
   const subject = context.get(note.spec.subject, note.spec.subject.uid);
   if (!subject || subject.metadata.deletionTimestamp || subject.metadata.name !== note.spec.subject.name || subject.metadata.namespace !== note.spec.subject.namespace) throw new Error("Note subject no longer exists");
   if (subject.kind === "Topic" && isGateTopic(subject as import("../topic/model.ts").TopicResource)) throw new Error("Gate keeps dialogue continuity, not domain Notes");
-  if (note.spec.summaryOf) {
+  if (note.spec.summaryOf && !note.status.retired) {
     if (!equalResourceValue(note.spec.subject, note.spec.summaryOf)) throw new Error("Summary Note subject must match summaryOf");
     const summaries = context.page<NoteSpec, NoteStatus>(NOTE_TYPE, { namespace: "v1", limit: 2,
       matchIndex: { name: "summaryOf", value: note.spec.summaryOf.uid } }).items;
@@ -36,9 +36,31 @@ function validate(note: NoteResource, context: ResourceValidationContext) {
   }
   if (writer) requireContentWriter(subject, writer, context);
 }
+/** Scope-relative visibility must still describe the same audience after extraction. */
+function validateSplitPart(part: NoteResource, context: ResourceValidationContext) {
+  const from = part.status.splitFrom;
+  if (!from) return;
+  const source = context.get<NoteSpec, NoteStatus>(NOTE_TYPE, from.uid);
+  if (!source || source.metadata.deletionTimestamp || source.status.retired || noteVersion(source) !== from.version)
+    throw new Error("Split source changed; read the Note again");
+  const writer = part.status.writer;
+  if (!writer || part.spec.summaryOf || source.spec.sensitivity !== part.spec.sensitivity || source.spec.visibility !== part.spec.visibility
+    || !equalResourceValue(source.spec.people, part.spec.people) || !equalResourceValue(source.spec.addresses, part.spec.addresses))
+    throw new Error("A split part requires a writer and the source Note's disclosure and associations");
+  if (source.spec.subject.uid === part.spec.subject.uid) return;
+  const visibility = source.spec.visibility;
+  if (visibility !== "topic" && visibility !== "root") return;
+  const topicOf = (subject: NoteSpec["subject"]) => requireTopic(subject.kind === "Topic" ? subject
+    : context.get<unknown, { topic?: import("@compforge/aide-plugin").ResourceRef }>(subject, subject.uid)?.status.topic, context);
+  const topics = [topicOf(source.spec.subject), topicOf(part.spec.subject)];
+  if (visibility === "topic" && topics[0]!.metadata.uid !== topics[1]!.metadata.uid)
+    throw new Error("Split would change the Note's topic disclosure audience");
+  requireOrganization({ actorUid: writer.resource.uid, executionId: writer.executionId, at: part.status.updatedAt, reason: "Split Note" }, context, topics);
+}
 export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
-  type: NOTE_TYPE, indexVersion: 6, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
-  validator: { create: (note, context) => { if (note.status.curated || note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts"); validateAddresses(note, context); validate(note, context); }, update: (before, after, context) => {
+  type: NOTE_TYPE, indexVersion: 7, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
+  validator: { create: (note, context) => { if (note.status.curated || note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts"); validateAddresses(note, context); validate(note, context); validateSplitPart(note, context); }, update: (before, after, context) => {
+    if (!equalResourceValue(before.status.splitFrom, after.status.splitFrom)) throw new Error("Split provenance is immutable");
     if (!equalResourceValue(before.status.curated, after.status.curated)) {
       const receipt = after.status.curated;
       const input = receipt && context.get<InputSpec, InputStatus>(INPUT_TYPE, receipt.inputUid);
@@ -76,7 +98,11 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
     if (!equalResourceValue(before.status.retired, after.status.retired)) {
       if (!after.status.retired || !equalResourceValue(before.spec, after.spec) || before.status.updatedAt !== after.status.updatedAt)
         throw new Error("Retirement must preserve Note content and age");
-      if (after.spec.summaryOf && context.get(after.spec.summaryOf, after.spec.summaryOf.uid)) throw new Error("Summary subject still exists");
+      if (after.spec.summaryOf) {
+        const owner = context.get<unknown, import("../context.ts").ResourceContext>(after.spec.summaryOf, after.spec.summaryOf.uid);
+        if (owner && (owner.status.summaryRevision || owner.status.lastRetiredSummaryUid !== before.metadata.uid))
+          throw new Error("Retire the Summary and clear its owner revision together");
+      }
       const subject = context.get(after.spec.subject, after.spec.subject.uid);
       if (!subject) throw new Error("Note subject no longer exists");
       requireContentWriter(subject, after.status.retired.writer, context);
@@ -127,11 +153,11 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
     }
     validate(after, context);
   }, delete: (note, context) => {
-    if (note.spec.summaryOf && context.get(note.spec.summaryOf, note.spec.summaryOf.uid))
+    if (note.spec.summaryOf && !note.status.retired && context.get(note.spec.summaryOf, note.spec.summaryOf.uid))
       throw new Error("Summary subject still exists");
   } },
   indexes: {
-    summaryOf: r => r.spec.summaryOf ? [r.spec.summaryOf.uid] : [],
+    summaryOf: r => r.spec.summaryOf && !r.status.retired ? [r.spec.summaryOf.uid] : [],
     knownSummary: r => r.spec.summaryOf && !r.metadata.deletionTimestamp && !r.status.retired && r.spec.text.trim() ? [r.spec.summaryOf.uid] : [],
     uid: r => [r.metadata.uid], subject: r => [r.spec.subject.uid], addresses: r => [...r.spec.addresses].map(a => a.uid), people: r => [...new Set([...r.spec.people].map(p => p.uid))] },
   orderedIndexes: {
@@ -146,6 +172,6 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
     recentAddresses: r => r.metadata.deletionTimestamp || r.status.retired ? [] : [...r.spec.addresses].filter(a => a.uid !== r.spec.summaryOf?.uid).map(a => ({ value: a.uid, order: r.status.updatedAt })),
     recentPeople: r => r.spec.summaryOf || r.metadata.deletionTimestamp || r.status.retired ? [] : [...new Set([...r.spec.people].map(p => p.uid))].map(value => ({ value, order: r.status.updatedAt })),
   },
-  retention: { releasedAt: r => r.status.updatedAt, canEvict: (r, context) => !r.spec.summaryOf || (!context.get(r.spec.summaryOf, r.spec.summaryOf.uid) && ![...r.spec.addresses].some(ref => context.get(ref, ref.uid))), references: () => [] },
+  retention: { releasedAt: r => r.status.updatedAt, canEvict: (r, context) => !r.spec.summaryOf || !!r.status.retired || (!context.get(r.spec.summaryOf, r.spec.summaryOf.uid) && ![...r.spec.addresses].some(ref => context.get(ref, ref.uid))), references: () => [] },
   printer: { describe: r => r.spec.text, summarize: r => r.spec.text.slice(0, 200) },
 };

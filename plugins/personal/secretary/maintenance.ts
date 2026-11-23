@@ -1,6 +1,5 @@
 import { tryCreateMaintenanceInput } from "./input.ts";
 import { digest } from "../identity.ts";
-import { resourceRef } from "../input/state.ts";
 import type { ResourceReader, ResourceType } from "@compforge/aide-plugin";
 import { INPUT_TYPE } from "../input/model.ts";
 import { WORK_TYPES } from "../work/resources.ts";
@@ -27,7 +26,7 @@ async function thresholdCount(resources: ResourceReader, type: ResourceType, nam
  */
 export async function maintenanceAgenda(resources: ResourceReader, topics: readonly TopicResource[], config?: unknown) {
   const policy = topicPolicy(config);
-  const material = [], children = [];
+  const candidates = [];
   for (const topic of topics) {
     if (topic.metadata.deletionTimestamp) continue;
     const uid = topic.metadata.uid, namespace = topic.metadata.namespace;
@@ -43,30 +42,24 @@ export async function maintenanceAgenda(resources: ResourceReader, topics: reado
     const facts = { uid, ...(topic.spec.name ? { name: topic.spec.name.slice(0, 200) } : {}),
       inputs: inputs.count, work, children: child.count,
       truncated: inputs.truncated || workTruncated || child.truncated, inputIds: inputs.ids, workIds: workIds.slice(0, 8), childUids: child.ids };
-    if (inputs.count > policy.maxUnfiledInput || work > policy.maxWork) material.push(facts);
-    else if (child.count > policy.maxChildren && children.length < 8) children.push(facts);
-    if (material.length === 8) break;
+    if (inputs.count > policy.maxUnfiledInput || work > policy.maxWork || child.count > policy.maxChildren) candidates.push(facts);
+    if (candidates.length === 8) break;
   }
-  const reason = material.length ? "organize_material" : children.length ? "organize_children" : "review";
-  const candidates = material.length ? material : children;
+  const reason = candidates.length ? "organize_capacity" : "review";
   return { reason, thresholds: { maxUnfiledInput: policy.maxUnfiledInput, maxWork: policy.maxWork, maxChildren: policy.maxChildren },
     affectedTopics: candidates.length, topics: candidates, countsAreLowerBounds: true };
 }
 
 /** Every Topic checks only direct capacity; the assigned root performs the requested work. */
-export async function ensureCapacityInputs(context: import("@compforge/aide-plugin").PluginContext, topic: TopicResource) {
-  const policy = topicPolicy(context.instance.config.topic);
+export async function ensureOrganizationInput(context: import("@compforge/aide-plugin").PluginContext, topic: TopicResource, policy = topicPolicy(context.instance.config.topic)) {
   const agenda = await maintenanceAgenda(context.resources, [topic], policy);
   const facts = agenda.topics[0];
   if (!facts) return;
-  for (const origin of ["aide:triage", "aide:organize"] as const) {
-    const needed = origin === "aide:triage" ? facts.inputs > policy.maxUnfiledInput || facts.work > policy.maxWork : facts.children > policy.maxChildren;
-    if (!needed) continue;
-    const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(topic));
-    if (!current || current.metadata.deletionTimestamp) return;
-    const fingerprint = digest(origin === "aide:triage"
-      ? [facts.inputs, facts.work, facts.inputIds, facts.workIds, policy.maxUnfiledInput, policy.maxWork]
-      : [facts.children, facts.childUids, policy.maxChildren]);
-    await tryCreateMaintenanceInput(context, current, new Date().toISOString(), agenda, origin, "idle", undefined, policy, fingerprint);
-  }
+  // One request covers all exceeded limits. Only changes to an active pressure reset its backoff.
+  const fingerprint = digest([
+    facts.inputs > policy.maxUnfiledInput && [facts.inputs, facts.inputIds, policy.maxUnfiledInput],
+    facts.work > policy.maxWork && [facts.work, facts.workIds, policy.maxWork],
+    facts.children > policy.maxChildren && [facts.children, facts.childUids, policy.maxChildren],
+  ]);
+  await tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:organize", "capacity", undefined, policy, fingerprint);
 }

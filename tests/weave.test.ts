@@ -1,3 +1,5 @@
+import { topicTools } from "../plugins/personal/chief/agent/topic-tools.ts";
+import { reclamationVersion } from "../plugins/personal/topic/retention.ts";
 import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
 import { isRootTopic } from "../plugins/personal/topic/boundary.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
@@ -29,7 +31,7 @@ import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.
 import { ensureSourceTopic, topicPath, understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 import { collectTopic } from "../plugins/personal/chief/session.ts";
-import { summarizeTopic, upsertTopicNote } from "../plugins/personal/topic/state.ts";
+import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
 import { routeByRules } from "../plugins/personal/route/rules.ts";
 import { topicCandidates } from "../plugins/personal/background.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
@@ -88,7 +90,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
     await reconcileChief(f.context, rootExecution, f.refresh(b));
     await assessInput(f.resources, f.refresh(a), "old-chief", { inputId: "first", summary: "Old Chief finished naturally" });
     const current = f.refresh(a);
-    await summarizeTopic(f.resources, current, "old-chief", { version: contentVersion(current), summary: "Late finding" }, 4000);
+    await upsertTopicNote(f.resources, current, "old-chief", { summaryOf: resourceRef(current), version: contentVersion(current), text: "Late finding" }, "summary", 4000, "aide:curate");
     const afterSummary = f.refresh(a);
     await upsertTopicNote(f.resources, afterSummary, "old-chief", { version: afterSummary.metadata.resourceVersion, text: "Late progress from the draining Chief" }, "late-note");
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
@@ -123,7 +125,7 @@ test("Weave rejects stale understanding and cycles but does not wait for uncerta
   assert.equal(f.refresh(a).status.lastError, "Inspect prior effects");
 });
 
-test("Explicit Topic deletion checks child absorption, releases source key, and never revives an old routed Input", async t => {
+test("Explicit Topic deletion checks explicit child release, releases source key, and never revives an old routed Input", async t => {
   const f = fixture(t); await f.initialize();
   const fact = await f.input("old", "a"), a = f.aide.topics.byKey("a")!, b = await ensureSourceTopic(f.resources, "b", "B");
   await f.resources.patchStatus(fact, { assess: { ...fact.status.assess, completedAt: new Date().toISOString() } });
@@ -131,11 +133,12 @@ test("Explicit Topic deletion checks child absorption, releases source key, and 
   const parent = f.aide.topics.list().find(t => isRootTopic({ spec: t }))!;
   await patchSummary(f.resources, f.refresh(a), { summary: "Changed child finding", lastInputAt: "2000-01-01T00:00:00.000Z" });
   await collectTopic(f.context, f.refresh(a));
-  assert.ok(f.aide.topics.resource(a.spec.id), "unabsorbed child survives");
+  assert.ok(f.aide.topics.resource(a.spec.id), "knowledge survives");
   await f.resources.patchStatus(f.aide.topics.resource(parent.id)!, { execution: { id: "synthesis", startedAt: new Date().toISOString() } });
   const p = f.aide.topics.resource(parent.id)!;
-  await summarizeTopic(f.resources, p, "synthesis", { version: contentVersion(p), summary: "Changed child finding retained",
-    absorbed: [{ uid: a.metadata.uid, version: understandingVersion(f.refresh(a)) }] }, 4000);
+  await assert.rejects(f.resources.delete(TOPIC_TYPE, a.metadata.name), /Release this Topic/);
+  const release = topicTools(f.aide.personal.store, () => p).find(tool => tool.name === "release_topic")!;
+  await release.execute("release", { uid: a.metadata.uid, version: reclamationVersion(f.refresh(a), f.aide.topics.resources), reason: "Knowledge saved elsewhere" }, undefined, undefined, {} as never);
   await collectTopic(f.context, f.refresh(a));
   assert.ok(f.aide.topics.resource(a.spec.id), "silence retains the Topic until capacity or explicit deletion");
   await f.resources.delete(TOPIC_TYPE, a.metadata.name, "v1", { uid: a.metadata.uid, resourceVersion: f.refresh(a).metadata.resourceVersion });
@@ -223,37 +226,7 @@ test("Weave advances only the bounded snapshot and retries interrupted analysis"
   assert.equal(Object.keys(f.reviewed() ?? {}).length, 24, "a changed Topic does not reset other progress");
 });
 
-test("A quiet changed child creates a review Input for root synthesis and can then be explicitly deleted", async t => {
-  const f = fixture(t); await f.initialize();
-  const a = await ensureSourceTopic(f.resources, "absorb:a", "A"), b = await ensureSourceTopic(f.resources, "absorb:b", "B");
-  await f.group(a, b);
-  const root = f.aide.topics.list().find(t => isRootTopic({ spec: t }))!;
-  await f.resources.patchStatus(f.aide.topics.resource(root.id)!, { notifiedWeaveRevision: 1 });
-  await patchSummary(f.resources, f.refresh(a), { summary: "New evidence", lastInputAt: "2000-01-01T00:00:00.000Z" });
-  const before = f.aide.topics.resource(root.id)!.status.lastInputAt;
-  let prompts = 0;
-  const execution: any = { executionId: "absorb", withContext() { return this; }, verbs: { async harness(args: any) {
-    if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
-    prompts++;
-    assert.match(args.prompt, /aide:curate/);
-    const current = f.aide.topics.resource(root.id)!;
-    await summarizeTopic(f.resources, current, "absorb", { version: contentVersion(current), summary: "New evidence retained",
-      absorbed: [{ uid: a.metadata.uid, version: understandingVersion(f.refresh(a)) }] }, 4000);
-    return { state: "success", value: { result: { stopReason: "end_turn" } } };
-  } } };
-  await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
-  await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
-  assert.equal(prompts, 1);
-  assert.ok(f.aide.topics.inputStore.list().every(i => i.spec.origin === "aide:curate"));
-  assert.equal(f.aide.topics.resource(root.id)!.status.lastInputAt, before);
-  await collectTopic(f.context, f.refresh(a));
-  assert.ok(f.aide.topics.resource(a.spec.id), "silence retains the Topic until capacity or explicit deletion");
-  await f.resources.delete(TOPIC_TYPE, a.metadata.name, "v1", { uid: a.metadata.uid, resourceVersion: f.refresh(a).metadata.resourceVersion });
-  assert.equal(f.aide.topics.resource(a.spec.id), undefined);
-  await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
-  await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
-  assert.equal(prompts, 1);
-});
+
 
 test("Root Chief admits urgent and observed business as separate bounded tasks with independent receipts", async t => {
   const f = fixture(t);
@@ -290,8 +263,7 @@ test("Unfinished synthesis retries one review Input without refreshing business 
   const a = await ensureSourceTopic(f.resources, "retry:a", "A"), b = await ensureSourceTopic(f.resources, "retry:b", "B");
   await f.group(a, b);
   const root = f.aide.topics.list().find(t => isRootTopic({ spec: t }))!;
-  await f.resources.patchStatus(f.aide.topics.resource(root.id)!, { notifiedWeaveRevision: 1 });
-  await patchSummary(f.resources, f.refresh(a), { summary: "Awaiting synthesis" });
+  await patchSummary(f.resources, f.refresh(a), { summary: "Changed after grouping" });
   let prompts = 0;
   const execution: any = { executionId: "retry", withContext() { return this; }, verbs: { async harness(args: any) {
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };

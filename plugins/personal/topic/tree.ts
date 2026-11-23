@@ -85,7 +85,7 @@ export async function readTopicInScope(resources: ResourceReader, owner: TopicRe
     current = current.spec.parentRef && !isProcessingRoot(current) ? await resources.get<TopicSpec, TopicStatus>(current.spec.parentRef) : undefined;
   }
 }
-/** Summary changes drive maintenance; full context versions still fence Weave and deletion. */
+/** Version the Topic summary separately from the knowledge used for Weave and reclamation. */
 export const summaryVersion = (topic: TopicResource): string =>
   createHash("sha256").update(topic.status.summaryRevision ?? "").digest("hex");
 export const understandingVersion = (topic: TopicResource, notes: readonly import("../note/model.ts").Note[] = []): string =>
@@ -110,27 +110,4 @@ export async function ensureSourceTopic(resources: ResourceClient, key: string, 
     if (!created) throw error;
     return created;
   }
-}
-
-/** @spec Summary changes can activate parent maintenance. Note-only changes join an already active review.
- * @spec Full context review remains necessary before a child can be reclaimed.
- * @link docs/personal/chief.md#研判与上下文
- */
-export function pendingAbsorption(topics: readonly TopicResource[], root: TopicResource, includeNotes = false, versions = new Map<string, string>()) {
-  const children = new Map<string, TopicResource[]>();
-  for (const topic of topics) if (topic.spec.parentRef) {
-    const siblings = children.get(topic.spec.parentRef.uid) ?? [];
-    siblings.push(topic);
-    children.set(topic.spec.parentRef.uid, siblings);
-  }
-  const subtree = topicSubtree(root, parent => children.get(parent.metadata.uid) ?? []);
-  const byUid = new Map(subtree.map(topic => [topic.metadata.uid, topic]));
-  const depths = new Map([[root.metadata.uid, 0]]);
-  for (const topic of subtree.slice(1)) depths.set(topic.metadata.uid, depths.get(topic.spec.parentRef!.uid)! + 1);
-  return subtree.slice(1)
-    .filter(topic => includeNotes
-      ? byUid.get(topic.spec.parentRef!.uid)?.status.absorbed?.[topic.metadata.uid] !== (versions.get(topic.metadata.uid) ?? understandingVersion(topic))
-      : byUid.get(topic.spec.parentRef!.uid)?.status.absorbedSummaries?.[topic.metadata.uid] !== summaryVersion(topic))
-    .sort((a, b) => depths.get(b.metadata.uid)! - depths.get(a.metadata.uid)!)
-    .map(topic => ({ uid: topic.metadata.uid, parentUid: topic.spec.parentRef!.uid, version: (versions.get(topic.metadata.uid) ?? understandingVersion(topic)) }));
 }

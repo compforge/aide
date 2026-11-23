@@ -11,9 +11,8 @@ Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为
 | 观察到的事实 | 准备的待办 |
 | --- | --- |
 | Deferred Input 的数量与最早等待时间达到阈值 | 创建独立 Batch，将兼容的原始 Input 归入固定批次 |
-| Topic 的直属 Input／Work 数量超限 | 创建 `aide:triage` Input，请 Chief 整理材料归属 |
-| Topic 的直属 child 数量超限 | 创建 `aide:organize` Input，请 Chief 整理主题结构 |
-| 子认识待吸收、Weave 结构版本变化或 Note 容量压力 | 创建 `aide:curate` Input，请 Chief 检查并维护认识 |
+| Topic 的直属未归集 Input、Work 或 child 数量超限 | 创建一条 `aide:organize` Input，请 Chief 一起整理主题结构和材料归属 |
+| Weave 结构版本变化或 Note 容量压力 | 创建 `aide:curate` Input，请 Chief 检查并维护认识 |
 | Chief 完成量达到阈值，或待回顾活动等待达到时限 | 创建 `aide:curate` Input；本轮覆盖请求创建时的完成水位 |
 | 静默检查到期且没有待办 | 只更新检查时间与退避，不创建 Input、不触发 Agent |
 
@@ -43,22 +42,21 @@ Secretary 合并领域内的梳理需求，并为 episodic Note 的具体问题�
 
 | origin | 触发与目的 |
 | --- | --- |
-| aide:triage | maxUnfiledInput 或既有 maxWork 超限；批阅、分理和归集材料 |
-| aide:organize | maxChildren 超限；组织直属下属的分工与层次 |
+| aide:organize | 任一直属容量超限时，汇总 Input、Work、child 的计数与样本。所有超限都消失后可取消尚未接纳的议程 |
 | aide:followup | 跟进需要回应的事项；当前按开放 episodic Note 的问题与核实时间调度 |
 | aide:curate | 普通 Note 的改动达到批量或等待上限，或工作量、子摘要、结构与预算变化需要梳理；核对证据并维护近期事项与长期认识 |
 
-内置请求复用 Input，status.topic 指向目标节点，未领取时 status.assess.topic 收敛到当前 root，领取后保留实际负责人。origin 决定 Chief 的工具与处理路径，text 描述任务。Secretary 统一准备 Curate／Followup／Triage／Organize，每个节点、每种 origin 最多一条未完成请求；可重试失败仍处理原 Input。创建与请求记账原子提交，结果与完成水位原子提交，无需二次结算。`maintenanceRequests` 保留请求身份、时间、需求指纹与尝试次数；同一需求从 `capacityCooldownSeconds`（默认 60 秒）指数退避到 2 小时（基础冷却更长时保留基础冷却），新需求重新安排。已完成 Input 回收后仍可从 Topic 保留的事实继续调度。
+内置请求复用 Input，status.topic 指向目标节点，未领取时 status.assess.topic 收敛到当前 root，领取后保留实际负责人。origin 决定 Chief 的工具与处理路径，text 描述任务。Secretary 统一准备 Curate／Followup／Organize，每个节点、每种 origin 最多一条未完成请求；可重试失败仍处理原 Input。创建与请求记账原子提交，结果与完成水位原子提交，无需二次结算。`maintenanceRequests` 保留请求身份、时间、需求指纹与尝试次数；同一需求从 `capacityCooldownSeconds`（默认 60 秒）指数退避到 2 小时（基础冷却更长时保留基础冷却），新需求重新安排。已完成 Input 回收后仍可从 Topic 保留的事实继续调度。
 
 maxUnfiledInput 统计直属、无 topicKey、未删除的业务 Input，包含已研判材料；三类内置 Input 排除。maxInput 字段暂时保留，不参与策略。maxChildren 统计直属有效 child。归集到 child 后，该 child 同样检查阈值并请求 root 继续整理；已完成回执不重置。容量触发独立于静默回顾退避，执行前重查需求，已消失则直接完成请求。提示每轮至多处理 8 条材料或直属 child；这是 Agent 执行要求，不是工具调用次数硬配额，整体激活提示还受 contextChars 限制。
 
 ### 工作量与时间窗口
 
-`Topic.status.chiefWorkload` 记录 Chief 已完成量与最近 Curate 覆盖的水位。每成功处理一个独立 Input 或 Batch 计一次，包括 Curate、Followup、Triage、Organize；Batch 内有多少成员都只计一次，成员结果投影不重复计数。Task／Routine 的执行、状态和报告不计入 Chief 工作量；如果形成了新的协调 Input，并由 Chief 完成，则按一次计数。
+`Topic.status.chiefWorkload` 记录 Chief 已完成量与最近 Curate 覆盖的水位。每成功处理一个独立 Input 或 Batch 计一次，包括 Curate、Followup、Organize；Batch 内有多少成员都只计一次，成员结果投影不重复计数。Task／Routine 的执行、状态和报告不计入 Chief 工作量；如果形成了新的协调 Input，并由 Chief 完成，则按一次计数。
 
 默认累计 10 次完成触发 Curate；不足 10 次时，从最早尚未回顾的活动等待 15 分钟触发，后续完成不推迟该时间。Curate 自身仍计入下一轮数量，但不独自开启定时回顾需求，避免空闲时持续自我触发。请求记录创建时的完成水位，完成事务只确认这一水位，并保留请求后到来的活动。计数和时间窗口随 Topic 持久化，不依赖已完成 Input 的保留或历史扫描。
 
-日常认识检查只读取最多 20 个直属 child；到期回顾与结构变化可按需检查子树。子 summary 变化、Weave 结构通知和 Note 压力可独立产生维护请求。普通 Note 的改名、更新时间和吸收回执不构成新的调度需求；完整 Note／understanding 版本仍用于并发写入、吸收和删除安全校验。压力指纹使用稳定材料身份、正文与预算，元数据改名不重置退避。
+Secretary 根据 Weave 通知、工作量和 Note 本身的变化或容量压力准备维护请求。父子 Summary 独立修订。压力指纹使用材料身份、正文和预算，单纯改名沿用原退避。
 
 无活动、无维护需求时，Secretary 的静默检查默认按 15、30、60、120 分钟退避；资源 Watch 和短周期 tick 仍保障新 Input 与阈值响应。空检查不触发 Agent，新的业务到达恢复检查节奏。
 

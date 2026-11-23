@@ -10,7 +10,7 @@ import type { ResourceContext } from "../context.ts";
 
 export interface SummaryUpdate extends MaterialDisclosure { name?: string; pruned?: NoteStatus["pruned"]; nature?: NoteSpec["nature"]; maxChars?: number; text?: string; people?: Iterable<PersonRef>; addresses?: Iterable<AddressRef> }
 export type SummaryResource = Resource<unknown, ResourceContext>;
-const summaryName = (resource: SummaryResource) => `summary-${resource.metadata.uid}`;
+const summaryName = (resource: SummaryResource) => `summary-${resource.metadata.uid}${resource.status.lastRetiredSummaryUid ? "-" + resource.status.lastRetiredSummaryUid : ""}`;
 type Reader = Pick<ResourceValidationContext, "page">;
 export function summaryNote(reader: Reader, resource: SummaryResource): NoteResource | undefined {
   const note = reader.page<NoteSpec, NoteStatus>(NOTE_TYPE, { limit: 1, matchIndex: { name: "summaryOf", value: resource.metadata.uid } }).items[0];
@@ -61,7 +61,7 @@ export async function prepareSummary(resources: ResourceClient, owner: SummaryRe
       }
     }
   }
-  if (note.metadata.deletionTimestamp || note.spec.subject.uid !== owner.metadata.uid) throw new Error("Summary Note owner changed");
+  if (note.status.retired || note.metadata.deletionTimestamp || note.spec.subject.uid !== owner.metadata.uid) throw new Error("Summary Note owner changed");
   const people = incomingPeople ?? note.spec.people;
   const visibility = update.visibility ?? note.spec.visibility ?? "people";
   const spec = NoteSpecSchema.parse({ ...note.spec, ...(update.name !== undefined ? { name: update.name } : {}), summaryOf: resourceRef(owner), text, people,
@@ -80,6 +80,17 @@ export async function prepareSummary(resources: ResourceClient, owner: SummaryRe
     { op: "replace", path: "/status", value: updated.status },
   ] } }];
   return { note: updated, writes, status: { summaryRevision: noteVersion(updated) } };
+}
+/** Update only Summary-owned fields so concurrent scheduling changes on the owner survive. */
+export function publishSummaryRevision(owner: SummaryResource, expected: string, revision: string, writer: NonNullable<NoteStatus["writer"]>, at: string, retiredUid?: string): ResourceCommit {
+  return { operation: "patch", resource: owner, patch: { type: "json", value: [
+    { op: "test", path: "/status/summaryRevision", value: expected },
+    { op: "add", path: "/status/summaryRevision", value: revision },
+    { op: "add", path: "/status/contextWriter", value: writer },
+    ...(retiredUid ? [{ op: "add" as const, path: "/status/lastRetiredSummaryUid", value: retiredUid }] : []),
+    ...(owner.kind === "Person" ? [{ op: "add" as const, path: "/status/updatedAt", value: at },
+      { op: "add" as const, path: "/status/updatedBy", value: "chief" }] : []),
+  ] } };
 }
 export async function writeSummary<R extends SummaryResource>(resources: ResourceClient, owner: R, update: SummaryUpdate,
   writer?: NoteStatus["writer"], version = contentVersion(owner), patch: Record<string, unknown> = {}) {

@@ -8,7 +8,6 @@ import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
 import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
-import { patchSummary } from "./summary-fixture.ts";
 
 test("Chief ignores unprepared Deferred; Secretary produces a batch without invoking Harness", async t => {
   const f = await secretaryFixture(t); await f.input("a"); await f.input("b");
@@ -20,9 +19,8 @@ test("Chief ignores unprepared Deferred; Secretary produces a batch without invo
 });
 
 test("Chief commits review results and scheduling facts once without Secretary settlement", async t => {
-  const f = await secretaryFixture(t); const child = await f.aide.topics.ensure("child");
-  await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(f.root()) }, child.status);
-  await patchSummary(f.resources, f.aide.topics.resource("child")!, { summary: "new understanding" });
+  const f = await secretaryFixture(t);
+  await f.resources.patchStatus(f.root(), { weaveRevision: 1 });
   await reconcileSecretary(f.context, f.root(), f.policy);
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   assert.ok(review.spec.observation?.review); assert.equal(f.calls(), 0);
@@ -132,7 +130,7 @@ test("Maintenance completion retries a conflicting Topic write atomically", asyn
 // @case Workload is durable completion accounting, not execution count or Input origin filtering.
 test("Every Chief origin counts once and successful receipt retries never count again", async t => {
   const f = await secretaryFixture(t);
-  const origins = ["source", "channel", "chief", "aide:triage", "aide:organize", "aide:curate"] as const;
+  const origins = ["source", "channel", "chief", "aide:followup", "aide:organize", "aide:curate"] as const;
   for (const [index, origin] of origins.entries()) {
     const id = `item-${index}`, executionId = `run-${index}`;
     await f.input(id, InputAttention.Normal, origin);
@@ -193,11 +191,9 @@ test("Time trigger uses the earliest unreviewed completion and later work cannot
 test("Review renaming a child Note does not create a new maintenance need", async t => {
   const f = await secretaryFixture(t);
   const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
-  const { summaryVersion } = await import("../plugins/personal/topic/tree.ts");
   const child = await f.aide.topics.ensure("child");
   await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(f.root()) }, child.status);
-  await f.resources.patchStatus(f.root(), { execution: { id: "write", startedAt: new Date().toISOString() },
-    absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
+  await f.resources.patchStatus(f.root(), { execution: { id: "write", startedAt: new Date().toISOString() } });
   const note = await upsertTopicNote(f.resources, f.root(), "write", { subject: resourceRef(child), name: "old", text: "unchanged facts" }, "note");
   await f.resources.patchStatus(f.root(), { execution: null, chiefWorkload: { completed: 1, reviewed: 0, pendingSince: new Date(0).toISOString() } });
   await reconcileSecretary(f.context, f.root(), f.policy);
@@ -232,22 +228,22 @@ test("Task and Routine status updates do not count as Chief workload", async t =
   assert.equal(f.calls(), 0);
 });
 
-test("Unchanged Triage pressure backs off instead of reissuing every base cooldown", async t => {
+test("Unchanged organization pressure backs off instead of reissuing every base cooldown", async t => {
   const f = await secretaryFixture(t);
   const advance = deadlineClock(t);
   f.policy.maxUnfiledInput = 1;
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
   await reconcileChief(f.context, f.execution("business"), f.root(), f.policy);
-  const reviews = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage");
+  const reviews = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize");
   for (const round of [1, 2]) {
     await reconcileSecretary(f.context, f.root(), f.policy);
     assert.equal(reviews().length, round);
-    await reconcileChief(f.context, f.execution(`triage-${round}`), f.root(), f.policy);
+    await reconcileChief(f.context, f.execution(`organize-${round}`), f.root(), f.policy);
     if (round === 1) advance(61_000);
   }
   await reconcileSecretary(f.context, f.root(), f.policy);
   assert.equal(reviews().length, 2, "second unchanged attempt waits 120 seconds");
-  assert.equal(f.root().status.maintenanceRequests?.["aide:triage"]?.attempts, 2);
+  assert.equal(f.root().status.maintenanceRequests?.["aide:organize"]?.attempts, 2);
   advance(61_000);
   await reconcileSecretary(f.context, f.root(), f.policy);
   assert.equal(reviews().length, 3);
@@ -293,11 +289,11 @@ test("Maintenance backoff reaches two hours even with a one-second base cooldown
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
   await reconcileChief(f.context, f.execution("business"), f.root(), f.policy);
   await reconcileSecretary(f.context, f.root(), f.policy);
-  await reconcileChief(f.context, f.execution("triage"), f.root(), f.policy);
-  const request = f.root().status.maintenanceRequests!["aide:triage"]!;
-  await f.resources.patchStatus(f.root(), { maintenanceRequests: { "aide:triage": { ...request, attempts: 14 } } });
-  const count = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length;
+  await reconcileChief(f.context, f.execution("organize"), f.root(), f.policy);
+  const request = f.root().status.maintenanceRequests!["aide:organize"]!;
+  await f.resources.patchStatus(f.root(), { maintenanceRequests: { "aide:organize": { ...request, attempts: 14 } } });
+  const count = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize").length;
   advance(7199_000); await reconcileSecretary(f.context, f.root(), f.policy); assert.equal(count(), 1);
   advance(2000); await reconcileSecretary(f.context, f.root(), f.policy); assert.equal(count(), 2);
-  assert.equal(f.root().status.maintenanceRequests!["aide:triage"]!.attempts, 14);
+  assert.equal(f.root().status.maintenanceRequests!["aide:organize"]!.attempts, 14);
 });

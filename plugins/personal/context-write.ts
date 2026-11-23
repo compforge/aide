@@ -6,8 +6,8 @@ import type { Resource, ResourceValidationContext } from "@compforge/aide-plugin
 import { requireTopic } from "./topic/ownership.ts";
 import type { NoteStatus } from "./note/model.ts";
 import type { ResourceContext } from "./context.ts";
-export const contentVersion = (resource: Resource<unknown, { summaryRevision?: string }>) =>
-  createHash("sha256").update(JSON.stringify([resource.metadata.uid, resource.status.summaryRevision ?? ""])).digest("hex");
+export const contentVersion = (resource: Resource<unknown, ResourceContext>) =>
+  createHash("sha256").update(JSON.stringify([resource.metadata.uid, resource.status.summaryRevision ?? "", resource.status.lastRetiredSummaryUid])).digest("hex");
 /** @spec Authorization reads current execution and ancestry in the write transaction, independent of scheduling versions.
  * @case tests/notes.test.ts
  * @link docs/personal/note.md

@@ -18,7 +18,7 @@ import type { ResourceClient } from "@compforge/aide-plugin";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/personal/topic/model.ts";
-import { summarizeTopic, upsertTopicNote } from "../plugins/personal/topic/state.ts";
+import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
 import { understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
@@ -86,16 +86,16 @@ test("summary edits survive scheduling and Note changes, but reject concurrent c
   const f = await setup(t), original = f.read(), version = contentVersion(original);
   await f.resources.patchStatus(original, { reviewCheckedAt: new Date().toISOString(), idleReviewCount: 2 });
   await f.upsert({ text: "Recent evidence" }, "evidence");
-  const result = await summarizeTopic(f.resources, original, "live", { version, summary: "Durable correction" }, 4000);
-  assert.equal(result.version, contentVersion(f.read())); assert.equal(f.read().status.idleReviewCount, 2);
+  const result = await upsertTopicNote(f.resources, original, "live", { summaryOf: resourceRef(original), version, text: "Durable correction" }, "summary", 4000, "aide:curate");
+  assert.equal(result.version, f.read().status.summaryRevision); assert.equal(f.read().status.idleReviewCount, 2);
   assert.equal(f.recent().length, 1);
-  await assert.rejects(summarizeTopic(f.resources, original, "live", { version, summary: "old interpretation" }, 4000), /context changed/);
+  await assert.rejects(upsertTopicNote(f.resources, original, "live", { summaryOf: resourceRef(original), version, text: "old interpretation" }, "summary", 4000, "aide:curate"), /version conflict/);
   const current = f.read();
   const race: ResourceClient = { ...f.resources, async commit(writes) {
     await patchSummary(f.resources, current, { summary: "Concurrent user correction" });
     return f.resources.commit(writes);
   } };
-  await assert.rejects(summarizeTopic(race, current, "live", { version: contentVersion(current), summary: "overwrite" }, 4000), /Test operation failed/);
+  await assert.rejects(upsertTopicNote(race, current, "live", { summaryOf: resourceRef(current), version: contentVersion(current), text: "overwrite" }, "summary", 4000, "aide:curate"), /Test operation failed/);
   assert.equal(summaryText(f.aide.topics.resources, f.read()), "Concurrent user correction");
 });
 test("content writes validate execution and intermediate Topic ownership inside the transaction", async t => {
@@ -107,7 +107,7 @@ test("content writes validate execution and intermediate Topic ownership inside 
     await f.resources.replace(middle, { ...middle.spec, parentRef: resourceRef(other) }, middle.status);
     return f.resources.commit(writes);
   } };
-  await assert.rejects(summarizeTopic(race, f.root, "live", { topicUid: leaf.metadata.uid, version: contentVersion(leaf), summary: "outside" }, 4000), /outside/);
+  await assert.rejects(upsertTopicNote(race, f.root, "live", { summaryOf: resourceRef(leaf), version: contentVersion(leaf), text: "outside" }, "summary", 4000, "aide:curate"), /outside/);
   const switchExecution: ResourceClient = { ...f.resources, async create(type, init) {
     await f.resources.patchStatus(f.root, { execution: { id: "new", startedAt: new Date().toISOString() } });
     return f.resources.create(type, init);
@@ -149,21 +149,7 @@ test("Notes outlive subjects and capacity evicts old Notes without recreating ev
   await f.resources.delete(TOPIC_TYPE, live.metadata.name); f.aide.topics.resources.finalizeDeletion(TOPIC_TYPE, live.metadata.name);
   assert.deepEqual(await f.resources.list(NOTE_TYPE), retained);
 });
-test("child understanding includes independent Note revisions and detects concurrent Note creation", async t => {
-  const f = await setup(t);
-  const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "Child", receipts: [] } });
-  await f.upsert({ subject: resourceRef(child), text: "Child evidence" }, "child-note");
-  const version = understandingVersion(child, await readNotes(f.resources, child.metadata.uid, "subject"));
-  const race: ResourceClient = { ...f.resources, async commit(writes) {
-    await f.upsert({ subject: resourceRef(child), text: "Late evidence" }, "late-note");
-    return f.resources.commit(writes);
-  } };
-  await assert.rejects(summarizeTopic(race, f.root, "live", { version: contentVersion(f.read()), absorbed: [{ uid: child.metadata.uid, version }] }, 4000), /Child understanding changed/);
-  assert.equal(f.read().status.absorbed?.[child.metadata.uid], undefined);
-  const latest = understandingVersion(child, await readNotes(f.resources, child.metadata.uid, "subject"));
-  await summarizeTopic(f.resources, f.root, "live", { version: contentVersion(f.read()), absorbed: [{ uid: child.metadata.uid, version: latest }] }, 4000);
-  assert.equal(f.read().status.absorbed?.[child.metadata.uid], latest);
-});
+
 test("Work summary and Notes use content versions and enforce the bound subject", async t => {
   const f = await setup(t);
   const original = await createWithSummary(f.resources, ROUTINE_TYPE, { name: "work", spec: { title: "Monitor", instruction: "Check", paused: false, trigger: { cron: null, event: "tick", timezone: "UTC" } },
@@ -222,13 +208,13 @@ test("summary response version identifies its committed content, not a later con
   let committedVersion = "";
   const race: ResourceClient = { ...f.resources, async commit(writes) {
     const written = await f.resources.commit(writes);
-    committedVersion = contentVersion(written.at(-1) as any);
+    committedVersion = (written.at(-1) as typeof initial).status.summaryRevision!;
     await patchSummary(f.resources, f.read(), { summary: "Later correction" });
     return written;
   } };
-  const result = await summarizeTopic(race, initial, "live", { version: contentVersion(initial), summary: "My synthesis" }, 4000);
+  const result = await upsertTopicNote(race, initial, "live", { summaryOf: resourceRef(initial), version: contentVersion(initial), text: "My synthesis" }, "summary", 4000, "aide:curate");
   assert.equal(result.version, committedVersion);
-  await assert.rejects(summarizeTopic(f.resources, initial, "live", { version: result.version, summary: "Would overwrite unseen correction" }, 4000), /context changed/);
+  await assert.rejects(upsertTopicNote(f.resources, initial, "live", { summaryOf: resourceRef(initial), version: result.version, text: "Would overwrite unseen correction" }, "summary", 4000, "aide:curate"), /version conflict/);
 });
 
 

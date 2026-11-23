@@ -104,7 +104,7 @@ test("Input protects every unfinished stage; deleting its Work ends handling and
 });
 
 test("Topic Notes are bounded independently of long-lived summary and reject stale writes", async t => {
-  const { summarizeTopic, upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
+  const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
   const { aide, resources } = setup(t);
   await aide.topics.ensure("me");
   await patchSummary(resources, aide.topics.resource("me")!, { execution: { id: "review", startedAt: new Date().toISOString() }, summary: "Durable distinction" });
@@ -118,14 +118,14 @@ test("Topic Notes are bounded independently of long-lived summary and reject sta
   assert.ok(notes(aide.topics.resources, current.metadata.uid, "subject").length <= 40);
   assert.ok(notes(aide.topics.resources, current.metadata.uid, "subject").reduce((sum, entry) => sum + entry.text.length, 0) <= 16000);
   assert.equal(contentVersion(stale), contentVersion(current), "Independent notes do not change summary version");
-  await assert.rejects(summarizeTopic(resources, current, "wrong-execution", { version: contentVersion(current), summary: "stale" }, 4000), /no longer active/);
-  await assert.rejects(summarizeTopic(resources, current, "review", { version: contentVersion(current), summary: "x".repeat(16001) }, 4000));
+  await assert.rejects(upsertTopicNote(resources, current, "wrong-execution", { summaryOf: resourceRef(current), version: contentVersion(current), text: "stale" }, "summary", 4000, "aide:curate"), /no longer active/);
+  await assert.rejects(upsertTopicNote(resources, current, "review", { summaryOf: resourceRef(current), version: contentVersion(current), text: "x".repeat(16001) }, "summary", 4000, "aide:curate"));
   assert.deepEqual(aide.topics.resource("me")!.status, current.status);
 });
 
 /** @case Repeated silent receipts do not evict important context or imply an unresolved anomaly recovered. */
 test("quiet assessments retain topic understanding; explicit synthesis can update summary without recent", async t => {
-  const { summarizeTopic } = await import("../plugins/personal/topic/state.ts");
+  const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
   const { aide, resources, context } = setup(t);
   const c = await aide.topics.ensure("me");
   const recent = [{ id: String(new Date().toISOString()), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), text: "User asked to investigate recurrent OOM" }];
@@ -142,8 +142,8 @@ test("quiet assessments retain topic understanding; explicit synthesis can updat
   const current = aide.topics.resource("me")!;
   assert.equal(summaryText(aide.topics.resources, current), "OOM unresolved; investigation delegated");
   assert.deepEqual(notes(aide.topics.resources, current.metadata.uid, "subject"), storedNotes);
-  const receipt = await summarizeTopic(resources, current, "live", { version: contentVersion(current), summary: "OOM cause confirmed; fix pending" }, 4000);
-  assert.deepEqual(Object.keys(receipt), ["version", "understandingVersion"], "Do not echo all context back into model history");
+  const receipt = await upsertTopicNote(resources, current, "live", { summaryOf: resourceRef(current), version: contentVersion(current), text: "OOM cause confirmed; fix pending" }, "summary", 4000, "aide:curate");
+  assert.equal(receipt.version, aide.topics.resource("me")!.status.summaryRevision);
   assert.deepEqual(notes(aide.topics.resources, current.metadata.uid, "subject"), storedNotes);
   assert.equal(summaryText(aide.topics.resources, aide.topics.resource("me")!), "OOM cause confirmed; fix pending");
 });

@@ -16,7 +16,6 @@ import { TASK_TYPE } from "../plugins/personal/task/model.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
 import { ensureDefaultTopic } from "../plugins/personal/topic/default.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
-import { understandingVersion } from "../plugins/personal/topic/tree.ts";
 
 function fixture(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-validation-scope-"));
@@ -109,9 +108,8 @@ test("Person validation checks new identities only and rolls back transferred in
 });
 
 /** @case Delete reads current dependencies only, excluding unrelated work and retained completed Input history. */
-test("Topic deletion reads indexed dependents and the parent UID, not retained history", async t => {
+test("Topic deletion reads indexed dependents, not retained history", async t => {
   const f = fixture(t), parent = await f.topic("parent"), leaf = await f.topic("leaf", parent), other = await f.topic("other");
-  await f.resources.patchStatus(parent, { absorbed: { [leaf.metadata.uid]: understandingVersion(leaf) } });
   for (let i = 0; i < 30; i++) await f.resources.create(INPUT_TYPE, { name: `history-${i}`,
     spec: { origin: "source", originId: "fixture", text: "Retained evidence" },
     status: { topic: resourceRef(i % 2 ? other : leaf), assess: i % 2 ? {} : { completedAt: new Date().toISOString() } } });
@@ -122,9 +120,9 @@ test("Topic deletion reads indexed dependents and the parent UID, not retained h
   await f.resources.delete(TOPIC_TYPE, leaf.metadata.name);
   assert.ok((await f.resources.get(resourceRef(leaf)))!.metadata.deletionTimestamp);
   const listed = f.queries.filter(q => q.index);
-  assert.deepEqual(listed.map(q => [q.kind, q.index]), [["Handoff", "activeTopic"], ["Batch", "open"], ["Topic", "parent"], ["Input", "assessPending"], ["Task", "topic"], ["Routine", "topic"], ["Note", "recentSubject"]]);
+  assert.deepEqual(listed.map(q => [q.kind, q.index]), [["Handoff", "activeTopic"], ["Batch", "open"], ["Topic", "parent"], ["Input", "assessPending"], ["Task", "topic"], ["Routine", "topic"], ["Note", "summaryOf"], ["Note", "recentSubject"]]);
   assert.ok(listed.every(q => q.count === 0));
-  assert.ok(f.queries.some(q => q.uid === parent.metadata.uid));
+  assert.ok(!f.queries.some(q => q.uid === parent.metadata.uid));
 });
 
 /** @case A dependent written earlier in the same transaction prevents deletion and rolls back the entire write set. */

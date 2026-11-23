@@ -1,10 +1,11 @@
+import { topicTools } from "../plugins/personal/chief/agent/topic-tools.ts";
+import { reclamationVersion } from "../plugins/personal/topic/retention.ts";
 import { receiveDomain } from "./address-fixture.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { moveMaterial, moveTopic } from "../plugins/personal/topic/organize.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { assessInput } from "../plugins/personal/chief/assess.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
-import { understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { fixtureAddress, fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -132,7 +133,7 @@ test("Recreated Topic has fresh execution context and no old outputs or progress
 });
 
 /** @case Hierarchy deletion vetoes remain domain refusals through the HTTP API. */
-test("Web reports Topic hierarchy, absorption, Default deletion refusals", async (t) => {
+test("Web reports Topic hierarchy, retained knowledge and Default deletion refusals", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-delete-tree-"));
   const aide = new Aide(dir, fakeOptions({ execute: async () => { throw new Error("No execution expected"); } }, dir), log);
   const topics = aide.personal.topics;
@@ -141,16 +142,19 @@ test("Web reports Topic hierarchy, absorption, Default deletion refusals", async
   const parent = topics.resource("parent")!;
   let child = topics.resource("child")!;
   child = await resources.replace(child, { ...child.spec, parentRef: resourceRef(parent) }, child.status);
-  child = await patchSummary(resources, child, { summary: "未吸收的事实" });
+  child = await patchSummary(resources, child, { summary: "仍需保留的事实" });
   const { server, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
-  for (const [id, expected] of [["parent", /子主题/], ["child", /尚未吸收/], ["default", /默认主题不能删除/]] as const) {
+  for (const [id, expected] of [["parent", /子主题/], ["child", /确认可释放/], ["default", /默认主题不能删除/]] as const) {
     const before = topics.resource(id)!;
     const response = await remove(id, Number(before.metadata.resourceVersion));
     assert.equal(response.status, 409);
     assert.match((await response.json() as { error: string }).error, expected);
     assert.deepEqual(topics.resource(id), before);
   }
-  await resources.patchStatus(topics.resource("parent")!, { absorbed: { [child.metadata.uid]: understandingVersion(child) } });
+  const actor = await resources.patchStatus(topics.resource("parent")!, { execution: { id: "release", startedAt: new Date().toISOString() } });
+  const tool = topicTools(aide.personal.store, () => actor).find(t => t.name === "release_topic")!;
+  await tool.execute("release", { uid: child.metadata.uid, version: reclamationVersion(child, topics.resources), reason: "Safe to release" }, undefined, undefined, {} as never);
+  child = topics.resource("child")!;
   assert.equal((await remove("child", Number(child.metadata.resourceVersion))).status, 200);
 });
