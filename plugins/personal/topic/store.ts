@@ -1,3 +1,4 @@
+import { NOTE_TYPE, followupInputId, type NoteSpec, type NoteStatus } from "../note/model.ts";
 import { isGateTopic } from "./boundary.ts";
 import { HANDOFF_TYPE, type HandoffSpec, type HandoffStatus } from "../handoff/model.ts";
 import { AddressRefSchema, type AddressRef } from "../address/model.ts";
@@ -151,7 +152,12 @@ export class TopicStore {
   async say(topicId: string, inputId: string | undefined, text: string, executionId?: string,
     options: Omit<SayInput, "text"> & { contentKind?: "agent" } = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { agent?: import("@compforge/aide-plugin").AgentStatus; execution?: { id: string } | null }>): Promise<SayReceipt> {
     const initial = await this.ensure(topicId);
-    const id = options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
+    const request = options.inputIds?.length === 1 ? this.inputStore.get(options.inputIds[0]!) : undefined;
+    const followup = request?.spec.origin === "aide:followup" ? request : undefined;
+    if (followup && (!executionId || followup.status.assess?.executionId !== executionId || followup.status.assess.completedAt
+      || !options.to?.me || options.target || options.receivers || options.respondToInputId || options.respondToHandoffId))
+      throw new Error("Only the active followup may ask Me");
+    const id = followup ? followup.metadata.name : options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
     const previous = this.outputStore.get(id);
     if (options.respondToInputId && options.to) throw new Error("say cannot combine respondToInputId with to");
     if (options.respondToHandoffId && (options.respondToInputId || options.to || options.target)) throw new Error("Choose a single reply destination");
@@ -246,6 +252,11 @@ export class TopicStore {
         owner = latest;
       }
       if (executionId && (owner ? owner.status.execution?.id : c.status.execution?.id) !== executionId) throw new Error("Output execution is no longer active");
+      const note = followup && this.resources.find<NoteSpec, NoteStatus>(NOTE_TYPE, String(followup.spec.observation?.noteId));
+      if (followup && (!note || note.metadata.uid !== followup.spec.observation?.noteUid || followupInputId(note) !== id || note.status.followupInputId !== id))
+        throw new Error("Followup no longer matches an open Note question");
+      // @spec Persist the one-question receipt with acceptance, across retries and Output capacity eviction.
+      if (note?.status.askedFollowupId === id) return { outputId: id, accepted: true };
       const draft: OutputDraft = { id, topicId, text, workId: null };
       // @spec Provenance belongs to the first admission. System notices have no agent execution;
       // their deduplication key is not a tool-call ID, even when this Topic has an active Chief.
@@ -260,6 +271,7 @@ export class TopicStore {
           { operation: "patchStatus", resource: c, patch: {} },
           ...(owner ? [{ operation: "patchStatus" as const, resource: owner, patch: {} }] : []),
           outputWrite(c, draft, association),
+          ...(note ? [{ operation: "patchStatus" as const, resource: note, patch: { askedFollowupId: id } }] : []),
         ]);
         return { outputId: id, accepted: true };
       } catch (error) {

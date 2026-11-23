@@ -12,7 +12,10 @@ export async function noteRoot(context: Pick<PluginContext, "resources">, note: 
   const subject = await context.resources.get<unknown, { topic?: ResourceRef }>(note.spec.subject);
   if (!subject || subject.metadata.deletionTimestamp) return;
   const ref = subject.kind === "Topic" ? resourceRef(subject) : subject.status.topic;
-  return ref ? readTopicRoot(context.resources, ref) : undefined;
+  if (ref) return readTopicRoot(context.resources, ref);
+  const writer = note.status.writer?.resource;
+  if (writer?.kind === "Topic") return readTopicRoot(context.resources, writer);
+  return undefined;
 }
 /** @spec Only summary Notes need per-Note reconciliation, to repair their owner's derived fingerprint.
  * @why Ordinary Note edits are evidence changes, not independent review requests.

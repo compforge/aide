@@ -8,7 +8,7 @@ import { completeChiefWork } from "./workload.ts";
  */
 export function inputOutcome(input: Input, owner: TopicResource, at: string): Partial<TopicStatus> {
   const evidence = input.spec.originRef?.uid === owner.metadata.uid ? reviewEvidence(input.spec) : undefined;
-  return { chiefWorkload: completeChiefWork(owner, at, input.spec.origin === "aide:review", evidence),
+  return { chiefWorkload: completeChiefWork(owner, at, input.spec.origin === "aide:curate", evidence),
     ...(evidence ? { notifiedWeaveRevision: Math.max(owner.status.notifiedWeaveRevision ?? 0, evidence.weaveRevision) } : {}),
   };
 }

@@ -1,3 +1,4 @@
+import { fixtureMe } from "./address-fixture.ts";
 import { fixtureGateRef } from "./summary-fixture.ts";
 import { collectResources } from "./fixtures/resource-gc.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
@@ -166,7 +167,7 @@ test("pressure review request tolerates unrelated Topic writes and commits its c
     }
     return f.resources.commit(writes);
   } };
-  const input = await createMaintenanceInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review", "note_pressure");
+  const input = await createMaintenanceInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:curate", "note_pressure");
   assert.equal(input.status.assess!.topic!.uid, f.root.metadata.uid);
   assert.equal(f.read().status.lastError, "preserved");
   assert.ok(f.read().status.reviewCheckedAt);
@@ -183,7 +184,7 @@ test(`review request rolls back on ${race} at commit`, async t => {
     if (race === "disabled") await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
     return f.resources.commit(race === "schedule-failure" ? [...writes, { operation: "patchStatus", resource: f.read(), patch: { unknown: true } }] : writes);
   } };
-  await assert.rejects(createMaintenanceInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review"), race === "schedule-failure" ? /unknown|Unrecognized/ : /eligible root/);
+  await assert.rejects(createMaintenanceInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:curate"), race === "schedule-failure" ? /unknown|Unrecognized/ : /eligible root/);
   assert.equal(f.aide.topics.inputStore.list().length, 0);
   assert.equal(f.read().status.reviewCheckedAt ?? null, null);
   assert.equal(f.read().status.maintenanceRequests, undefined);
@@ -195,8 +196,8 @@ test(`racing review requests reuse one pending Input (same due: ${sameDue})`, as
   await f.resources.patchStatus(f.read(), { execution: null });
   const agenda = await maintenanceAgenda(f.resources, []), due = new Date().toISOString();
   const [a, b] = await Promise.all([
-    createMaintenanceInput(f.context, f.read(), due, agenda, "aide:review", "note_pressure"),
-    createMaintenanceInput(f.context, f.read(), sameDue ? due : "2000-01-01T00:00:00.000Z", agenda, "aide:review", "note_pressure"),
+    createMaintenanceInput(f.context, f.read(), due, agenda, "aide:curate", "note_pressure"),
+    createMaintenanceInput(f.context, f.read(), sameDue ? due : "2000-01-01T00:00:00.000Z", agenda, "aide:curate", "note_pressure"),
   ]);
   assert.equal(a.metadata.uid, b.metadata.uid);
   assert.equal(f.aide.topics.inputStore.list().length, 1);
@@ -338,7 +339,7 @@ async function completePressure(f: Awaited<ReturnType<typeof setup>>, pressure: 
   const { assessInput } = await import("../plugins/personal/chief/assess.ts");
   if (executionId) await f.resources.patchStatus(f.read(), { execution: { id: executionId, startedAt: new Date().toISOString() } });
   const review = await createMaintenanceInput(f.context, f.read(), new Date().toISOString(),
-    await maintenanceAgenda(f.resources, []), "aide:review", "note_pressure", { cooldownSeconds: 60, instructions: "Review pressure",
+    await maintenanceAgenda(f.resources, []), "aide:curate", "note_pressure", { cooldownSeconds: 60, instructions: "Review pressure",
       plan: { weaveRevision: 0, absorption: [], notePressure: pressure } });
   if (executionId) await assessInput(f.resources, f.read(), executionId, { inputId: review.metadata.name, summary: "Pressure reviewed" });
 }
@@ -362,4 +363,137 @@ test("Note renaming preserves pressure identity and backoff while text changes r
   assert.notEqual(f.read().status.notePressure?.version, pressure.version);
   assert.equal(f.read().status.notePressure?.attempts, 0);
   assert.equal((await dueNotePressure(f.resources, f.read())).length, 1);
+});
+
+test("Secretary separates curation from one-shot followup and fences stale questions on closure", async t => {
+  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
+  const f = await setup(t);
+  const policy = topicPolicy();
+  const ordinary = await f.note({ text: "An unclassified observation" }, "unclassified");
+  const original = await f.get(ordinary.noteId);
+  assert.ok((await prepareNoteMaintenance(f.context, original, policy))!.requeueAfterMs > 0);
+  await prepareNoteMaintenance(f.context, original, policy, Date.now() + policy.curation.maxWaitSeconds * 1000);
+  const curate = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate");
+  assert.equal(curate.length, 1);
+  assert.match(curate[0]!.spec.text, new RegExp(ordinary.noteId));
+
+  const episode = await f.note({ text: "Waiting for metrics", nature: "episodic" }, "episode");
+  const schedule = async () => prepareNoteMaintenance(f.context, await f.get(episode.noteId), policy);
+  await schedule();
+  const followup = { question: "Are the metrics final?", checkAt: new Date(0).toISOString() };
+  await assert.rejects(f.note({ text: "a method", nature: "procedural", followup }, "invalid"), /episodic/);
+  const open = await f.note({ ...episode, followup }, "schedule");
+  await schedule();
+  await schedule();
+  const requests = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:followup");
+  assert.equal(requests.length, 1);
+  const request = requests[0]!;
+  assert.equal(request.status.assess?.topic?.uid, f.root.metadata.uid);
+  await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "live", startedAt: new Date().toISOString() } });
+  const ask = (id: string) => f.aide.topics.say("knowledge", undefined, followup.question, "live",
+    { to: { me: true }, inputIds: [request.metadata.name], idempotencyKey: id });
+  await fixtureMe(f.aide);
+  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
+  const finish = () => assessChiefInput(f.resources, f.read(), "live",
+    { inputId: request.metadata.name, summary: "Checked the status of the metrics" }, "assess");
+  await assert.rejects(finish(), /ask Me/);
+  const first = await ask("first");
+  assert.deepEqual(await ask("another-tool-call"), first);
+  assert.equal(f.aide.topics.outputStore.get(first.outputId)?.spec.target.uid, f.aide.defaultAddress().uid);
+  assert.equal((await f.get(open.noteId)).status.askedFollowupId, request.metadata.name);
+
+  await finish();
+  assert.equal((await f.get(open.noteId)).spec.closedAt, undefined);
+
+  const closedAt = new Date().toISOString();
+  const closed = await f.note({ ...open, text: "Me confirmed the metrics were signed off", closedAt }, "close");
+  const result = await readNote(f.resources, closed.noteId);
+  assert.equal(result.closedAt, closedAt);
+  assert.equal(result.followup, undefined);
+  assert.equal(result.retired, undefined);
+  await schedule();
+  await assert.rejects(ask("late"), /Only the active followup/);
+});
+
+test("curate batches classified drafts and acknowledges only final versions it actually reviewed", async t => {
+  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
+  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
+  const { pendingCuration } = await import("../plugins/personal/note/model.ts");
+  const f = await setup(t);
+  await f.aide.topics.setReviewEnabled(f.root.spec.id, false);
+  const policy = topicPolicy({ curation: { count: 2 } });
+  const first = await f.note({ nature: "episodic", text: "Me provisionally owns the metrics" }, "handoff");
+  const initial = await f.get(first.noteId);
+  await prepareNoteMaintenance(f.context, initial, policy);
+  const requests = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate");
+  assert.equal(requests().length, 0);
+  const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, {
+    name: "metrics", spec: { id: "metrics", parentRef: resourceRef(f.root) }, status: { receipts: [] } });
+  const other = await f.note({ nature: "semantic", text: "The role changes each quarter", subject: resourceRef(child) }, "policy");
+  await prepareNoteMaintenance(f.context, await f.get(other.noteId), policy);
+  const [request] = requests();
+  assert.equal(request!.spec.observation?.trigger, "notes_changed");
+  assert.deepEqual(new Set((request!.spec.observation?.notes as typeof first[]).map(n => n.noteId)), new Set([first.noteId, other.noteId]));
+  await f.resources.patchStatus(request!, { assess: { ...request!.status.assess, executionId: "live", startedAt: new Date().toISOString() } });
+  const revised = await f.note({ ...first, text: "Metrics ownership transferred to the new lead" }, "curate-edit");
+  const destination = await f.note({ nature: "procedural", text: "Confirm the current owner in the oncall schedule" }, "curate-split");
+  const concurrent = await f.note({ ...other, text: "Rotation now takes place monthly" }, "business-update");
+  const assess = () => assessChiefInput(f.resources, f.read(), "live", { inputId: request!.metadata.name,
+    summary: "Clarified the handover", curatedNotes: [revised, destination, other] }, "finish");
+  await assess();
+  await assess(); // Replay preserves the original completion.
+  assert.equal(pendingCuration(await f.get(first.noteId)), undefined);
+  assert.equal(pendingCuration(await f.get(destination.noteId)), undefined);
+  assert.ok(pendingCuration(await f.get(concurrent.noteId)));
+  assert.equal(await prepareNoteMaintenance(f.context, await f.get(first.noteId), policy), undefined);
+  const renamed = await f.note({ ...revised, name: "Metrics handover", maxChars: 500 }, "display");
+  assert.equal(pendingCuration(await f.get(renamed.noteId)), undefined);
+  const closed = await f.note({ ...renamed, closedAt: new Date().toISOString() }, "closure");
+  assert.ok(pendingCuration(await f.get(closed.noteId)));
+});
+
+test("an unclassified draft stays pending through edits until its classified version is acknowledged", async t => {
+  const { pendingCuration } = await import("../plugins/personal/note/model.ts");
+  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
+  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
+  const f = await setup(t), policy = topicPolicy();
+  const draft = await f.note({ text: "Prepare oncall metrics and document the process" }, "draft");
+  const since = pendingCuration(await f.get(draft.noteId))!;
+  const edited = await f.note({ ...draft, text: "Document the oncall metrics process" }, "progress");
+  assert.equal(pendingCuration(await f.get(draft.noteId)), since);
+  await prepareNoteMaintenance(f.context, await f.get(draft.noteId), policy, Date.parse(since) + policy.curation.maxWaitSeconds * 1000);
+  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
+  await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "live", startedAt: new Date().toISOString() } });
+  const finish = (receipt: typeof draft) => assessChiefInput(f.resources, f.read(), "live",
+    { inputId: request.metadata.name, summary: "Reviewed the method", curatedNotes: [receipt] }, "finish");
+  await assert.rejects(finish(edited), /a nature/);
+  assert.equal(f.aide.topics.inputStore.get(request.metadata.name)?.status.assess?.completedAt, undefined);
+  const classified = await f.note({ ...edited, nature: "procedural" }, "classify");
+  await finish(classified);
+  assert.equal(pendingCuration(await f.get(draft.noteId)), undefined);
+});
+
+test("evidence that an episode is still ongoing settles the old check without asking Me", async t => {
+  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
+  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
+  const f = await setup(t);
+  const episode = await f.note({ nature: "episodic", text: "Awaiting final sign-off",
+    followup: { question: "Has sign-off happened?", checkAt: new Date(0).toISOString() } }, "signoff");
+  await prepareNoteMaintenance(f.context, await f.get(episode.noteId), topicPolicy());
+  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:followup")!;
+  await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "live", startedAt: new Date().toISOString() } });
+  const followup = { question: "Did the scheduled sign-off complete?", checkAt: new Date(Date.now() + 86_400_000).toISOString() };
+  await f.note({ ...episode, text: "Owner confirmed review is still ongoing and scheduled sign-off for tomorrow", followup }, "progress");
+  await fixtureMe(f.aide);
+  await assert.rejects(f.aide.topics.say("knowledge", undefined, "Has sign-off happened?", "live", {
+    to: { me: true }, inputIds: [request.metadata.name] }), /no longer matches/);
+  await assessChiefInput(f.resources, f.read(), "live", { inputId: request.metadata.name, summary: "Owner confirmed the revised schedule" }, "assess");
+  const note = await f.get(episode.noteId);
+  assert.equal(note.spec.closedAt, undefined);
+  assert.deepEqual(note.spec.followup, followup);
+  assert.equal(f.aide.outputs().length, 0);
 });

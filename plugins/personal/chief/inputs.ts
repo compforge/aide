@@ -36,6 +36,7 @@ export async function assessChiefInput(resources: ResourceClient, topic: TopicRe
   const { inputId, summary, workRequests = [] } = args;
   const batch = await batchById(resources, inputId);
   if (batch) {
+    if (args.curatedNotes?.length) throw new Error("Only aide:curate may acknowledge Notes");
     const members = workRequests.length ? await batchMembers(resources, batch) : [];
     const requests = workRequests.map(({ sourceInputId, ...request }) => {
       const member = sourceInputId ?? (members.length === 1 ? members[0]!.metadata.name : undefined);
@@ -49,5 +50,5 @@ export async function assessChiefInput(resources: ResourceClient, topic: TopicRe
     if (sourceInputId !== undefined && sourceInputId !== inputId) throw new Error("Work request source does not belong to this input");
     return request;
   });
-  return assessInput(resources, topic, executionId, { inputId, summary, workRequests: requests }, callId);
+  return assessInput(resources, topic, executionId, { inputId, summary, curatedNotes: args.curatedNotes, workRequests: requests }, callId);
 }

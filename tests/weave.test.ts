@@ -235,7 +235,7 @@ test("A quiet changed child creates a review Input for root synthesis and can th
   const execution: any = { executionId: "absorb", withContext() { return this; }, verbs: { async harness(args: any) {
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
     prompts++;
-    assert.match(args.prompt, /aide:review/);
+    assert.match(args.prompt, /aide:curate/);
     const current = f.aide.topics.resource(root.id)!;
     await summarizeTopic(f.resources, current, "absorb", { version: contentVersion(current), summary: "New evidence retained",
       absorbed: [{ uid: a.metadata.uid, version: understandingVersion(f.refresh(a)) }] }, 4000);
@@ -244,7 +244,7 @@ test("A quiet changed child creates a review Input for root synthesis and can th
   await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 1);
-  assert.ok(f.aide.topics.inputStore.list().every(i => i.spec.origin === "aide:review"));
+  assert.ok(f.aide.topics.inputStore.list().every(i => i.spec.origin === "aide:curate"));
   assert.equal(f.aide.topics.resource(root.id)!.status.lastInputAt, before);
   await collectTopic(f.context, f.refresh(a));
   assert.ok(f.aide.topics.resource(a.spec.id), "silence retains the Topic until capacity or explicit deletion");
@@ -303,16 +303,16 @@ test("Unfinished synthesis retries one review Input without refreshing business 
   await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 1);
-  assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceRequests?.["aide:review"]?.attempts, 1);
-  const pending = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+  assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceRequests?.["aide:curate"]?.attempts, 1);
+  const pending = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   await f.resources.patchStatus(pending, { assess: { ...pending.status.assess, errorAt: "2000-01-01T00:00:00.000Z" } });
   await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 2);
-  assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceRequests?.["aide:review"]?.attempts, 1);
+  assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceRequests?.["aide:curate"]?.attempts, 1);
   assert.equal(f.aide.topics.inputStore.list().length, 1);
   assert.equal(f.aide.topics.inputStore.list()[0]!.metadata.uid, pending.metadata.uid);
-  assert.ok(f.aide.topics.inputStore.list().every(i => i.spec.origin === "aide:review"));
+  assert.ok(f.aide.topics.inputStore.list().every(i => i.spec.origin === "aide:curate"));
 });
 
 /** @case Grouping retains recent matters with their stable identities instead of moving progress into parent summary. */

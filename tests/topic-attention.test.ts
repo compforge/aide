@@ -32,7 +32,7 @@ test("Input attention has three string values and source-specific defaults", () 
   for (const attention of Object.values(InputAttention))
     assert.equal(InputSpecSchema.parse({ origin: "source", originId: "fixture", text: "fact", attention }).attention, attention);
   assert.throws(() => InputSpecSchema.parse({ origin: "source", originId: "fixture", text: "fact", attention: "default" }));
-  for (const origin of ["channel", "source", "chief", "aide:review"] as const) {
+  for (const origin of ["channel", "source", "chief", "aide:curate"] as const) {
     assert.equal(inputAttention({ origin, originId: "fixture", text: "fact" }), origin === "channel" ? InputAttention.Immediate : InputAttention.Normal);
     assert.equal(inputAttention({ origin, originId: "fixture", text: "fact", attention: InputAttention.Deferred }), InputAttention.Deferred);
   }
@@ -96,7 +96,7 @@ test("Deferred backlog survives restart with review disabled and timer reviews r
       assert.equal(prompts.length, 0);
     }
     assert.equal(prompts.length, 0, "young Deferred does not create review work");
-    assert.ok(restarted.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").every(i => i.status.assess!.completedAt));
+    assert.ok(restarted.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").every(i => i.status.assess!.completedAt));
     assert.ok(restarted.topics.inputStore.list().filter(i => i.spec.origin === "source").every(i => !i.status.assess!.executionId));
   } finally { await restarted.close(); }
 });
@@ -111,7 +111,7 @@ test("Child understanding activates a review Input while Deferred business stays
   await patchSummary(client, aide.topics.resource("child")!, { summary: "New understanding" });
   await aide.settled();
   assert.equal(prompts.length, 1);
-  assert.match(prompts[0]!, /aide:review/);
+  assert.match(prompts[0]!, /aide:curate/);
   assert.doesNotMatch(prompts[0]!, /fact deferred/);
   assert.equal(aide.topics.inputStore.get("deferred")!.status.assess!.completedAt, undefined);
 });

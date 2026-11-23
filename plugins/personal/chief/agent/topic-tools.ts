@@ -29,7 +29,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
     return result(resource);
   };
   return [...noteTools(store.client, active, log),
-    tool({ name: "release_topic", inputOrigins: ["aide:review"], label: "Allow Topic reclamation", description: "Explicitly allow capacity reclamation of a root whose current knowledge is dispensable or safely retained elsewhere. Read this Topic first and supply its reclamationVersion and reason. Does not delete now. New knowledge invalidates the decision. Default, busy Topics and live dependencies remain protected.",
+    tool({ name: "release_topic", inputOrigins: ["aide:curate"], label: "Allow Topic reclamation", description: "Explicitly allow capacity reclamation of a root whose current knowledge is dispensable or safely retained elsewhere. Read this Topic first and supply its reclamationVersion and reason. Does not delete now. New knowledge invalidates the decision. Default, busy Topics and live dependencies remain protected.",
       parameters: Type.Object({ uid: Type.Optional(Type.String()), version: Type.String(), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
       async execute(_id, args) {
         const actor = active(), topic = await readTopicInScope(store.client, actor, args.uid);

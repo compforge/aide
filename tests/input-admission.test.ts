@@ -268,7 +268,7 @@ test("Immediate business can interrupt internal maintenance and unfinished maint
   const f = fixture(t), root = await f.aide.topics.ensure("a");
   const maintenance = await createMaintenanceInput(f.context, root, new Date().toISOString(), await maintenanceAgenda(f.resources, []));
   await running(f, root);
-  await f.resources.patchStatus(f.current(root), { execution: { ...f.current(root).status.execution!, inputOrigin: "aide:review" } });
+  await f.resources.patchStatus(f.current(root), { execution: { ...f.current(root).status.execution!, inputOrigin: "aide:curate" } });
   await f.resources.patchStatus(maintenance, { assess: { ...maintenance.status.assess, executionId: "a", startedAt: new Date().toISOString() } });
   await f.input("urgent", [root], InputAttention.Immediate);
   mockRunning(f, async () => ({ state: "success", value: { outcome: "accepted" } }));

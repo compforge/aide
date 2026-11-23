@@ -14,10 +14,10 @@ export enum InputAttention {
   Deferred = "deferred",
 }
 
-export const INPUT_ORIGINS = ["channel", "source", "chief", "aide:review", "aide:triage", "aide:organize"] as const;
+export const INPUT_ORIGINS = ["channel", "source", "chief", "aide:curate", "aide:followup", "aide:triage", "aide:organize"] as const;
 export type InputOrigin = typeof INPUT_ORIGINS[number];
 export const isInternalInput = (input: Pick<InputSpec, "origin">): boolean =>
-  input.origin === "aide:review" || input.origin === "aide:triage" || input.origin === "aide:organize";
+  input.origin.startsWith("aide:");
 export const isCapacityInput = (input: Pick<InputSpec, "origin">): boolean =>
   input.origin === "aide:triage" || input.origin === "aide:organize";
 export const inputQueue = (input: InputSpec): string => isInternalInput(input) ? input.origin : inputAttention(input);
@@ -83,7 +83,7 @@ export interface Attempt {
   retryable?: boolean;
 }
 export interface Assessment extends Attempt {
-  result?: { summary: string; disposition?: "completed" | "cancelled" | "rejected" };
+  result?: { summary: string; curatedNotes?: { noteId: string; version: string }[]; disposition?: "completed" | "cancelled" | "rejected" };
 }
 /** @spec Persisted terminal results end assessment; retryable execution errors leave it pending. */
 export const assessmentFinished = (assessment?: Assessment): boolean => !!(assessment?.completedAt || (assessment?.lastError && !assessment.retryable));

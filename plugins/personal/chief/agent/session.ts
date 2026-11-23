@@ -73,7 +73,7 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
     return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, inputBinding: {
       read: () => {
         const c = active();
-        return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "aide:review",
+        return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "aide:curate",
           inputs: [...store.topics.inputStore.query("assessExecution", c.status.execution!.id).map(i => ({
             id: i.metadata.name, deliveryId: i.status.assess?.deliveryId ?? `input:${i.metadata.uid}`, initial: !i.status.assess?.deliveryId && i.status.assess?.startedAt === c.status.execution!.startedAt,
             origin: i.spec.origin, immediate: immediate(i.spec), text: inputPreview(i, Math.floor(policy.contextChars / 8)),

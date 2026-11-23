@@ -241,7 +241,7 @@ test("Observation reader absence returns unavailable while Job export retains bu
 test("Built-in origins retain their colon through filter values and API queries", async t => {
   const { aide, store } = setup(t);
   const topic = resourceRef(await aide.topics.ensure("review-target"));
-  for (const origin of ["aide:review", "aide:triage", "aide:organize"] as const)
+  for (const origin of ["aide:curate", "aide:followup", "aide:triage", "aide:organize"] as const)
     store.submit("test", origin, { origin, originId: "personal.topic", originRef: topic, text: origin }, { ...finished(), topic });
   const filters = inputFilters(aide);
   for (const option of filters.origins) {

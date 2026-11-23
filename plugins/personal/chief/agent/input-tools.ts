@@ -20,7 +20,8 @@ const instructions: Record<InputOrigin, string> = {
   channel: "Respond to the business Input. Answer, maintain matter Notes and hand off ongoing Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
   source: "Assess the observed business facts within existing authority. Update continuing matter Notes and relevant Work as needed. Observation is not new authorization. Leave tree organization and durable summary maintenance to their own Inputs.",
   chief: "Handle the recorded business decision within its existing authorization. Maintain matter Notes and Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
-  "aide:review": "Review only the admitted maintenance request: check and consolidate Notes with upsert_note, prune_note and retire_note, maintain durable understanding and summaries. Do not answer or hand off business Inputs. Finish with assess_input for this maintenance Input only.",
+  "aide:followup": "Check the current Note and its scheduled question against related Inputs, Work results and replies from Me. If the question was superseded, finish this check. When the evidence establishes completion, record the outcome and its basis on the same Note and set closedAt. If it establishes that work is ongoing, record the progress, keep the Note open and update or clear the answered check. If completion is still unclear, ask Me privately through ask_me for the specific missing fact and keep the Note open for the reply. A related Work record alone does not settle the question. Finish this check with assess_input.",
+  "aide:curate": "Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Split mixed material and merge duplicates, saving destinations before pruning or retiring sources. Record verified closure of episodes. Only closed episodes may contribute new lasting conclusions. Correct or remove unsupported Summary claims as soon as evidence warrants. Finish this Input with assess_input.curatedNotes listing the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Leave unresolved versions pending.",
   "aide:triage": "File material within the responsibility tree: create meaningful children and move Inputs, idle Work and Notes as needed. Do not process business requests or reorganize Topic parentage. Finish this bounded maintenance Input with assess_input.",
   "aide:organize": "Organize the responsibility tree: create or move Topics and maintain their durable understanding. Do not process business requests or move individual Inputs/Work. Finish this bounded maintenance Input with assess_input.",
 };
@@ -28,7 +29,7 @@ const instructions: Record<InputOrigin, string> = {
 const bundled: { name: string; inputOrigins: readonly InputOrigin[] }[] = [
   ...["read", "grep", "find", "ls", "memory_search", "session_search"].map(name => ({ name, inputOrigins: INPUT_ORIGINS })),
   ...["bash", "edit", "write"].map(name => ({ name, inputOrigins: BUSINESS_INPUT_ORIGINS })),
-  ...["memory_add", "memory_replace", "memory_remove", "skill_manage"].map(name => ({ name, inputOrigins: ["aide:review"] as const })),
+  ...["memory_add", "memory_replace", "memory_remove", "skill_manage"].map(name => ({ name, inputOrigins: ["aide:curate"] as const })),
 ];
 export function toolsForInput(tools: readonly { name: string; inputOrigins: readonly InputOrigin[] }[], origin: InputOrigin): string[] {
   return tools.filter(tool => tool.inputOrigins.includes(origin)).map(tool => tool.name);
@@ -120,6 +121,8 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     const live = binding.read();
     if (!current || live.executionId !== current.executionId || !names.includes(context.toolCall.name))
       return { block: true, reason: "Tool is unavailable for the current Chief Input task" };
+    if (context.toolCall.name === "ask_me" && !current.inputs.some(i => i.origin === "aide:followup" && i.id === (context.args as { inputId?: string }).inputId))
+      return { block: true, reason: "Ask only about the admitted followup" };
     if (context.toolCall.name === "assess_input") {
       const args = context.args as { inputId?: string; workRequests?: unknown[] };
       const origin = current.inputs.find(i => i.id === args.inputId)?.origin ?? (args.inputId ? binding.inputOrigin(args.inputId) : undefined);

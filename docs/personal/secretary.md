@@ -13,11 +13,15 @@ Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为
 | Deferred Input 的数量与最早等待时间达到阈值 | 创建独立 Batch，将兼容的原始 Input 归入固定批次 |
 | Topic 的直属 Input／Work 数量超限 | 创建 `aide:triage` Input，请 Chief 整理材料归属 |
 | Topic 的直属 child 数量超限 | 创建 `aide:organize` Input，请 Chief 整理主题结构 |
-| 子认识待吸收、Weave 结构版本变化或 Note 容量压力 | 创建 `aide:review` Input，请 Chief 检查并维护认识 |
-| Chief 完成量达到阈值，或待回顾活动等待达到时限 | 创建 `aide:review` Input；本轮覆盖请求创建时的完成水位 |
+| 子认识待吸收、Weave 结构版本变化或 Note 容量压力 | 创建 `aide:curate` Input，请 Chief 检查并维护认识 |
+| Chief 完成量达到阈值，或待回顾活动等待达到时限 | 创建 `aide:curate` Input；本轮覆盖请求创建时的完成水位 |
 | 静默检查到期且没有待办 | 只更新检查时间与退避，不创建 Input、不触发 Agent |
 
 每个普通 Topic 检查自己的直属容量；维护请求交给其当前 root Chief 处理。领域 root 负责子树认识维护和业务批次准备。Gate 的单聊与协调请求逐条研判。具体范围见[容量与维护请求](#容量与维护请求)和 [Gate](gate.md)。
+
+## Note 维护
+
+Secretary 合并领域内的梳理需求，并为 episodic Note 的具体问题按约定时间生成 followup。curate 负责从普通 Note 到 Summary 的整理；followup 只核实未决问题，必要时私下询问 Me。[Note 生命周期](note.md#梳理与跟进)
 
 ## Reconciler
 
@@ -31,7 +35,7 @@ Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为
 
 ### 容量与维护请求
 
-维护任务使用普通 Input：origin 标记请求类型，text 描述任务，review 的 `observation.review` 保存请求时的 Chief 完成水位、结构通知版本和压力依据。创建请求时确定 Topic 归属；负责人分派随当前 Topic tree 收敛到 root。
+维护任务使用普通 Input：origin 标记请求类型，text 描述任务，curate 的 `observation.review` 保存请求时的 Chief 完成水位、结构通知版本和压力依据。创建请求时确定 Topic 归属；负责人分派随当前 Topic tree 收敛到 root。
 
 同一 Topic、同一维护 origin 的排队、执行和可重试请求共同参与去重。一轮完成后，后续周期或新变化产生新的 Input；已消失且尚未接纳的请求可取消。完整参数见[配置](../configuration.md#topic-消费策略)。
 
@@ -41,17 +45,18 @@ Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为
 | --- | --- |
 | aide:triage | maxUnfiledInput 或既有 maxWork 超限；批阅、分理和归集材料 |
 | aide:organize | maxChildren 超限；组织直属下属的分工与层次 |
-| aide:review | Chief 完成量、未回顾活动等待，或子 summary／结构／Note 压力；回顾进展与知识 |
+| aide:followup | 跟进需要回应的事项；当前按开放 episodic Note 的问题与核实时间调度 |
+| aide:curate | 普通 Note 的改动达到批量或等待上限，或工作量、子摘要、结构与预算变化需要梳理；核对证据并维护近期事项与长期认识 |
 
-内置请求复用 Input，status.topic 指向目标节点，未领取时 status.assess.topic 收敛到当前 root，领取后保留实际负责人。origin 决定 Chief 的工具与处理路径，text 描述任务。Secretary 统一准备 Review／Triage／Organize，每个节点、每种 origin 最多一条未完成请求；可重试失败仍处理原 Input。创建与请求记账原子提交，结果与完成水位原子提交，无需二次结算。`maintenanceRequests` 保留请求身份、时间、需求指纹与尝试次数；同一需求从 `capacityCooldownSeconds`（默认 60 秒）指数退避到 2 小时（基础冷却更长时保留基础冷却），新需求重新安排。已完成 Input 回收后仍可从 Topic 保留的事实继续调度。
+内置请求复用 Input，status.topic 指向目标节点，未领取时 status.assess.topic 收敛到当前 root，领取后保留实际负责人。origin 决定 Chief 的工具与处理路径，text 描述任务。Secretary 统一准备 Curate／Followup／Triage／Organize，每个节点、每种 origin 最多一条未完成请求；可重试失败仍处理原 Input。创建与请求记账原子提交，结果与完成水位原子提交，无需二次结算。`maintenanceRequests` 保留请求身份、时间、需求指纹与尝试次数；同一需求从 `capacityCooldownSeconds`（默认 60 秒）指数退避到 2 小时（基础冷却更长时保留基础冷却），新需求重新安排。已完成 Input 回收后仍可从 Topic 保留的事实继续调度。
 
 maxUnfiledInput 统计直属、无 topicKey、未删除的业务 Input，包含已研判材料；三类内置 Input 排除。maxInput 字段暂时保留，不参与策略。maxChildren 统计直属有效 child。归集到 child 后，该 child 同样检查阈值并请求 root 继续整理；已完成回执不重置。容量触发独立于静默回顾退避，执行前重查需求，已消失则直接完成请求。提示每轮至多处理 8 条材料或直属 child；这是 Agent 执行要求，不是工具调用次数硬配额，整体激活提示还受 contextChars 限制。
 
 ### 工作量与时间窗口
 
-`Topic.status.chiefWorkload` 记录 Chief 已完成量与最近 Review 覆盖的水位。每成功处理一个独立 Input 或 Batch 计一次，包括 Review、Triage、Organize；Batch 内有多少成员都只计一次，成员结果投影不重复计数。Task／Routine 的执行、状态和报告不计入 Chief 工作量；如果形成了新的协调 Input，并由 Chief 完成，则按一次计数。
+`Topic.status.chiefWorkload` 记录 Chief 已完成量与最近 Curate 覆盖的水位。每成功处理一个独立 Input 或 Batch 计一次，包括 Curate、Followup、Triage、Organize；Batch 内有多少成员都只计一次，成员结果投影不重复计数。Task／Routine 的执行、状态和报告不计入 Chief 工作量；如果形成了新的协调 Input，并由 Chief 完成，则按一次计数。
 
-默认累计 10 次完成触发 Review；不足 10 次时，从最早尚未回顾的活动等待 15 分钟触发，后续完成不推迟该时间。Review 自身仍计入下一轮数量，但不独自开启定时回顾需求，避免空闲时持续自我触发。请求记录创建时的完成水位，完成事务只确认这一水位，并保留请求后到来的活动。计数和时间窗口随 Topic 持久化，不依赖已完成 Input 的保留或历史扫描。
+默认累计 10 次完成触发 Curate；不足 10 次时，从最早尚未回顾的活动等待 15 分钟触发，后续完成不推迟该时间。Curate 自身仍计入下一轮数量，但不独自开启定时回顾需求，避免空闲时持续自我触发。请求记录创建时的完成水位，完成事务只确认这一水位，并保留请求后到来的活动。计数和时间窗口随 Topic 持久化，不依赖已完成 Input 的保留或历史扫描。
 
 日常认识检查只读取最多 20 个直属 child；到期回顾与结构变化可按需检查子树。子 summary 变化、Weave 结构通知和 Note 压力可独立产生维护请求。普通 Note 的改名、更新时间和吸收回执不构成新的调度需求；完整 Note／understanding 版本仍用于并发写入、吸收和删除安全校验。压力指纹使用稳定材料身份、正文与预算，元数据改名不重置退避。
 
@@ -63,11 +68,11 @@ Topic 配置区分 `trigger.intervalSeconds`（默认 60 秒，固定唤醒 Reco
 
 回顾截止时间从持久化事实与当前策略计算。调整配置后，下一次协调使用新策略，不从重启重新计时、不补跑错过的周期。Chief 执行结束只保存执行事实，不重置 Secretary 调度状态。失败或缺少终态回执时，Chief 重试原 Input／Batch；完成回执不再二次结算。关闭回顾或调整责任边界时，明确重置静默检查状态。
 
-维护 Input 创建即绑定目标 Topic，无需 Route 模型；请求身份、冷却及 Review 覆盖快照原子保存。Chief 使用 origin 选择工具，通过 `assess_input` 留下结果；系统 Input 不刷新 `lastInputAt`、不新增授权。日志区分请求生成、冷却等待、无事退避与执行结果，保留 origin、Topic、请求身份、触发原因与下一次检查时间。
+维护 Input 创建即绑定目标 Topic，无需 Route 模型；请求身份、冷却及 Curate 覆盖快照原子保存。Chief 使用 origin 选择工具，通过 `assess_input` 留下结果；系统 Input 不刷新 `lastInputAt`、不新增授权。日志区分请求生成、冷却等待、无事退避与执行结果，保留 origin、Topic、请求身份、触发原因与下一次检查时间。
 
 ## 与 Chief 及其它角色协作
 
-Chief Reconcile 关注抽到的非 Deferred Input／Batch，按其 origin、attention 和权限选择工具并触发 Agent，把当前待办处理好。Secretary 关注更多资源事实，它的工作产物是新的 Input 或就绪 Batch。Chief 角色内部使用 Agent 作判断，通过 `assess_input` 提交持久化结果；完成结果、Chief 工作量与本次 Review 覆盖水位在同一事务中提交。Chief 不决定下一次维护何时发生，也不在执行结束时重置秘书的退避。
+Chief Reconcile 关注抽到的非 Deferred Input／Batch，按其 origin、attention 和权限选择工具并触发 Agent，把当前待办处理好。Secretary 关注更多资源事实，它的工作产物是新的 Input 或就绪 Batch。Chief 角色内部使用 Agent 作判断，通过 `assess_input` 提交持久化结果；完成结果、Chief 工作量与本次 Curate 覆盖水位在同一事务中提交。Chief 不决定下一次维护何时发生，也不在执行结束时重置秘书的退避。
 
 Secretary 观察 Chief 已持久化的完成事实，后续需求产生新 Input。结果写入与重试由 [Chief](chief.md#完成与重试) 负责，Batch 成员结果由 Input Reconcile 投影；这些完成路径无需秘书再次确认。
 

@@ -295,6 +295,8 @@ plugins:
 
 Immediate／Normal Input 直接复用 Chief 的接纳与执行路径；Secretary 根据处理量、等待时间和 pressure 生成维护 Input。Deferred 达到 count 条或最老等待 maxWaitSeconds 后归为独立 Batch，按 Normal 交给 Chief；Batch 计一次工作量。Task／Routine 的状态变化不计 Chief 工作量。没有待回顾活动时只做退避检查；Review 自身计数但不独自启动下一轮定时需求。维护遇到容量不足会推迟，已持久化业务仍可处理。窗口、去重与退避契约见 [Secretary](personal/secretary.md)。
 
+`topic.curation.count` 指定触发梳理的普通 Note 数（1–8，默认 8），`topic.curation.maxWaitSeconds` 指定最早待梳理变更的等待时间（默认 900 秒）。满足任一条件即可调度。关闭 Topic 的工作量回顾后，普通 Note 的梳理与约定跟进仍可独立调度。
+
 修改基础等待、倍数或上限并重启后，按持久化时间事实与当前配置重新计算资格；最迟在下一次固定检查时应用，不从重启时重新等待，也不补跑历史周期。每个 Topic 通过 `spec.review.enabled` 开关后台回顾，关闭不停止定时协调、输入接纳或既有职责。完整契约见 [Topic 定时回顾](personal/secretary.md#工作量与时间窗口)。
 
 
@@ -409,7 +411,7 @@ plugins:
 
 Topic 阈值按直接归属判断，由空闲 Chief 决定如何整理；Weave 的 maxRoots 统计普通 root，Default 单独兜底，允许无合理归并方案时超标。超过目标时，未变化但已检查的 root 在 reviewIntervalMs 后重查；独立子树有 15 分钟观察期。来源 topicKey 仍保留确定性定位语义。长期设计见 [Topic](personal/topic.md)。
 
-Topic 容量阈值：maxUnfiledInput 默认 40，统计直属无 topicKey 的业务 Input（包含已研判），maxChildren 默认 8，maxWork 保持默认 8。maxInput 保留配置但暂不参与策略。每个 Topic 超限时通过 aide:triage / aide:organize Input 请求 root；每种请求去重，完成后按 capacityCooldownSeconds 冷却。静默回顾使用 aide:review，独立遵循 review.backoff。详见 [Topic 内置请求](personal/secretary.md#容量与维护请求)。
+Topic 容量阈值：maxUnfiledInput 默认 40，统计直属无 topicKey 的业务 Input（包含已研判），maxChildren 默认 8，maxWork 保持默认 8。maxInput 保留配置但暂不参与策略。每个 Topic 超限时通过 aide:triage / aide:organize Input 请求 root；每种请求去重，完成后按 capacityCooldownSeconds 冷却。静默回顾使用 aide:curate，独立遵循 review.backoff。详见 [Topic 内置请求](personal/secretary.md#容量与维护请求)。
 
 ### Gate
 

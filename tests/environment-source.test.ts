@@ -161,8 +161,8 @@ test("Real Runner groups deferred observations by canonical environment and rest
     resourceKind: topic.kind, resourceId: topic.metadata.name, controllerName: "secretary" });
   await aide.settled();
   assert.equal(aide.topics.inputStore.get(input.metadata.name)!.status.assess!.completedAt, undefined);
-  assert.equal(aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").length, 0, "Deferred observations wait for Secretary, not review inference");
-  assert.ok(prompts.every(prompt => !prompt.includes("aide:review")));
+  assert.equal(aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 0, "Deferred observations wait for Secretary, not review inference");
+  assert.ok(prompts.every(prompt => !prompt.includes("aide:curate")));
   assert.doesNotMatch(prompts.at(-1)!, /"before"|"after"/);
   assert.equal(aide.outputs().filter((message) => message.topicId !== "other").length, 0, "Source Topics do not inherit a reply address");
   assert.equal(aide.works().length, 0);

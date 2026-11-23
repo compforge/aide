@@ -24,7 +24,7 @@ test("Chief commits review results and scheduling facts once without Secretary s
   await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(f.root()) }, child.status);
   await patchSummary(f.resources, f.aide.topics.resource("child")!, { summary: "new understanding" });
   await reconcileSecretary(f.context, f.root(), f.policy);
-  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   assert.ok(review.spec.observation?.review); assert.equal(f.calls(), 0);
   await reconcileChief(f.context, f.execution(), f.root(), f.policy);
   assert.ok(f.aide.topics.inputStore.get(review.metadata.name)!.status.assess?.completedAt);
@@ -38,7 +38,7 @@ test("Chief commits review results and scheduling facts once without Secretary s
 
 test("Maintenance remains an independent Input behind ordinary business", async t => {
   const f = await secretaryFixture(t);
-  await f.input("review", InputAttention.Normal, "aide:review");
+  await f.input("review", InputAttention.Normal, "aide:curate");
   await f.input("business", InputAttention.Normal);
   await reconcileChief(f.context, f.execution(), f.root(), f.policy);
   assert.equal(f.aide.topics.inputStore.get("review")!.status.assess?.executionId, undefined);
@@ -52,13 +52,13 @@ test("Secretary prepares while Chief is busy and failed structure review does no
   await f.resources.patchStatus(f.root(), { execution: { id: "busy", startedAt: new Date().toISOString() }, weaveRevision: 1 });
   await reconcileSecretary(f.context, f.root(), f.policy);
   assert.equal(f.calls(), 0);
-  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
-  assert.ok(review.spec.observation?.review); assert.ok(f.root().status.maintenanceRequests?.["aide:review"]);
+  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
+  assert.ok(review.spec.observation?.review); assert.ok(f.root().status.maintenanceRequests?.["aide:curate"]);
   await f.resources.patchStatus(f.root(), { execution: null });
   await reconcileChief(f.context, f.execution("failure", async () => { throw new Error("provider failed"); }), f.root(), f.policy);
   await reconcileSecretary(f.context, f.root(), f.policy);
   await reconcileSecretary(f.context, f.root(), f.policy);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").length, 1);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 1);
   assert.equal(f.root().status.notifiedWeaveRevision ?? 0, 0);
   assert.equal(f.aide.topics.inputStore.get(review.metadata.name)!.status.assess?.retryable, true);
 });
@@ -68,7 +68,7 @@ test("Review completion failure retries atomically and repeated completion canno
   const f = await secretaryFixture(t);
   await f.resources.patchStatus(f.root(), { weaveRevision: 1 });
   await reconcileSecretary(f.context, f.root(), f.policy);
-  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   await reconcileChief(f.context, f.execution("write-failure", async () => {
     const failing = { ...f.resources, async commit() { throw new Error("receipt store unavailable"); } };
     await assessInput(failing, f.root(), "write-failure", { inputId: review.metadata.name, summary: "checked" });
@@ -96,7 +96,7 @@ test("Review completion failure retries atomically and repeated completion canno
   deadlineClock(t)(61_000);
   await f.resources.patchStatus(f.root(), { weaveRevision: 2 });
   await reconcileSecretary(f.context, f.root(), f.policy);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").length, 2);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 2);
 });
 
 // @case A conflicting scheduling update rolls back the receipt, then recomputes the counter exactly once.
@@ -104,7 +104,7 @@ test("Maintenance completion retries a conflicting Topic write atomically", asyn
   const f = await secretaryFixture(t);
   await f.resources.patchStatus(f.root(), { weaveRevision: 1 });
   await reconcileSecretary(f.context, f.root(), f.policy);
-  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   let raced = false, rolledBack = false;
   await reconcileChief(f.context, f.execution("race", async () => {
     const resources = { ...f.resources, async commit(writes: Parameters<typeof f.resources.commit>[0]) {
@@ -132,7 +132,7 @@ test("Maintenance completion retries a conflicting Topic write atomically", asyn
 // @case Workload is durable completion accounting, not execution count or Input origin filtering.
 test("Every Chief origin counts once and successful receipt retries never count again", async t => {
   const f = await secretaryFixture(t);
-  const origins = ["source", "channel", "chief", "aide:triage", "aide:organize", "aide:review"] as const;
+  const origins = ["source", "channel", "chief", "aide:triage", "aide:organize", "aide:curate"] as const;
   for (const [index, origin] of origins.entries()) {
     const id = `item-${index}`, executionId = `run-${index}`;
     await f.input(id, InputAttention.Normal, origin);
@@ -151,11 +151,11 @@ test("Secretary schedules by completion count and Review preserves work complete
   await f.input("first", InputAttention.Normal);
   await reconcileChief(f.context, f.execution("one"), f.root(), f.policy);
   await reconcileSecretary(f.context, f.root(), f.policy);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").length, 0);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 0);
   await f.input("second", InputAttention.Normal);
   await reconcileChief(f.context, f.execution("two"), f.root(), f.policy);
   await reconcileSecretary(f.context, f.root(), f.policy);
-  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   assert.equal(review.spec.observation?.trigger, "workload");
   assert.equal((review.spec.observation?.review as { completed: number }).completed, 2);
   let lateAt = "";
@@ -180,13 +180,13 @@ test("Time trigger uses the earliest unreviewed completion and later work cannot
   await reconcileChief(f.context, f.execution("two"), f.root(), f.policy);
   assert.equal(f.root().status.chiefWorkload?.pendingSince, since);
   await reconcileSecretary(f.context, f.root(), f.policy);
-  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   assert.equal(review.spec.observation?.trigger, "idle");
   await reconcileChief(f.context, f.execution("review"), f.root(), f.policy);
   assert.equal(f.root().status.chiefWorkload?.pendingSince ?? null, null);
   await f.resources.patchStatus(f.root(), { reviewCheckedAt: new Date(0).toISOString(), idleReviewReset: null });
   await reconcileSecretary(f.context, f.root(), f.policy);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").length, 1,
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 1,
     "Review's own completion does not reopen a timed window");
 });
 
@@ -201,7 +201,7 @@ test("Review renaming a child Note does not create a new maintenance need", asyn
   const note = await upsertTopicNote(f.resources, f.root(), "write", { subject: resourceRef(child), name: "old", text: "unchanged facts" }, "note");
   await f.resources.patchStatus(f.root(), { execution: null, chiefWorkload: { completed: 1, reviewed: 0, pendingSince: new Date(0).toISOString() } });
   await reconcileSecretary(f.context, f.root(), f.policy);
-  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   await reconcileChief(f.context, f.execution("rename", async () => {
     const updated = await upsertTopicNote(f.resources, f.root(), "rename", { noteId: note.noteId, version: note.version, name: "new", text: "unchanged facts" }, "rename");
     assert.notEqual(updated.version, note.version);
@@ -264,7 +264,7 @@ test("Input collection cannot erase Chief completion demand", async t => {
   assert.equal(f.root().status.chiefWorkload?.completed, 1);
   await f.resources.patchStatus(f.root(), { chiefWorkload: { ...f.root().status.chiefWorkload!, pendingSince: new Date(0).toISOString() } });
   await reconcileSecretary(f.context, f.root(), f.policy);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").length, 1);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 1);
 });
 
 test("Secretary request creation retries a concurrent Chief completion without losing the workload", async t => {
@@ -280,7 +280,7 @@ test("Secretary request creation retries a concurrent Chief completion without l
   } } };
   await reconcileSecretary(context, f.root(), f.policy);
   assert.ok(raced);
-  const reviews = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review");
+  const reviews = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate");
   assert.equal(reviews.length, 1);
   assert.equal((reviews[0]!.spec.observation?.review as { completed: number }).completed, 5);
   assert.equal(f.root().status.chiefWorkload?.completed, 5);

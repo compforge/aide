@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ResourceClient } from "@compforge/aide-plugin";
 import { resourceRef } from "../input/state.ts";
-import { WriterResourceSchema, SubjectSchema, NOTE_TYPE, noteVersion, type NoteSpec, type NoteStatus } from "./model.ts";
+import { WriterResourceSchema, SubjectSchema, NOTE_TYPE, pendingCuration, noteVersion, type NoteSpec, type NoteStatus } from "./model.ts";
 import type { TopicResource } from "../topic/model.ts";
 
 export const MoveNoteSchema = z.object({ noteId: z.string().min(1), version: z.string().min(1), subject: SubjectSchema, reason: z.string().trim().min(1).max(2000) }).strict();
@@ -16,6 +16,7 @@ export async function moveNote(resources: ResourceClient, actor: TopicResource, 
   if (!actor.status.execution) throw new Error("Note move requires an active Chief");
   if (JSON.stringify(note.spec.subject) === JSON.stringify(args.subject)) return { noteId: args.noteId, version: noteVersion(note) };
   const updated = await resources.replace(note, { ...note.spec, subject: args.subject }, { ...note.status,
+    pendingSince: pendingCuration(note) ?? new Date().toISOString(),
     writer: { resource: WriterResourceSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id },
     organization: { at: new Date().toISOString(), reason: args.reason, from: note.spec.subject, to: args.subject,
       writer: { resource: WriterResourceSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id } } });

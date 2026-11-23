@@ -17,12 +17,13 @@ Note 为主题与人物的长期认识、主题组织提供依据，提炼主线
 | spec.people | 涉及的人物引用，按 UID 去重；默认空数组 |
 | spec.addresses | 涉及的 Address UID 集合，近期记录按此关联分页，不改变 subject |
 | spec.sensitivity / visibility | 整条 Note 统一适用的敏感度与可见范围；定级和拆分规则见 [披露边界](disclosure.md#定级与-note-边界) |
-| spec.nature | 可选：episodic 事件经历、semantic 事实与长期认识、procedural 方法与步骤；按主要内容选择，与 summaryOf 独立，旧 Note 不自动分类 |
+| spec.nature | 可选：episodic 事件经历、semantic 事实与长期认识、procedural 方法与步骤；按主要内容选择，与 summaryOf 独立，暂缺的普通 Note 由 Secretary 到期安排归类 |
 | spec.maxChars | 正文字符数软预算，缺省 4000；普通 Note 与 summary 共用，可按篇覆盖，超额仍能保存 |
 | spec.text | 事项或长期摘要的完整正文，最多 16000 字符；摘要正文可清空 |
 | metadata.creationTimestamp | 创建时间 |
 | status.updatedAt | 最近一次内容修改时间 |
 | status.writer | Agent 写入者资源和 executionId；用户编辑、配置合并与 Weave 创建摘要不伪造 Agent 执行身份 |
+| status.curated | 最近一次确认的材料指纹和梳理 Input UID，可回查该次完成回执 |
 | status.pruned / retired | 最近删减或整篇退役的时间、原因、执行身份；退役保留正文和原内容版本 |
 | status.organization | 最近一次移动的来源、目标、原因与时间 |
 
@@ -34,7 +35,7 @@ subject、people 和 addresses 均有索引；recentSubject / recentPeople / rec
 
 未命名 Note 以正文首个非空行作为占位名称，读取投影带 `nameMissing: true`，Web 显示 `[未命名]`。Agent 在维护该 Note 时补齐名称；补齐前不改写存储。Summary 由所属对象识别，无需额外命名。
 
-Prompt 中的 summary 提供紧凑背景，普通 Note 目录只包含 id、name、nameMissing、nature、updatedAt 和 version。目录独立于正文预览预算，选取最新 40 条并按稳定 ID 排序，最多 8000 个 JSON 字符；提供总数（已知时）、truncated 与 list_notes 查询条件。异步有界读取无法确定总数时明确截断，不把当前页数量当作总量。Topic、Person、Address 和 Work 按各自关联查询；退休 Note 和 summary 不进入普通目录。Agent 根据名称判断相关性，再以 read_note 读取完整内容。Chief、Gate 和 Work 复用只读 Note 检索；读取证据不授予修改其它资源的权限，写入继续校验当前执行和 subject 归属。
+Prompt 中的 summary 提供紧凑背景，普通 Note 目录只包含 id、name、nameMissing、nature、closedAt（如已关闭）、updatedAt 和 version。目录独立于正文预览预算，选取最新 40 条并按稳定 ID 排序，最多 8000 个 JSON 字符；提供总数（已知时）、truncated 与 list_notes 查询条件。异步有界读取无法确定总数时明确截断，不把当前页数量当作总量。Topic、Person、Address 和 Work 按各自关联查询；退休 Note 和 summary 不进入普通目录。Agent 根据名称判断相关性，再以 read_note 读取完整内容。Chief、Gate 和 Work 复用只读 Note 检索；读取证据不授予修改其它资源的权限，写入继续校验当前执行和 subject 归属。
 
 目录随每次模型调用重新生成，新增、改名、内容更新、移动和退休都反映到下一次请求。当前背景 part 直接替换，历史消息保留。目录变化可能降低 prefix cache 复用；以信息准确性和任务效果为先，结合缓存使用、token 与延迟衡量成本。
 
@@ -78,7 +79,19 @@ Topic understandingVersion 纳入其查询窗口中 Note 的 UID 和版本。子
 
 move_note 接受 noteId、version、目标 subject 和 reason。当前 root Chief 可在责任树内移动 Note，来源和目标均在写入事务内校验，目标可以是 Topic / Task / Routine。移动保留 ID、正文、people 和内容更新时间，记录组织调整；subject 改变使内容版本变化。upsert_note 专注内容维护，已有 Note 的归位使用 move_note。
 
-普通 Note 的新增或更新不创建逐条 review 请求，不保留回顾队列或逐条确认回执。写入 Agent 负责当次内容质量、分类与受众；后续在预算压力整理或定时回顾中按需检查、合并和提炼。summary 变化继续通过子 Topic 认识吸收路径处理。
+Chief 消化 Input 时，把近期事项写成普通 Note。此时材料可能片面或重复，nature 可以暂缺。保留事实来源、适用范围和不确定性，让下一轮梳理能核对当时的判断。
+
+## 梳理与跟进
+
+Secretary 把同一 root Topic 下有实质变化的普通 Note 放进同一份梳理议程。默认攒到 8 篇或最早一篇等满 15 分钟就申请一次 `aide:curate`。正文、归属、关联对象、披露范围、nature 或关闭状态变化都值得再看。改名、调整篇幅预算或设置下次核实时间沿用上次梳理结果。工作量、子摘要变化与预算压力也可以触发梳理。
+
+Chief 从议程出发查找相关 Note、Input 与 Work，核对原文和现有 Summary。为保留的内容选定 nature，拆开混杂的材料，合并重复的记录，先写目标再削减或退役来源。只有已关闭且结论适用于其他场合的经历才可为 Summary 增补长期认识。若新证据表明 Summary 把一次临时分工写成了长期职责，当轮即可修正或删去这句话。
+
+Chief 完成 `assess_input` 时用 `curatedNotes` 提交实际梳理过的普通 Note 和最终版本，包括拆分、合并的目标。Input 完成和版本回执在同一事务保存。未处理的 Note 和并发写入的新版本保留在后续议程中。
+
+`aide:followup` 承担“事事有回应”的跟进职责。当前入口是 episodic Note 上已约定核实的问题。
+
+普通 episodic Note 可写 `closedAt` 表示确认该事项已有结论，正文保存结果与依据。仍需核实的问题可写 `followup: {question, checkAt}`；明确传 null 取消，关闭时自动清除。Secretary 在约定时刻安排 `aide:followup`。Chief 核对最新 Note、Input、关联 Work 的实际结果，以及 Me 已给出的答复。证据足以确认完成时，在原 Note 记录结果、依据和 `closedAt`。证据表明仍在进行时，记录进展，保持开放，按实际约定更新或清除已回答的核实问题。到期仍无法判断时，通过 `ask_me` 私下向 Me 询问缺失的事实。发出问题后可以结束本次检查，事项保持开放。Me 的回复作为新 Input，用来更新同一事项。调度和询问回执分别与 Input 和 Output 原子保存，同一问题与核实时间只询问一次。新证据或新的约定可以更新核实计划。关闭的经历仍可读取、修订和提炼，退役单独处理。
 
 ## 数量与篇幅驱动的整理
 
@@ -88,9 +101,9 @@ Input 保留大量短暂、步骤级证据；普通 Note 汇集近期事项；su
 
 Topic Reconcile 在 Note 变化时检查压力，周期唤醒兜底。数量查询最多读取 maxNotes+1 条；超长 Note 用独立索引查询，包含 summary，最多 20 条。每个 Topic 持有有界压力快照，按当前 root 与下次尝试时间建立索引，Chief 每轮最多取得 8 个 Topic；不会在每次 root 唤醒时全量遍历 Note 历史。
 
-压力通过 `aide:review`、`trigger=note_pressure` 安排 Chief 整理，独立于普通回顾开关；业务输入优先。Secretary 在创建请求时选取到期压力，已创建的请求保持快照，后来的需求留待下一次。请求创建时持久化冷却；完成结果不再修改压力调度。Secretary 根据剩余压力继续安排，同一需求逐步退避，新正文或预算变化恢复基础节奏。数量、长度降到预算内时清除压力。无法安全压缩时允许超额，并完成本轮回执。
+压力通过 `aide:curate`、`trigger=note_pressure` 安排 Chief 整理，独立于普通回顾开关；业务输入优先。Secretary 在创建请求时选取到期压力，已创建的请求保持快照，后来的需求留待下一次。请求创建时持久化冷却；完成结果不再修改压力调度。Secretary 根据剩余压力继续安排，同一需求逐步退避，新正文或预算变化恢复基础节奏。数量、长度降到预算内时清除压力。无法安全压缩时允许超额，并完成本轮回执。
 
-upsert_note 负责整合目标信息；prune_note 接受 noteId、version、完整的更短非空正文和 reason，只削减来源正文，保留元数据，也支持 summary 的原子指纹更新；retire_note 接受 noteId、version、reason，让整篇 Note 退出活跃使用。两种削减操作由 review 中的 Chief 使用，事务内校验执行身份、当前归属与版本。仍有归属对象的 summary 禁止退役。
+upsert_note 负责整合目标信息；prune_note 接受 noteId、version、完整的更短非空正文和 reason，只削减来源正文，保留元数据，也支持 summary 的原子指纹更新；retire_note 接受 noteId、version、reason，让整篇 Note 退出活跃使用。两种削减操作由 curate 中的 Chief 使用，事务内校验执行身份、当前归属与版本。仍有归属对象的 summary 禁止退役。
 
 信息移动始终先成功写入目标，再 prune 来源；来源没有独立价值才 retire。中断可以留下重复，不能先删来源再尝试保存目标。Agent 按重要性、稳定性、证据与未决问题决定合并、归位或沉淀，不为达到数量强行删除，也不通过抬高预算逃避整理。
 
@@ -115,8 +128,8 @@ Topic、Task、Routine 使用 aide.dev/v1alpha4，Person 使用 aide.dev/v1alpha
 
 摘要引用场景见 tests/summary-notes.test.ts；事项场景见 tests/note-knowledge.test.ts、tests/notes.test.ts、tests/topic-persons.test.ts 和 tests/pi-agent.test.ts：独立并发、同 Note 冲突、创建重试、过期执行、祖先归属竞争、悬空历史引用、容量回收、完整读取与真实工具路径。
 
-Secretary 创建 review 请求时原子保存触发依据和请求冷却，并按 Topic／origin 的 pending 索引去重。定时与工作量回顾受开关控制，预算压力与子 summary 吸收独立于该开关。Note 压力按稳定材料身份、正文和预算生成需求指纹；改名与 updatedAt 不重置退避。完整 Note 版本继续用于读写与删除校验。
+Secretary 创建 curate 请求时原子保存触发依据和请求冷却，并按 Topic／origin 的 pending 索引去重。定时与工作量回顾受开关控制，预算压力与子 summary 吸收独立于该开关。Note 压力按稳定材料身份、正文和预算生成需求指纹；改名与 updatedAt 不重置退避。完整 Note 版本继续用于读写与删除校验。
 
-Note Controller 只修复 summary 派生指纹。Topic 监听 Note 内容和退役状态变化以检查预算压力，周期检查兜底；预算内的普通 Note 变化不会立即调用模型。
+Note Controller 修复 summary 派生指纹；Secretary 的 Note 协调器负责归类和跟进的时机。Topic 监听 Note 内容和退役状态变化以检查预算压力，周期检查兜底；预算内的普通 Note 变化不会立即调用模型。
 
 Web 的近期记录项及 summary 正文左下角展示 sensitivity、visibility 和已设置的 nature 原值（例如 `L1 · any · semantic`）；未设置 nature 时省略，属性修改即使不改变正文，也会刷新标记。

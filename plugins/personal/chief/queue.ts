@@ -11,7 +11,7 @@ export async function preparedInputs(resources: ResourceReader, owner: Readonly<
   const result: Input[] = [];
   const queues = [{ name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, InputAttention.Immediate]) },
     { name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, InputAttention.Normal]) },
-    ...(["aide:triage", "aide:organize", "aide:review"] as const).map(origin => ({ name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, origin]) }))];
+    ...(["aide:triage", "aide:organize", "aide:followup", "aide:curate"] as const).map(origin => ({ name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, origin]) }))];
   for (const matchIndex of queues) {
     const page = await resources.page<InputSpec, InputStatus>(INPUT_TYPE, { namespace: owner.metadata.namespace, matchIndex, limit: Math.min(10, limit) });
     for (const input of page.items) {

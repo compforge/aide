@@ -1,3 +1,5 @@
+import { CuratedNotesSchema } from "../input/assessment.ts";
+import { NOTE_TYPE, noteMaterial, noteVersion, pendingCuration, type NoteSpec, type NoteStatus } from "../note/model.ts";
 import { inputOutcome } from "./input-outcome.ts";
 import { commitStatus } from "../status.ts";
 import { agentCall } from "../observation/reference.ts";
@@ -10,6 +12,7 @@ import { resourceRef, topicScope, belongsToTopic, type Input } from "../input/st
 import { WorkInputRequestSchema, type WorkStatus } from "../work/model.ts";
 import { WORK_TYPES, type WorkSpec } from "../work/resources.ts";
 export const AssessInputSchema = z.object({ inputId: z.string().min(1), summary: z.string().min(1).max(1000),
+  curatedNotes: CuratedNotesSchema.default([]),
   workRequests: z.array(z.object({ workUid: z.string().min(1), request: WorkInputRequestSchema }).strict()).max(100).default([]) }).strict();
 export type AssessInput = z.input<typeof AssessInputSchema>;
 /**
@@ -36,14 +39,30 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
       throw new Error("Input is already admitted to another Chief execution");
     const at = new Date().toISOString();
     const { handle, guards } = await prepareWorkRequests(resources, input, topics, args.workRequests, at);
+    const accepted: typeof args.curatedNotes = [];
+    const receipts: ResourceCommit[] = [];
+    if (args.curatedNotes.length) {
+      if (input.spec.origin !== "aide:curate" || input.status.assess?.executionId !== executionId)
+        throw new Error("Only the admitted aide:curate may acknowledge Notes");
+      if (new Set(args.curatedNotes.map(n => n.noteId)).size !== args.curatedNotes.length) throw new Error("Duplicate curated Note");
+      for (const { noteId, version } of args.curatedNotes) {
+        const note = await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: noteId });
+        // An intervening edit stays in the pending index for the next round, including on a transaction retry.
+        if (!note || !pendingCuration(note) || noteVersion(note) !== version) continue;
+        if (!note.spec.nature) throw new Error("Assign the retained Note a nature before acknowledging it");
+        accepted.push({ noteId, version });
+        receipts.push({ operation: "patchStatus", resource: note, patch: { curated: { inputUid: input.metadata.uid, material: noteMaterial(note.spec) } } });
+      }
+    }
     const outcome = inputOutcome(input, c, at);
     try {
       await commitStatus(resources, [
         ...guards,
         { operation: "patchStatus", resource: input, patch: { handle, assess: { ...input.status.assess,
           lastError: undefined, errorAt: undefined, retryable: undefined,
-          ...(toolCallId ? { completedBy: agentCall(c.status, toolCallId) } : {}), completedAt: at, result: { summary: args.summary, disposition: "completed" },
+          ...(toolCallId ? { completedBy: agentCall(c.status, toolCallId) } : {}), completedAt: at, result: { summary: args.summary, disposition: "completed", ...(accepted.length ? { curatedNotes: accepted } : {}) },
         } } },
+        ...receipts,
         { operation: "patchStatus", resource: c, patch: outcome },
       ]);
       return { assessed: args.inputId, workUids: args.workRequests.map(r => r.workUid) };
