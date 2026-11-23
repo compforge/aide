@@ -1,3 +1,4 @@
+import { fixtureMe } from "./address-fixture.ts";
 import { fixtureGateRef } from "./summary-fixture.ts";
 import { collectResources } from "./fixtures/resource-gc.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
@@ -166,7 +167,7 @@ test("pressure review request tolerates unrelated Topic writes and commits its c
     }
     return f.resources.commit(writes);
   } };
-  const input = await createMaintenanceInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review", "note_pressure");
+  const input = await createMaintenanceInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:curate", "note_pressure");
   assert.equal(input.status.assess!.topic!.uid, f.root.metadata.uid);
   assert.equal(f.read().status.lastError, "preserved");
   assert.ok(f.read().status.reviewCheckedAt);
@@ -183,7 +184,7 @@ test(`review request rolls back on ${race} at commit`, async t => {
     if (race === "disabled") await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
     return f.resources.commit(race === "schedule-failure" ? [...writes, { operation: "patchStatus", resource: f.read(), patch: { unknown: true } }] : writes);
   } };
-  await assert.rejects(createMaintenanceInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review"), race === "schedule-failure" ? /unknown|Unrecognized/ : /eligible root/);
+  await assert.rejects(createMaintenanceInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:curate"), race === "schedule-failure" ? /unknown|Unrecognized/ : /eligible root/);
   assert.equal(f.aide.topics.inputStore.list().length, 0);
   assert.equal(f.read().status.reviewCheckedAt ?? null, null);
   assert.equal(f.read().status.maintenanceRequests, undefined);
@@ -195,8 +196,8 @@ test(`racing review requests reuse one pending Input (same due: ${sameDue})`, as
   await f.resources.patchStatus(f.read(), { execution: null });
   const agenda = await maintenanceAgenda(f.resources, []), due = new Date().toISOString();
   const [a, b] = await Promise.all([
-    createMaintenanceInput(f.context, f.read(), due, agenda, "aide:review", "note_pressure"),
-    createMaintenanceInput(f.context, f.read(), sameDue ? due : "2000-01-01T00:00:00.000Z", agenda, "aide:review", "note_pressure"),
+    createMaintenanceInput(f.context, f.read(), due, agenda, "aide:curate", "note_pressure"),
+    createMaintenanceInput(f.context, f.read(), sameDue ? due : "2000-01-01T00:00:00.000Z", agenda, "aide:curate", "note_pressure"),
   ]);
   assert.equal(a.metadata.uid, b.metadata.uid);
   assert.equal(f.aide.topics.inputStore.list().length, 1);
@@ -338,7 +339,7 @@ async function completePressure(f: Awaited<ReturnType<typeof setup>>, pressure: 
   const { assessInput } = await import("../plugins/personal/chief/assess.ts");
   if (executionId) await f.resources.patchStatus(f.read(), { execution: { id: executionId, startedAt: new Date().toISOString() } });
   const review = await createMaintenanceInput(f.context, f.read(), new Date().toISOString(),
-    await maintenanceAgenda(f.resources, []), "aide:review", "note_pressure", { cooldownSeconds: 60, instructions: "Review pressure",
+    await maintenanceAgenda(f.resources, []), "aide:curate", "note_pressure", { cooldownSeconds: 60, instructions: "Review pressure",
       plan: { weaveRevision: 0, absorption: [], notePressure: pressure } });
   if (executionId) await assessInput(f.resources, f.read(), executionId, { inputId: review.metadata.name, summary: "Pressure reviewed" });
 }
@@ -362,4 +363,65 @@ test("Note renaming preserves pressure identity and backoff while text changes r
   assert.notEqual(f.read().status.notePressure?.version, pressure.version);
   assert.equal(f.read().status.notePressure?.attempts, 0);
   assert.equal((await dueNotePressure(f.resources, f.read())).length, 1);
+});
+
+test("Secretary separates curation from one-shot followup and fences stale questions on closure", async t => {
+  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
+  const f = await setup(t);
+  const policy = topicPolicy();
+  const ordinary = await f.note({ text: "An unclassified observation" }, "unclassified");
+  const original = await f.get(ordinary.noteId);
+  assert.ok((await prepareNoteMaintenance(f.context, original, policy))!.requeueAfterMs > 0);
+  await prepareNoteMaintenance(f.context, original, policy, Date.now() + policy.unclassifiedAfterSeconds * 1000);
+  const curate = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate");
+  assert.equal(curate.length, 1);
+  assert.match(curate[0]!.spec.text, new RegExp(ordinary.noteId));
+
+  const episode = await f.note({ text: "Waiting for metrics", nature: "episodic" }, "episode");
+  const schedule = async () => prepareNoteMaintenance(f.context, await f.get(episode.noteId), policy);
+  assert.equal(await schedule(), undefined);
+  const followup = { question: "Are the metrics final?", checkAt: new Date(0).toISOString() };
+  await assert.rejects(f.note({ text: "a method", nature: "procedural", followup }, "invalid"), /episodic/);
+  const open = await f.note({ ...episode, followup }, "schedule");
+  await schedule();
+  assert.equal(await schedule(), undefined);
+  const requests = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:followup");
+  assert.equal(requests.length, 1);
+  const request = requests[0]!;
+  assert.equal(request.status.assess?.topic?.uid, f.root.metadata.uid);
+  await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "live", startedAt: new Date().toISOString() } });
+  const ask = (id: string) => f.aide.topics.say("knowledge", undefined, followup.question, "live",
+    { to: { me: true }, inputIds: [request.metadata.name], idempotencyKey: id });
+  await fixtureMe(f.aide);
+  const first = await ask("first");
+  assert.deepEqual(await ask("another-tool-call"), first);
+  assert.equal(f.aide.topics.outputStore.get(first.outputId)?.spec.target.uid, f.aide.defaultAddress().uid);
+  assert.equal((await f.get(open.noteId)).status.askedFollowupId, request.metadata.name);
+
+  const closedAt = new Date().toISOString();
+  const closed = await f.note({ ...open, text: "Metrics signed off", closedAt }, "close");
+  const result = await readNote(f.resources, closed.noteId);
+  assert.equal(result.closedAt, closedAt);
+  assert.equal(result.followup, undefined);
+  assert.equal(result.retired, undefined);
+  assert.equal(await schedule(), undefined);
+  await assert.rejects(ask("late"), /no longer matches/);
+});
+
+test("conflicting evidence can request curation before an episode closes", async t => {
+  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
+  const f = await setup(t);
+  await f.aide.topics.setReviewEnabled(f.root.spec.id, false);
+  const episode = await f.note({ nature: "episodic", text: "Ownership of the current metrics was handed over",
+    summaryConflict: "Person Summary describes this temporary assignment as standing ownership" }, "handoff");
+  const note = await f.get(episode.noteId);
+  await prepareNoteMaintenance(f.context, note, topicPolicy());
+  const input = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate");
+  assert.equal(input?.spec.observation?.trigger, "summary_conflict");
+  assert.ok(input.spec.text.includes(episode.noteId));
+  const updated = await f.note({ ...episode, summaryConflict: null }, "resolved");
+  assert.equal(await prepareNoteMaintenance(f.context, await f.get(updated.noteId), topicPolicy()), undefined);
+  assert.equal((await f.get(updated.noteId)).spec.closedAt, undefined);
 });

@@ -8,6 +8,7 @@ import { registerWeave } from "./weave/reconcile.ts";
 import type { PluginPackage } from "@compforge/aide-plugin";
 import { registerTopicObservations } from "./topic/conditions.ts";
 import { registerChief } from "./chief/reconcile.ts";
+import { registerNoteMaintenance } from "./secretary/note.ts";
 import { registerSecretary } from "./secretary/reconcile.ts";
 import { registerRoute } from "./route/reconcile.ts";
 import { registerEnvironmentSources } from "./source/environment/observe.ts";
@@ -31,6 +32,7 @@ const plugin: PluginPackage = {
     registerTopicObservations(context);
     registerChief(context);
     registerSecretary(context);
+    registerNoteMaintenance(context);
     registerSources(context);
     registerRepositorySources(context);
     registerPullRequestSources(context);

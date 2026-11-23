@@ -1,3 +1,4 @@
+import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
 import { committedStatus } from "./fixtures/resource-write.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
@@ -174,4 +175,21 @@ test("startup resumes existing Topic inputs without Topic or Work display projec
   await aide.settled();
   assert.equal(calls, 1);
   assert.equal(aide.topics.inputStore.get("before-start")!.status.assess?.completedAt !== undefined, true);
+});
+
+test("startup dispatches a due episodic Note to Chief and persists the followup receipt", async t => {
+  const { aide } = setup(t, { async chief() { return "Checked"; } });
+  const resources = aide.runtime.plugins.resourceClient("personal");
+  const root = await aide.topics.ensure("me");
+  const startedAt = new Date().toISOString();
+  const writer = await resources.patchStatus(root, { execution: { id: "seed", startedAt } });
+  const receipt = await upsertTopicNote(resources, writer, "seed", { nature: "episodic", text: "Metrics await sign-off",
+    followup: { question: "Has the owner signed off?", checkAt: startedAt } }, "metrics");
+  await resources.patch(aide.topics.resource("me")!, { type: "json", value: [{ op: "remove", path: "/status/execution" }] });
+  await aide.start();
+  const requests = () => aide.topics.inputStore.list().filter(input => input.spec.origin === "aide:followup");
+  await until(() => requests().some(input => !!input.status.assess?.completedAt));
+  assert.equal(requests().length, 1);
+  assert.equal(requests()[0]!.spec.observation?.noteUid, receipt.uid);
+  assert.ok(requests()[0]!.status.assess?.result);
 });

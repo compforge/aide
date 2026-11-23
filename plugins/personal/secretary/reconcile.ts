@@ -1,3 +1,4 @@
+import { NOTE_TYPE, followupInputId, type NoteResource } from "../note/model.ts";
 import { topicWatch, materialWatch } from "../topic/watch.ts";
 import { assignmentWatch } from "../input/state.ts";
 import { batchWatch } from "../batch/reconcile.ts";
@@ -33,12 +34,12 @@ function maintenanceInstructions(plan: ReviewPreparation, maxChars: number): str
 }
 
 async function cancelObsolete(context: PluginContext, topic: TopicResource, policy: TopicPolicy) {
-  for (const origin of ["aide:review", "aide:triage", "aide:organize"] as const) {
+  for (const origin of ["aide:curate", "aide:followup", "aide:triage", "aide:organize"] as const) {
     const pending = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
       matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
     const input = pending.items[0];
     if (!input || input.status.assess?.executionId) continue;
-    let obsolete = origin === "aide:review" && !isRootTopic(topic);
+    let obsolete = origin === "aide:curate" && !isRootTopic(topic);
     const evidence = reviewEvidence(input.spec);
     const work = chiefWorkload(topic);
     const workloadDue = topicReview(topic.spec.review).enabled && (work.completed - work.reviewed >= policy.review.completedInputs
@@ -51,7 +52,11 @@ async function cancelObsolete(context: PluginContext, topic: TopicResource, poli
         obsolete ||= targets.every(page => !page.items[0]?.status.notePressure);
       }
     }
-    if (origin !== "aide:review") {
+    if (origin === "aide:followup") {
+      const note = await context.resources.get<NoteResource["spec"], NoteResource["status"]>({
+        ...NOTE_TYPE, namespace: "v1", name: String(input.spec.observation?.noteId) });
+      obsolete = !note || followupInputId(note) !== input.metadata.name;
+    } else if (origin !== "aide:curate") {
       const facts = (await maintenanceAgenda(context.resources, [topic], policy)).topics[0];
       obsolete = !facts || (origin === "aide:triage" ? facts.inputs <= policy.maxUnfiledInput && facts.work <= policy.maxWork : facts.children <= policy.maxChildren);
     }
@@ -82,7 +87,7 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
   if (Object.keys(schedule.patch).length) topic = await context.resources.patchStatus(topic, schedule.patch);
   const due = topicReview(topic.spec.review).enabled && Date.parse(schedule.dueAt) <= Date.now();
   const outstanding = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
-    matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, "aide:review"]) }, limit: 1 });
+    matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, "aide:curate"]) }, limit: 1 });
   if (outstanding.items.length) return { requeueAfterMs: next };
   const notePressure = await dueNotePressure(context.resources, topic, Date.now(), Math.max(1, Math.min(8, Math.floor((policy.contextChars - 3000) / 600))));
   const work = chiefWorkload(topic);
@@ -107,7 +112,7 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
     const fingerprint = digest([weave ? plan.weaveRevision : 0,
       pendingAbsorption(topics, topic).map(entry => [entry.uid, entry.parentUid, entry.version]),
       notePressure.map(entry => [entry.uid, entry.pressure.version]), workloadDue ? work.completed : null]);
-    await tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:review",
+    await tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:curate",
       notePressure.length ? "note_pressure" : weave || summaryPending.length ? "understanding" : countDue ? "workload" : "idle",
       { plan, instructions: maintenanceInstructions(plan, policy.maxChars), cooldownSeconds: policy.capacityCooldownSeconds }, policy, fingerprint);
   } else if (due && !topic.status.execution) {

@@ -71,7 +71,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
       chiefWorkload: ChiefWorkloadSchema.optional(),
-      maintenanceRequests: z.partialRecord(z.enum(["aide:review", "aide:triage", "aide:organize"]), z.object({ checkedAt: z.string().datetime(), inputId: z.string(), fingerprint: z.string(), attempts: z.number().int().nonnegative().max(14) }).strict()).optional(),
+      maintenanceRequests: z.partialRecord(z.enum(["aide:curate", "aide:followup", "aide:triage", "aide:organize"]), z.object({ checkedAt: z.string().datetime(), inputId: z.string(), fingerprint: z.string(), attempts: z.number().int().nonnegative().max(14) }).strict()).optional(),
       notePressure: NotePressureSchema.optional(),
       // Discard the retired queue when decoding older Topic resources.
       noteReviewQueue: z.unknown().optional(),

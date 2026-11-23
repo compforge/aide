@@ -22,7 +22,7 @@ Input.assess 保存全局唯一研判和 Chief 接纳 executionId。Chief Reconc
 
 明确拒绝 steer / followUp 时恢复待通知状态。status.agent 保存 harness 和原生 sessionId，恢复由 SDK 承担。旧 Chief 自然结束后再释放成为子节点的原生句柄，不修改历史。
 
-root 按 Immediate → 已准备的 Deferred Batch → Normal → aide:triage → aide:organize → aide:review 选择。Secretary 可在业务执行期间准备维护 Input；维护请求保持独立。Deferred 组批策略见 [Secretary](secretary.md#deferred-归组)，成员及准备契约见 [Batch](batch.md)。
+root 按 Immediate → 已准备的 Deferred Batch → Normal → aide:triage → aide:organize → aide:followup → aide:curate 选择。Secretary 可在业务执行期间准备维护 Input；维护请求保持独立。Deferred 组批策略见 [Secretary](secretary.md#deferred-归组)，成员及准备契约见 [Batch](batch.md)。
 
 维护只接纳本轮内部 Input，不消费业务回执。Immediate 可在维护期间 steer 同一 Chief，下一模型轮次切换工具；其它准备好的待办通过 followUp 排队，在实际取出时切换任务范围。工具与共享 session 的取舍见 [按 Input 选择工具](#按-input-选择工具)。运行中的 Batch 使用一个 deliveryId、一个原生消息和自身的接纳回执；成员通过 batchId 查询执行事实。
 
@@ -57,7 +57,8 @@ Chief Agent 负责判断，Personal Route 负责话题归位。Chief 的接收 C
 | Input.origin | 任务专属能力（此外共享读取、检索和 upsert_note） |
 | --- | --- |
 | channel / source / chief | say、cite_output、Work 创建和请求、文件与 CLI 操作；assess_input 可原子交接业务 Input |
-| aide:review | Note 回顾与归位、Topic/Person/Address summary、Topic 回收许可、Hermes memory/skill 写入 |
+| aide:followup | 核实到期的具体问题，更新 episodic Note；必要时通过 ask_me 私下询问 Me |
+| aide:curate | Note 回顾与归位、Topic/Person/Address summary、Topic 回收许可、Hermes memory/skill 写入 |
 | aide:triage | 创建 child、迁移 Input/Work/Note；只完成本轮维护 Input |
 | aide:organize | 创建或移动 Topic、维护 Topic summary；只完成本轮维护 Input |
 
@@ -139,7 +140,7 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-hermes-memory](https://github.com/chandra447/pi-hermes-memory)，由 Pi 的扩展加载器显式加载。
 事项认识由 Note 承载，主题、人物、场合和工作的长期认识由各自 summary 承载，Topic tree 保存主题组织关系；Hermes 提供通用记忆与检索。职责与沉淀主线见 [Personal](README.md#从-input-到认识与成果)。
 
-Chief 在同一轮 `aide:review` 中读取待整理 Note 的完整内容，通过 subject、people、addresses 判断哪些对象出现值得沉淀的长期认识，按需读取现有 summary 并调用 summarize_topic、summarize_person、summarize_address。Person 与 Address 的 summary 汇集多个领域的认识，更新保留其他领域的有效内容和用户修正，版本冲突时重新读取并合并。确认目标保存成功后，再判断来源 Note 是否需要削减或退役。整理沿用 Topic 的预算压力、认识吸收与定时 review；每轮处理当前议程内的材料，有长期认识变化时才更新对应 summary。各对象的内容职责见 [作为 summary 的 Note](note.md#作为-summary-的-note)。
+Chief 在同一轮 `aide:curate` 中读取待整理 Note 的完整内容，通过 subject、people、addresses 判断哪些对象出现值得沉淀的长期认识，按需读取现有 summary 并调用 summarize_topic、summarize_person、summarize_address。Person 与 Address 的 summary 汇集多个领域的认识，更新保留其他领域的有效内容和用户修正，版本冲突时重新读取并合并。确认目标保存成功后，再判断来源 Note 是否需要削减或退役。整理沿用 Topic 的预算压力、认识吸收与定时 review；每轮处理当前议程内的材料，有长期认识变化时才更新对应 summary。各对象的内容职责见 [作为 summary 的 Note](note.md#作为-summary-的-note)。
 
 #### 人物认知
 

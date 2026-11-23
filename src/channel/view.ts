@@ -17,7 +17,7 @@ export interface TopicBlock extends BaseBlock {
   generation?: string;
   detail?: string;
   inputId?: string;
-  origin?: "channel" | "source" | "chief" | "aide:review" | "aide:triage" | "aide:organize";
+  origin?: "channel" | "source" | "chief" | "aide:curate" | "aide:followup" | "aide:triage" | "aide:organize";
   originId?: string;
   relation?: import("../../plugins/personal/input/model.ts").InputRelation;
   sender?: import("@compforge/aide-plugin").ResourceRef;

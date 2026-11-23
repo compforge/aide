@@ -181,15 +181,15 @@ test("Due child knowledge creates a pre-routed review Input with independent rec
   await f.input("deferred"); await unabsorbedChild(f); await f.due();
   const activity = f.read().status.lastInputAt;
   await f.run();
-  const input = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+  const input = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   assert.deepEqual(input.status.route!.result!.topics, [resourceRef(f.read())]);
   assert.equal(input.status.route?.executionId, undefined);
   assert.ok(input.status.assess?.completedAt);
   assert.equal(f.read().status.lastInputAt, activity);
   assert.equal((await inputJob(input, [])).status, "completed");
-  assert.equal(inputList(f.aide, { origin: "aide:review" }).items.length, 1);
+  assert.equal(inputList(f.aide, { origin: "aide:curate" }).items.length, 1);
   assert.ok(inputDetail(f.aide, input.metadata.name)!.timeline.some(e => e.stage === "assess" && e.status === "completed"));
-  assert.ok(topicView(f.aide, "root").blocks.some(b => b.origin === "aide:review"));
+  assert.ok(topicView(f.aide, "root").blocks.some(b => b.origin === "aide:curate"));
   await f.run(); assert.equal(f.calls.length, 1);
 });
 
@@ -210,7 +210,7 @@ test(`${changed} maintenance is selected from Topic data`, async t => {
   }
   await f.run({ review: backoff });
   assert.equal(f.calls.length, 1);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").length, 1);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 1);
 });
 
 test("Material pressure creates a bounded organization Input even without pending assessments", async t => {
@@ -244,7 +244,7 @@ test("Review creation is fenced; reopening before admission consumes the existin
   const topic = f.read(), due = idleReviewSchedule(topic, backoff).dueAt;
   const agenda = await maintenanceAgenda(f.resources, [topic]);
   await createMaintenanceInput(f.context, topic, due, agenda);
-  assert.equal((await createMaintenanceInput(f.context, topic, due, agenda)).metadata.name, f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!.metadata.name);
+  assert.equal((await createMaintenanceInput(f.context, topic, due, agenda)).metadata.name, f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!.metadata.name);
   // Assignment refresh has its own restart tests; here both materials are ready before admission.
   await reconcileAssignments(f.context, f.read());
   await f.aide.close();
@@ -253,7 +253,7 @@ test("Review creation is fenced; reopening before admission consumes the existin
     await restarted.start(); await restarted.settled();
     assert.equal(restarted.invocations().filter(i => i.topicId === "root").length, 1);
     assert.equal(restarted.topics.inputStore.list().length, 2);
-    assert.ok(restarted.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").every(i => i.status.assess?.completedAt));
+    assert.ok(restarted.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").every(i => i.status.assess?.completedAt));
     assert.equal(restarted.topics.inputStore.get("deferred")!.status.assess?.executionId, undefined);
   } finally { await restarted.close(); }
 });
@@ -264,7 +264,7 @@ test(`${mode} finalizes review waiting without replaying uncertain inputs`, asyn
   if (mode === "interrupted") {
     await reconcileSecretary(f.context, f.read());
     await f.resources.patchStatus(f.read(), { execution: { id: "interrupted", startedAt: past() } });
-    const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+    const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
     await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "interrupted", startedAt: past() } });
   }
   if (mode === "missing_receipt") f.hooks.skipAssessment = true;
@@ -293,7 +293,7 @@ test(`${mode} review preserves deferred business and retries the same maintenanc
   await f.input("old-deferred"); await unabsorbedChild(f); await f.due();
   f.hooks.skipAssessment = mode === "missing_receipt";
   await f.run({ review: backoff }, mode === "failure");
-  const failed = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+  const failed = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   const old = f.aide.topics.inputStore.get("old-deferred")!;
   assert.ok(failed.status.assess?.lastError);
   assert.equal(old.status.assess?.executionId, undefined);
@@ -310,7 +310,7 @@ test(`${mode} review preserves deferred business and retries the same maintenanc
   await f.resources.patchStatus(failed, { assess: { ...failed.status.assess, errorAt: new Date(Date.now() - 61_000).toISOString() } });
   await f.due(); await f.run();
   assert.equal(f.calls.length, 2, "the unfinished review retries after its cooldown");
-  const reviews = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review");
+  const reviews = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate");
   assert.equal(reviews.length, 1);
   assert.equal(reviews[0]!.metadata.uid, failed.metadata.uid);
   assert.ok(reviews[0]!.status.assess?.completedAt);
@@ -319,7 +319,7 @@ test(`${mode} review preserves deferred business and retries the same maintenanc
   assert.deepEqual(f.aide.topics.inputStore.get("old-deferred")!.status, old.status, "failed business Input is not replayed");
 });
 
-for (const origin of ["aide:review", "aide:triage", "aide:organize"] as const)
+for (const origin of ["aide:curate", "aide:triage", "aide:organize"] as const)
 test(`${origin} deduplicates queued, active and retryable requests until completion`, async t => {
   const f = await fixture(t);
   const topic = f.read(), agenda = await maintenanceAgenda(f.resources, [topic]);
@@ -656,7 +656,7 @@ test("business inputs run ahead of Note pressure and resolved pressure requests 
   await f.input("business", InputAttention.Immediate);
   await f.run();
   assert.equal(f.calls.length, 1); assert.ok(!f.calls[0]!.prompt.includes("Note consolidation"));
-  const pending = await createMaintenanceInput(f.context, f.read(), new Date().toISOString(), await maintenanceAgenda(f.resources, []), "aide:review", "note_pressure");
+  const pending = await createMaintenanceInput(f.context, f.read(), new Date().toISOString(), await maintenanceAgenda(f.resources, []), "aide:curate", "note_pressure");
   await f.resources.patchStatus(f.read(), { execution: { id: "reduce", startedAt: new Date().toISOString() } });
   await retireNote(f.resources, f.read(), { noteId: references[0]!.noteId, version: references[0]!.version, reason: "duplicate" });
   await f.resources.patchStatus(f.read(), { execution: null });

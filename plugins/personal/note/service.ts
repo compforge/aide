@@ -7,15 +7,15 @@ import { z } from "zod";
 import type { Resource, ResourceClient } from "@compforge/aide-plugin";
 import { personRefs, PersonRefsSchema } from "../person/model.ts";
 import { resourceRef } from "../input/state.ts";
-import { NOTE_TYPE, NoteNameSchema, NoteNatureSchema, MaxCharsSchema, noteMaxChars, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
+import { NOTE_TYPE, NoteNameSchema, NoteNatureSchema, FollowupSchema, MaxCharsSchema, noteMaxChars, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
 
 export const NoteUpdateSchema = z.object({ version: z.string().min(1).optional(), noteId: z.string().min(1).optional(),
-  name: NoteNameSchema.optional(), nature: NoteNatureSchema.optional(), maxChars: MaxCharsSchema.optional(),
+  name: NoteNameSchema.optional(), nature: NoteNatureSchema.optional(), summaryConflict: z.string().trim().min(1).max(1000).nullable().optional(), closedAt: z.iso.datetime().optional(), followup: FollowupSchema.nullable().optional(), maxChars: MaxCharsSchema.optional(),
   sensitivity: SensitivitySchema.optional(), visibility: VisibilitySchema.optional(),
   addresses: AddressRefsSchema.optional(), subject: SubjectSchema.optional(), text: z.string().trim().min(1).max(16000).optional(), people: PersonRefsSchema().optional(),
 }).strict().refine(a => !a.noteId || !!a.version, "Updating a Note requires its version")
   .refine(a => !!a.noteId || a.text !== undefined, "Creating a Note requires text")
-  .refine(a => [a.name, a.text, a.people, a.addresses, a.sensitivity, a.visibility, a.nature, a.maxChars].some(v => v !== undefined), "Supply Note content or classification");
+  .refine(a => [a.name, a.text, a.people, a.addresses, a.sensitivity, a.visibility, a.nature, a.summaryConflict, a.closedAt, a.followup, a.maxChars].some(v => v !== undefined), "Supply Note content or classification");
 export type NoteUpdate = z.infer<typeof NoteUpdateSchema>;
 export function noteReceipt(note: NoteResource) {
   return { noteId: note.metadata.name, uid: note.metadata.uid, version: noteVersion(note),
@@ -49,6 +49,14 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
     ...(args.maxChars !== undefined ? { maxChars: args.maxChars } : !previous ? { maxChars: noteMaxChars({}) } : {}), sensitivity: args.sensitivity ?? previous?.spec.sensitivity ?? "L3", visibility,
     subject: args.subject ?? previous?.spec.subject ?? writer.resource, text: args.text ?? previous?.spec.text ?? "",
     people: args.people ?? previous?.spec.people ?? personRefs([]), addresses: args.addresses ?? previous?.spec.addresses ?? addressRefs([]) };
+  if (args.summaryConflict) spec.summaryConflict = args.summaryConflict;
+  if (args.summaryConflict === null) delete spec.summaryConflict;
+  if (spec.summaryOf && spec.summaryConflict) throw new Error("Record conflicting evidence on an ordinary Note");
+  if (args.closedAt !== undefined) spec.closedAt = args.closedAt;
+  if (args.followup) spec.followup = args.followup;
+  if (args.followup === null || args.closedAt && args.followup === undefined) delete spec.followup;
+  if ((spec.closedAt || spec.followup) && (spec.summaryOf || spec.nature !== "episodic" || spec.closedAt && spec.followup))
+    throw new Error("Only ordinary episodic Notes can close or schedule an open question");
   if (previous && !equalResourceValue(previous.spec.subject, spec.subject)) throw new Error("Use move_note to change an existing Note subject");
   if (previous?.spec.summaryOf) {
     const owner = await resources.get<SummaryResource["spec"], SummaryResource["status"]>(previous.spec.subject);

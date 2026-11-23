@@ -107,7 +107,7 @@ test("Incompatible origins remain separate and internal maintenance never batche
   const f = await secretaryFixture(t);
   await f.input("a", InputAttention.Deferred, "source", "one"); await f.input("b", InputAttention.Deferred, "source", "two");
   await prepareInputs(f.context, f.root(), f.policy); assert.equal((await f.resources.list(BATCH_TYPE)).length, 0);
-  const review = await f.input("review", InputAttention.Normal, "aide:review");
+  const review = await f.input("review", InputAttention.Normal, "aide:curate");
   await prepareInputs(f.context, f.root(), f.policy, Date.parse(review.metadata.creationTimestamp) + 700_000);
   assert.equal(f.aide.topics.inputStore.get("review")!.status.batchId, undefined);
   assert.equal((await f.resources.list(BATCH_TYPE)).length, 2);

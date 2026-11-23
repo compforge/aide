@@ -38,7 +38,7 @@ const ref = z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.st
  * @case tests/topic-review.test.ts
  */
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
-  type: INPUT_TYPE, indexVersion: 2,
+  type: INPUT_TYPE, indexVersion: 3,
   schema: { spec: InputSpecSchema, status: z.object({
     batchId: z.string().min(1).optional(), batchAt: z.iso.datetime().optional(),
     retention: InputPolicySchema.shape.retention.optional(), conditions: ConditionsSchema, topic: ResourceRefSchema.optional(), organization: OrganizationSchema.optional(),
@@ -71,6 +71,7 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   }, delete(current, context) { if (!memberCanEvict(current, context)) throw new Error("Finish or cancel Batch before deleting a member"); } },
   printer: inputPrinter,
   indexes: {
+    followup: r => r.spec.origin === "aide:followup" ? [r.metadata.name] : [],
     batch: r => r.status.batchId ? [r.status.batchId] : [],
     obsoleteReply: r => obsoleteReplies(r.spec),
     message: r => { const identity = replyIdentity(r); return identity ? [identity.key] : []; },

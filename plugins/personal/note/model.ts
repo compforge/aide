@@ -23,11 +23,19 @@ export const SubjectSchema = WriterResourceSchema.extend({ kind: z.enum(["Topic"
  * @why Differently classified facts belong in separate Notes, even when they concern the same matter.
  * @link docs/personal/disclosure.md
  */
+export const FollowupSchema = z.object({ question: z.string().trim().min(1).max(1000), checkAt: z.iso.datetime() }).strict();
+/** Stable across unrelated edits, executions and restarts. */
+export function followupInputId(note: NoteResource) {
+  const plan = note.spec.followup;
+  if (!plan || note.spec.closedAt || note.status.retired || note.metadata.deletionTimestamp) return;
+  return "followup-" + createHash("sha256").update(JSON.stringify([note.metadata.uid, plan.question, plan.checkAt])).digest("hex");
+}
 export const NoteSpecSchema = z.object({ name: NoteNameSchema.optional(), subject: SubjectSchema, summaryOf: SubjectSchema.optional(), people: PersonRefsSchema().prefault([]),
-  addresses: AddressRefsSchema.prefault([]), nature: NoteNatureSchema.optional(), maxChars: MaxCharsSchema.optional(), text: z.string().max(16000), ...DisclosureFields }).strict();
+  addresses: AddressRefsSchema.prefault([]), nature: NoteNatureSchema.optional(), summaryConflict: z.string().trim().min(1).max(1000).optional(), closedAt: z.iso.datetime().optional(), followup: FollowupSchema.optional(), maxChars: MaxCharsSchema.optional(), text: z.string().max(16000), ...DisclosureFields }).strict();
 export const NoteWriterSchema = z.object({ resource: WriterResourceSchema, executionId: z.string().min(1) }).strict();
 const ReductionReceiptSchema = z.object({ at: z.string().datetime(), reason: z.string().trim().min(1).max(2000), writer: NoteWriterSchema }).strict();
 export const NoteStatusSchema = z.object({ updatedAt: z.string().datetime(), writer: NoteWriterSchema.optional(),
+  followupInputId: z.string().optional(), askedFollowupId: z.string().optional(),
   retired: ReductionReceiptSchema.optional(),
   pruned: ReductionReceiptSchema.optional(),
   // Retired scheduling fields are accepted only to normalize existing stored resources.
