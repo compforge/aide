@@ -27,7 +27,7 @@ export function chiefTools(connectors: ConnectorClient, say?: (id: string, input
       parameters: Type.Object({ inputId: Type.Optional(text), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, args) { if (!readInput) throw new Error("read_input unavailable"); return result(readInput(args.inputId, args.offset ?? 0)); } }),
     tool({ name: "ask_me", inputOrigins: ["aide:followup"], label: "Ask Me about the open question",
-      description: "Ask Me once if the scheduled question remains important after checking current Note, Work and Input evidence.",
+      description: "Ask Me privately for the missing fact when current evidence cannot answer the scheduled question. Name the matter so Me can answer in context. The question leaves the Note open.",
       parameters: Type.Object({ inputId: text, text }, { additionalProperties: false }),
       async execute(id, args) {
         if (!say) throw new Error("Output unavailable");

@@ -4,6 +4,7 @@ import { inputExpiry, inputHardExpiry, inputPressure } from "./retention.ts";
 import { InputClassificationFields } from "../disclosure.ts";
 import { channelPromotion } from "./identity.ts";
 import { obsoleteReplies, replyIdentity } from "../address/reply.ts";
+import { NOTE_TYPE, followupInputId, type NoteSpec, type NoteStatus } from "../note/model.ts";
 import { validateReviewRequest } from "./review.ts";
 import { PersonRefSchema } from "../person/model.ts";
 import { ConditionsSchema } from "../conditions.ts";
@@ -55,6 +56,15 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
         .some(i => i.metadata.uid !== current.metadata.uid)) throw new ResourceVersionConflict("Topic already has this internal Input pending");
   }, update(previous, current, context) {
     validateMembership(previous, current, context);
+    // @spec An admitted check can finish once the question is settled, superseded, or asked privately. Asking leaves the episode open.
+    // @link docs/personal/note.md#梳理与跟进
+    const assessment = current.status.assess;
+    if (current.spec.origin === "aide:followup" && !previous.status.assess?.completedAt && assessment?.completedAt
+      && assessment.result?.disposition === "completed" && typeof current.spec.observation?.noteUid === "string") {
+      const note = context.get<NoteSpec, NoteStatus>(NOTE_TYPE, current.spec.observation.noteUid);
+      if (note && followupInputId(note) === current.metadata.name && note.status.askedFollowupId !== current.metadata.name)
+        throw new Error("Resolve the scheduled question from evidence or ask Me before completing this followup");
+    }
     if (assessmentFinished(previous.status.assess) && !equalResourceValue({ ...previous.status.assess, topic: undefined }, { ...current.status.assess, topic: undefined })) throw new Error(previous.status.assess?.lastError ? "Input assessment has failed; submit a new Input" : "Input assessment is already completed");
     if (previous.status.assess?.lastError && !previous.status.assess.retryable && !previous.status.assess.completedAt
       && Object.keys(current.status.handle ?? {}).some(uid => !previous.status.handle?.[uid]))

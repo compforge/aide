@@ -57,7 +57,7 @@ Chief Agent 负责判断，Personal Route 负责话题归位。Chief 的接收 C
 | Input.origin | 任务专属能力（此外共享读取、检索和 upsert_note） |
 | --- | --- |
 | channel / source / chief | say、cite_output、Work 创建和请求、文件与 CLI 操作；assess_input 可原子交接业务 Input |
-| aide:followup | 跟进需要回应的事项。当前核实 episodic Note 上到期的问题，更新进展，必要时通过 ask_me 私下询问 Me |
+| aide:followup | 跟进需要回应的事项。当前核实 episodic Note 上到期的问题。有证据就记录结论，缺少决定性信息就通过 ask_me 私下询问 Me |
 | aide:curate | Note 回顾与归位、Topic/Person/Address summary、Topic 回收许可、Hermes memory/skill 写入 |
 | aide:triage | 创建 child、迁移 Input/Work/Note；只完成本轮维护 Input |
 | aide:organize | 创建或移动 Topic、维护 Topic summary；只完成本轮维护 Input |

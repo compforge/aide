@@ -394,19 +394,26 @@ test("Secretary separates curation from one-shot followup and fences stale quest
   const ask = (id: string) => f.aide.topics.say("knowledge", undefined, followup.question, "live",
     { to: { me: true }, inputIds: [request.metadata.name], idempotencyKey: id });
   await fixtureMe(f.aide);
+  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
+  const finish = () => assessChiefInput(f.resources, f.read(), "live",
+    { inputId: request.metadata.name, summary: "Checked the status of the metrics" }, "assess");
+  await assert.rejects(finish(), /ask Me/);
   const first = await ask("first");
   assert.deepEqual(await ask("another-tool-call"), first);
   assert.equal(f.aide.topics.outputStore.get(first.outputId)?.spec.target.uid, f.aide.defaultAddress().uid);
   assert.equal((await f.get(open.noteId)).status.askedFollowupId, request.metadata.name);
 
+  await finish();
+  assert.equal((await f.get(open.noteId)).spec.closedAt, undefined);
+
   const closedAt = new Date().toISOString();
-  const closed = await f.note({ ...open, text: "Metrics signed off", closedAt }, "close");
+  const closed = await f.note({ ...open, text: "Me confirmed the metrics were signed off", closedAt }, "close");
   const result = await readNote(f.resources, closed.noteId);
   assert.equal(result.closedAt, closedAt);
   assert.equal(result.followup, undefined);
   assert.equal(result.retired, undefined);
   await schedule();
-  await assert.rejects(ask("late"), /no longer matches/);
+  await assert.rejects(ask("late"), /Only the active followup/);
 });
 
 test("curate batches classified drafts and acknowledges only final versions it actually reviewed", async t => {
@@ -467,4 +474,26 @@ test("an unclassified draft stays pending through edits until its classified ver
   const classified = await f.note({ ...edited, nature: "procedural" }, "classify");
   await finish(classified);
   assert.equal(pendingCuration(await f.get(draft.noteId)), undefined);
+});
+
+test("evidence that an episode is still ongoing settles the old check without asking Me", async t => {
+  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
+  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
+  const f = await setup(t);
+  const episode = await f.note({ nature: "episodic", text: "Awaiting final sign-off",
+    followup: { question: "Has sign-off happened?", checkAt: new Date(0).toISOString() } }, "signoff");
+  await prepareNoteMaintenance(f.context, await f.get(episode.noteId), topicPolicy());
+  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:followup")!;
+  await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "live", startedAt: new Date().toISOString() } });
+  const followup = { question: "Did the scheduled sign-off complete?", checkAt: new Date(Date.now() + 86_400_000).toISOString() };
+  await f.note({ ...episode, text: "Owner confirmed review is still ongoing and scheduled sign-off for tomorrow", followup }, "progress");
+  await fixtureMe(f.aide);
+  await assert.rejects(f.aide.topics.say("knowledge", undefined, "Has sign-off happened?", "live", {
+    to: { me: true }, inputIds: [request.metadata.name] }), /no longer matches/);
+  await assessChiefInput(f.resources, f.read(), "live", { inputId: request.metadata.name, summary: "Owner confirmed the revised schedule" }, "assess");
+  const note = await f.get(episode.noteId);
+  assert.equal(note.spec.closedAt, undefined);
+  assert.deepEqual(note.spec.followup, followup);
+  assert.equal(f.aide.outputs().length, 0);
 });

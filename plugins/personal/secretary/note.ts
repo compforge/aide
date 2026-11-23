@@ -22,7 +22,7 @@ export async function prepareNoteMaintenance(context: PluginContext, note: NoteR
   let next = checkAt;
   const cooldown = policy.capacityCooldownSeconds;
   if (followup && requestId && checkAt <= now) {
-    const instructions = `Check Note ${note.metadata.name}. Scheduled question: ${followup.question}. Read the current Note, related Work and new evidence. If the need has changed or Work is following it, finish silently.`;
+    const instructions = `Check Note ${note.metadata.name}. Scheduled question: ${followup.question}. Read the current Note, related Work and any new evidence to determine the outcome.`;
     await tryCreateMaintenanceInput(context, topic, followup.checkAt, await maintenanceAgenda(context.resources, [], policy),
       "aide:followup", "question_due", { note, instructions, cooldownSeconds: cooldown }, policy, requestId);
     next = now + cooldown * 1000;

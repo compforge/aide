@@ -1,3 +1,4 @@
+import { readNote } from "../plugins/personal/note/service.ts";
 import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
 import { committedStatus } from "./fixtures/resource-write.ts";
@@ -177,12 +178,20 @@ test("startup resumes existing Topic inputs without Topic or Work display projec
   assert.equal(aide.topics.inputStore.get("before-start")!.status.assess?.completedAt !== undefined, true);
 });
 
-test("startup dispatches a due episodic Note to Chief and persists the followup receipt", async t => {
-  const { aide } = setup(t, { async chief() { return "Checked"; } });
+test("startup followup closes a verified episode without asking Me", async t => {
+  const { aide } = setup(t, { async chief() {
+    const current = aide.topics.resource("me")!;
+    const signoff = await readNote(resources, evidence.noteId);
+    await upsertTopicNote(resources, current, current.status.execution!.id, {
+      noteId: receipt.noteId, version: receipt.version, text: signoff.text, closedAt: signoff.updatedAt,
+    }, "close-from-signoff");
+    return "Confirmed sign-off from the recorded decision";
+  } });
   const resources = aide.runtime.plugins.resourceClient("personal");
   const root = await aide.topics.ensure("me");
   const startedAt = new Date().toISOString();
   const writer = await resources.patchStatus(root, { execution: { id: "seed", startedAt } });
+  const evidence = await upsertTopicNote(resources, writer, "seed", { text: "Owner signed off on the final metrics" }, "decision");
   const receipt = await upsertTopicNote(resources, writer, "seed", { nature: "episodic", text: "Metrics await sign-off",
     followup: { question: "Has the owner signed off?", checkAt: startedAt } }, "metrics");
   await resources.patch(aide.topics.resource("me")!, { type: "json", value: [{ op: "remove", path: "/status/execution" }] });
@@ -192,4 +201,6 @@ test("startup dispatches a due episodic Note to Chief and persists the followup 
   assert.equal(requests().length, 1);
   assert.equal(requests()[0]!.spec.observation?.noteUid, receipt.uid);
   assert.ok(requests()[0]!.status.assess?.result);
+  assert.ok((await readNote(resources, receipt.noteId)).closedAt);
+  assert.equal(aide.outputs().length, 0);
 });

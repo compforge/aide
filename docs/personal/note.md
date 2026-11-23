@@ -91,7 +91,7 @@ Chief 完成 `assess_input` 时用 `curatedNotes` 提交实际梳理过的普通
 
 `aide:followup` 承担“事事有回应”的跟进职责。当前入口是 episodic Note 上已约定核实的问题。
 
-普通 episodic Note 可写 `closedAt` 表示确认该事项已有结论，正文保存结果与依据。仍需核实的问题可写 `followup: {question, checkAt}`；明确传 null 取消，关闭时自动清除。Secretary 在约定时刻安排 `aide:followup`，Chief 核对最新 Note、Input 和关联 Work，已有 Work 跟进时沿用其安排。必要时通过 ask_me 私下核实。调度和询问回执分别与 Input 和 Output 原子保存，同一问题与核实时间只询问一次。新证据或新的约定可以更新核实计划。关闭的经历仍可读取、修订和提炼，退役单独处理。
+普通 episodic Note 可写 `closedAt` 表示确认该事项已有结论，正文保存结果与依据。仍需核实的问题可写 `followup: {question, checkAt}`；明确传 null 取消，关闭时自动清除。Secretary 在约定时刻安排 `aide:followup`。Chief 核对最新 Note、Input、关联 Work 的实际结果，以及 Me 已给出的答复。证据足以确认完成时，在原 Note 记录结果、依据和 `closedAt`。证据表明仍在进行时，记录进展，保持开放，按实际约定更新或清除已回答的核实问题。到期仍无法判断时，通过 `ask_me` 私下向 Me 询问缺失的事实。发出问题后可以结束本次检查，事项保持开放。Me 的回复作为新 Input，用来更新同一事项。调度和询问回执分别与 Input 和 Output 原子保存，同一问题与核实时间只询问一次。新证据或新的约定可以更新核实计划。关闭的经历仍可读取、修订和提炼，退役单独处理。
 
 ## 数量与篇幅驱动的整理
 
