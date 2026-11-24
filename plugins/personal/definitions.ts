@@ -1,3 +1,4 @@
+import { OngoingDefinition } from "./ongoing/definition.ts";
 import { BatchDefinition } from "./batch/definition.ts";
 import { NoteDefinition } from "./note/definition.ts";
 import { RepositorySourceDefinition } from "./source/repository/definition.ts";
@@ -17,4 +18,4 @@ import { StreamDefinition } from "../../src/host/stream/definition.ts";
 
 import { HandoffDefinition } from "./handoff/model.ts";
 
-export default [BatchDefinition, HandoffDefinition, StreamDefinition, AddressDefinition, NoteDefinition, RepositorySourceDefinition, PullRequestSourceDefinition, WeaveDefinition, RouteDefinition, InputDefinition, OutputDefinition, TopicDefinition, TaskDefinition, RoutineDefinition, EnvironmentSourceDefinition, MessageSourceDefinition, RequirementSourceDefinition];
+export default [OngoingDefinition, BatchDefinition, HandoffDefinition, StreamDefinition, AddressDefinition, NoteDefinition, RepositorySourceDefinition, PullRequestSourceDefinition, WeaveDefinition, RouteDefinition, InputDefinition, OutputDefinition, TopicDefinition, TaskDefinition, RoutineDefinition, EnvironmentSourceDefinition, MessageSourceDefinition, RequirementSourceDefinition];

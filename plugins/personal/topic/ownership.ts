@@ -16,6 +16,16 @@ export function requireTopic(ref: ResourceRef | undefined, context: ResourceVali
     || ref.apiVersion !== TOPIC_TYPE.apiVersion || ref.kind !== TOPIC_TYPE.kind || topic.metadata.deletionTimestamp) throw new Error("Assigned Topic unavailable");
   return topic;
 }
+export function requireProcessingRoot(ref: ResourceRef | undefined, context: ResourceValidationContext) {
+  let topic = requireTopic(ref, context);
+  const seen = new Set<string>();
+  while (topic.spec.parentRef && !isProcessingRoot(topic)) {
+    if (seen.has(topic.metadata.uid)) throw new Error("Topic parent cycle");
+    seen.add(topic.metadata.uid);
+    topic = requireTopic(topic.spec.parentRef, context);
+  }
+  return topic;
+}
 /** @spec Reassignment changes visibility, never routing history or completed processing receipts.
  * @why An admitted Input finishes before moving, so its active Chief cannot lose authority mid-turn.
  * @link docs/personal/topic.md#归属调整与责任交接

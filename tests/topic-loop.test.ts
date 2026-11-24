@@ -1,3 +1,4 @@
+import { upsertOngoing, readOngoing } from "../plugins/personal/ongoing/service.ts";
 import { readNote } from "../plugins/personal/note/service.ts";
 import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
@@ -178,12 +179,13 @@ test("startup resumes existing Topic inputs without Topic or Work display projec
   assert.equal(aide.topics.inputStore.get("before-start")!.status.assess?.completedAt !== undefined, true);
 });
 
-test("startup followup closes a verified episode without asking Me", async t => {
+test("startup followup closes a verified ongoing matter without asking Me", async t => {
   const { aide } = setup(t, { async chief() {
     const current = aide.topics.resource("me")!;
     const signoff = await readNote(resources, evidence.noteId);
-    await upsertTopicNote(resources, current, current.status.execution!.id, {
-      noteId: receipt.noteId, version: receipt.version, text: signoff.text, closedAt: signoff.updatedAt,
+    const matter = await readOngoing(resources, current, receipt.ongoingId);
+    await upsertOngoing(resources, current, {
+      ongoingId: receipt.ongoingId, version: matter.metadata.resourceVersion, outcome: signoff.text,
     }, "close-from-signoff");
     return "Confirmed sign-off from the recorded decision";
   } });
@@ -192,15 +194,15 @@ test("startup followup closes a verified episode without asking Me", async t => 
   const startedAt = new Date().toISOString();
   const writer = await resources.patchStatus(root, { execution: { id: "seed", startedAt } });
   const evidence = await upsertTopicNote(resources, writer, "seed", { text: "Owner signed off on the final metrics" }, "decision");
-  const receipt = await upsertTopicNote(resources, writer, "seed", { nature: "episodic", text: "Metrics await sign-off",
-    followup: { question: "Has the owner signed off?", checkAt: startedAt } }, "metrics");
+  const receipt = await upsertOngoing(resources, writer, { title: "Metrics await sign-off",
+    question: "Has the owner signed off?", checkAt: startedAt }, "metrics");
   await resources.patch(aide.topics.resource("me")!, { type: "json", value: [{ op: "remove", path: "/status/execution" }] });
   await aide.start();
   const requests = () => aide.topics.inputStore.list().filter(input => input.spec.origin === "aide:followup");
   await until(() => requests().some(input => !!input.status.assess?.completedAt));
   assert.equal(requests().length, 1);
-  assert.equal(requests()[0]!.spec.observation?.noteUid, receipt.uid);
+  assert.equal(requests()[0]!.spec.observation?.ongoingUid, receipt.uid);
   assert.ok(requests()[0]!.status.assess?.result);
-  assert.ok((await readNote(resources, receipt.noteId)).closedAt);
+  assert.ok((await readOngoing(resources, root, receipt.ongoingId)).status.closure?.at);
   assert.equal(aide.outputs().length, 0);
 });

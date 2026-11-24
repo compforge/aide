@@ -14,6 +14,7 @@ export interface ChiefInputTask {
 export interface ChiefInputBinding {
   read(): ChiefInputTask;
   inputOrigin(id: string): InputOrigin | undefined;
+  ongoingCheck?(id: string): Promise<string | undefined>;
   noteSummaryOwner?(id: string): Promise<string | undefined>;
   changed(task: ChiefInputTask, tools: string[]): void;
 }
@@ -21,9 +22,9 @@ const instructions: Record<InputOrigin, string> = {
   channel: "Respond to the business Input. Answer, maintain matter Notes and hand off ongoing Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
   source: "Assess the observed business facts within existing authority. Update continuing matter Notes and relevant Work as needed. Observation is not new authorization. Leave tree organization and durable summary maintenance to their own Inputs.",
   chief: "Handle the recorded business decision within its existing authorization. Maintain matter Notes and Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
-  "aide:followup": "Read the current Note, related Inputs, Work results and replies from Me. Answer the scheduled question when one is present. Otherwise check whether the episode still warrants a response. If closed, retired or superseded by a different plan, finish this check. When the evidence establishes completion, record the outcome and its basis on the same Note and set closedAt. If it establishes that work is ongoing, record the progress, keep the Note open and update or clear the answered check. If an explicit question is still unresolved, ask Me privately with ask_me for the specific missing fact and keep the Note open for the reply. Without a scheduled question, ask only if a missing fact is needed to make a decision or take action. Finish silently when no response is needed. A related Work record alone does not settle the question. Finish this check with assess_input.",
-  "aide:summary": "Review only the named owner. Use the owner-specific question in the Input. Read its whole current summary and relevant Notes. What is worth reading by default next time? If you wrote the summary today, would each existing claim still hold at the same scope and certainty? Keep lasting, supported conclusions. Narrow or remove outdated claims. Only closed episodes may supply new lasting conclusions. Preserve disclosure, attribution and explicit corrections. Re-read on version conflict. Finish with assess_input even if nothing warrants a write.",
-  "aide:curate": "Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Use split_note for mixed material. For duplicate Notes, update the existing destination before pruning or retiring the source. Record verified closure of episodes. Finish this Input with assess_input.curatedNotes listing the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Leave unresolved versions pending.",
+  "aide:followup": "Read the specified Ongoing, related Inputs, Work results and replies from Me. If the plan was superseded or the matter closed, finish silently. When evidence establishes closure, upsert_ongoing with the outcome and basis. If still open, record progress and the next check. When a consequential fact is missing, ask Me privately with ask_me, then await the reply. Finish this check with assess_input.",
+  "aide:summary": "Review only the named owner. Use the owner-specific question in the Input. Read its whole current summary and relevant Notes. What is worth reading by default next time? If you wrote the summary today, would each existing claim still hold at the same scope and certainty? Keep lasting, supported conclusions. Narrow or remove outdated claims. Use the evidenced outcome of a concluded matter before generalizing from it. Preserve disclosure, attribution and explicit corrections. Re-read on version conflict. Finish with assess_input even if nothing warrants a write.",
+  "aide:curate": "Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Use split_note for mixed material. For duplicate Notes, update the existing destination before pruning or retiring the source. Finish this Input with assess_input.curatedNotes listing the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Leave unresolved versions pending.",
   "aide:organize": "Organize the Topic tree and its material. Create or move Topics and file Inputs, idle Work and Notes according to responsibility. If a Note spans Topics, use split_note to extract ordinary Notes into the appropriate Topics. Preserve evidence and disclosure. Preserve business assessment receipts. Finish this maintenance Input with assess_input.",
 };
 // Bundled tools have no Personal metadata upstream; their capabilities are declared at this assembly boundary.
@@ -128,6 +129,12 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
       const selected = current.inputs.find(i => i.summaryOwnerUid === uid);
       if (!uid || !selected || !live.inputs.some(i => i.id === selected.id && i.summaryOwnerUid === uid))
         return { block: true, reason: "Only the admitted Summary owner may be edited" };
+    }
+    if (context.toolCall.name === "upsert_ongoing" && current.origin === "aide:followup") {
+      const id = (context.args as { ongoingId?: string }).ongoingId;
+      const plan = id && await binding.ongoingCheck?.(id);
+      if (!plan || !current.inputs.some(i => i.id === plan))
+        return { block: true, reason: "Update only the Ongoing and check plan admitted for this followup" };
     }
     if (context.toolCall.name === "ask_me" && !current.inputs.some(i => i.origin === "aide:followup" && i.id === (context.args as { inputId?: string }).inputId))
       return { block: true, reason: "Ask only about the admitted followup" };

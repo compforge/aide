@@ -110,6 +110,13 @@ test("Gate read tools discover multiple roots and enforce the active owner on ev
   assert.equal((await call("read_topic", { uid: second.metadata.uid })).url, "/?topic=second");
   const work = await aide.work("first").create({ kind: "routine", title: "Existing domain work", instruction: "Domain responsibility", trigger: { cron: null, timezone: "UTC", event: "check" } });
   assert.equal((await call("read_work", { id: work.id })).id, work.id);
+  const resources = aide.personal.store.client;
+  const writer = await resources.patchStatus(second, { execution: { id: "seed", startedAt: new Date().toISOString() } });
+  const { upsertOngoing } = await import("../plugins/personal/ongoing/service.ts");
+  const matter = await upsertOngoing(resources, writer, { title: "Awaiting the approval" }, "approval");
+  assert.equal((await call("list_ongoings", { topicUid: second.metadata.uid })).items[0].ongoingId, matter.ongoingId);
+  assert.equal((await call("read_ongoing", { ongoingId: matter.ongoingId })).title, matter.title);
+  assert.ok(!tools.some(tool => tool.name === "upsert_ongoing"));
   assert.equal((await call("list_work", { kind: "routine", q: "domain" })).items[0].id, work.id);
   await assert.rejects(aide.work("gate").create({ kind: "routine", title: "Forbidden Gate work", instruction: "Must delegate", trigger: { cron: null, timezone: "UTC", event: "check" } }), /cannot own new Work/);
   await assert.rejects(aide.work("gate").requestInput(work.id, { text: "change domain" }), /Unknown work/);

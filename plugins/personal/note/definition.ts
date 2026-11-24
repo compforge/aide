@@ -1,10 +1,9 @@
-import { OUTPUT_TYPE, type OutputSpec } from "../output/model.ts";
 import { INPUT_TYPE } from "../input/model.ts";
 import type { InputSpec, InputStatus } from "../input/model.ts";
 import { isGateTopic } from "../topic/boundary.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { requireOrganization, requireTopic } from "../topic/ownership.ts";
-import { pendingCuration, noteMaterial, followupInputId, noteVersion, noteMaxChars } from "./model.ts";
+import { pendingCuration, noteMaterial, noteVersion, noteMaxChars } from "./model.ts";
 import { requireContentWriter } from "../context-write.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { NOTE_TYPE, WriterResourceSchema, NoteSpecSchema, NoteStatusSchema, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
@@ -20,8 +19,6 @@ function validateAddresses(note: NoteResource, context: ResourceValidationContex
   }
 }
 function validate(note: NoteResource, context: ResourceValidationContext) {
-  if ((note.spec.closedAt || note.spec.followup) && (note.spec.nature !== "episodic" || note.spec.summaryOf || note.spec.closedAt && note.spec.followup))
-    throw new Error("Only ordinary episodic Notes can close or schedule an open question");
   if (note.metadata.deletionTimestamp) throw new Error("Note is being deleted");
   if (note.metadata.namespace !== "v1" || note.metadata.owner) throw new Error("Note requires the shared namespace and an independent lifecycle");
   const writer = note.status.writer;
@@ -73,26 +70,6 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
       const subject = context.get(before.spec.subject, before.spec.subject.uid);
       if (!subject) throw new Error("Note subject no longer exists");
       requireContentWriter(subject, { resource: WriterResourceSchema.parse(input.status.topic), executionId }, context);
-      return;
-    }
-    if (before.status.askedFollowupId !== after.status.askedFollowupId) {
-      const id = followupInputId(before);
-      const output = id && context.page<OutputSpec, unknown>(OUTPUT_TYPE, { limit: 1, matchIndex: { name: "followup", value: id } }).items[0];
-      if (!output || id !== before.status.followupInputId || id !== after.status.askedFollowupId || !output.spec.inputIds?.includes(id)
-        || !equalResourceValue(before.spec, after.spec) || !equalResourceValue({ ...before.status, askedFollowupId: id }, after.status))
-        throw new Error("Followup question must match the current Note and accepted Output");
-      const subject = context.get(before.spec.subject, before.spec.subject.uid);
-      if (!subject || !output.spec.executionId) throw new Error("Followup owner is unavailable");
-      requireContentWriter(subject, { resource: WriterResourceSchema.parse(output.spec.topic), executionId: output.spec.executionId }, context);
-      return;
-    }
-    if (before.status.followupInputId !== after.status.followupInputId) {
-      const id = followupInputId(before);
-      const request = id && context.page<InputSpec, InputStatus>(INPUT_TYPE, { limit: 1, matchIndex: { name: "followup", value: id } }).items[0];
-      if (!request || request.spec.origin !== "aide:followup" || request.spec.observation?.noteUid !== before.metadata.uid
-        || id !== after.status.followupInputId || !equalResourceValue(before.spec, after.spec)
-        || !equalResourceValue({ ...before.status, followupInputId: id }, after.status))
-        throw new Error("Followup receipt must match the current Note and scheduled Input");
       return;
     }
     if (!equalResourceValue(before.status.retired, after.status.retired)) {

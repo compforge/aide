@@ -1,3 +1,4 @@
+import { ongoingReadTools } from "../ongoing/tools.ts";
 import { batchForInput } from "../batch/view.ts";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -33,6 +34,7 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
     return value;
   };
   const tools: ToolDefinition[] = [
+    ...ongoingReadTools(store.client, () => store.topics.resource("gate")!),
     tool({ name: "list_topics", label: "Find Topics", description: "Search root Topics by name/summary, or list one parent's children. Gate is excluded. Follow nextOffset for more; search before browsing all roots.",
       parameters: Type.Object({ q: Type.Optional(Type.String({ maxLength: 500 })), parentUid: Type.Optional(text), offset }),
       async execute(_id, args) {

@@ -1,3 +1,5 @@
+import { followupInputId } from "../../ongoing/model.ts";
+import { readOngoing } from "../../ongoing/service.ts";
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../../batch/model.ts";
 import { assessChiefInput, chiefPreviews, type ChiefAssessment } from "../inputs.ts";
 import { isGateTopic } from "../../topic/boundary.ts";
@@ -81,6 +83,7 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
             }));
           }) ] };
       },
+      ongoingCheck: async id => followupInputId(await readOngoing(store.client, active(), id)),
       noteSummaryOwner: async id => (await readNote(store.client, id)).summaryOf?.uid,
       inputOrigin: id => {
         const input = store.topics.inputStore.get(id);

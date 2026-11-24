@@ -1,4 +1,4 @@
-import { NOTE_TYPE, followupInputId, type NoteSpec, type NoteStatus } from "../note/model.ts";
+import { ONGOING_TYPE, followupInputId, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
 import { isGateTopic } from "./boundary.ts";
 import { HANDOFF_TYPE, type HandoffSpec, type HandoffStatus } from "../handoff/model.ts";
 import { AddressRefSchema, type AddressRef } from "../address/model.ts";
@@ -252,11 +252,11 @@ export class TopicStore {
         owner = latest;
       }
       if (executionId && (owner ? owner.status.execution?.id : c.status.execution?.id) !== executionId) throw new Error("Output execution is no longer active");
-      const note = followup && this.resources.find<NoteSpec, NoteStatus>(NOTE_TYPE, String(followup.spec.observation?.noteId));
-      if (followup && (!note || note.metadata.uid !== followup.spec.observation?.noteUid || followupInputId(note) !== id || note.status.followupInputId !== id))
-        throw new Error("Followup no longer matches an open Note question");
+      const matter = followup && this.resources.find<OngoingSpec, OngoingStatus>(ONGOING_TYPE, String(followup.spec.observation?.ongoingId));
+      if (followup && (!matter || matter.metadata.uid !== followup.spec.observation?.ongoingUid || followupInputId(matter) !== id || matter.status.followupInputId !== id))
+        throw new Error("Followup no longer matches an open Ongoing question");
       // @spec Persist the one-question receipt with acceptance, across retries and Output capacity eviction.
-      if (note?.status.askedFollowupId === id) return { outputId: id, accepted: true };
+      if (matter?.status.askedFollowupId === id) return { outputId: id, accepted: true };
       const draft: OutputDraft = { id, topicId, text, workId: null };
       // @spec Provenance belongs to the first admission. System notices have no agent execution;
       // their deduplication key is not a tool-call ID, even when this Topic has an active Chief.
@@ -271,7 +271,7 @@ export class TopicStore {
           { operation: "patchStatus", resource: c, patch: {} },
           ...(owner ? [{ operation: "patchStatus" as const, resource: owner, patch: {} }] : []),
           outputWrite(c, draft, association),
-          ...(note ? [{ operation: "patchStatus" as const, resource: note, patch: { askedFollowupId: id } }] : []),
+          ...(matter ? [{ operation: "patchStatus" as const, resource: matter, patch: { askedFollowupId: id } }] : []),
         ]);
         return { outputId: id, accepted: true };
       } catch (error) {

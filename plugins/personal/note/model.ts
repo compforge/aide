@@ -11,11 +11,11 @@ export const noteName = (note: { name?: string; text: string }) => note.name ?? 
 
 export const DEFAULT_MAX_CHARS = 4000;
 export const MaxCharsSchema = z.number().int().min(256).max(16000);
-export const NoteNatureSchema = z.enum(["episodic", "semantic", "procedural"]);
+export const NoteNatureSchema = z.enum(["semantic", "procedural"]);
 /** @why Resolve legacy budgets on read; persisting a default on decode would invalidate existing summary fingerprints. */
 export const noteMaxChars = (spec: { maxChars?: number }) => spec.maxChars ?? DEFAULT_MAX_CHARS;
 
-export const NOTE_TYPE = { apiVersion: "aide.dev/v1alpha4", kind: "Note" } as const;
+export const NOTE_TYPE = { apiVersion: "aide.dev/v1alpha5", kind: "Note" } as const;
 export const WriterResourceSchema = z.object({ apiVersion: z.string().min(1), kind: z.enum(["Topic", "Task", "Routine"]),
   namespace: z.literal("v1"), name: z.string().min(1), uid: z.string().min(1) }).strict();
 export const SubjectSchema = WriterResourceSchema.extend({ kind: z.enum(["Topic", "Task", "Routine", "Person", "Address"]) });
@@ -23,25 +23,13 @@ export const SubjectSchema = WriterResourceSchema.extend({ kind: z.enum(["Topic"
  * @why Differently classified facts belong in separate Notes, even when they concern the same matter.
  * @link docs/personal/disclosure.md
  */
-export const FollowupSchema = z.object({ question: z.string().trim().min(1).max(1000).optional(), checkAt: z.iso.datetime() }).strict();
-export const defaultFollowupCheckAt = (now: number) => new Date(now + 24 * 60 * 60_000).toISOString();
-/** @spec One Input per Note UID, question and stored checkAt. An omitted question requests a general check.
- * @link docs/personal/note.md#梳理与跟进
- */
-export function followupInputId(note: NoteResource) {
-  if (note.spec.nature !== "episodic" || note.spec.summaryOf || note.spec.closedAt || note.status.retired || note.metadata.deletionTimestamp) return;
-  const plan = note.spec.followup;
-  if (!plan) return;
-  return "followup-" + createHash("sha256").update(JSON.stringify([note.metadata.uid, plan.question, plan.checkAt])).digest("hex");
-}
 export const NoteSpecSchema = z.object({ name: NoteNameSchema.optional(), subject: SubjectSchema, summaryOf: SubjectSchema.optional(), people: PersonRefsSchema().prefault([]),
-  addresses: AddressRefsSchema.prefault([]), nature: NoteNatureSchema.optional(), closedAt: z.iso.datetime().optional(), followup: FollowupSchema.optional(), maxChars: MaxCharsSchema.optional(), text: z.string().max(16000), ...DisclosureFields }).strict();
+  addresses: AddressRefsSchema.prefault([]), nature: NoteNatureSchema.optional(), maxChars: MaxCharsSchema.optional(), text: z.string().max(16000), ...DisclosureFields }).strict();
 export const NoteWriterSchema = z.object({ resource: WriterResourceSchema, executionId: z.string().min(1) }).strict();
 const ReductionReceiptSchema = z.object({ at: z.string().datetime(), reason: z.string().trim().min(1).max(2000), writer: NoteWriterSchema }).strict();
 export const NoteStatusSchema = z.object({ updatedAt: z.string().datetime(), writer: NoteWriterSchema.optional(),
   curationRoot: z.string().optional(), pendingSince: z.iso.datetime().optional(),
   curated: z.object({ inputUid: z.string(), material: z.string() }).strict().optional(),
-  followupInputId: z.string().optional(), askedFollowupId: z.string().optional(),
   splitFrom: z.object({ uid: z.string(), version: z.string() }).strict().optional(),
   retired: ReductionReceiptSchema.optional(),
   pruned: ReductionReceiptSchema.optional(),
@@ -53,9 +41,9 @@ export const NoteViewSchema = NoteSpecSchema.extend({ nameMissing: z.boolean().o
 export type NoteSpec = Omit<z.infer<typeof NoteSpecSchema>, "sensitivity" | "visibility"> & import("../disclosure.ts").MaterialDisclosure;
 export type NoteStatus = z.infer<typeof NoteStatusSchema>;
 export type NoteResource = Resource<NoteSpec, NoteStatus>;
-/** @spec Display names, budgets and scheduled checks do not change the knowledge to curate. */
+/** @spec Display names and budgets do not change the knowledge to curate. */
 export const noteMaterial = (s: NoteSpec) => createHash("sha256").update(JSON.stringify([
-  s.subject.uid, s.text, s.nature, s.closedAt, s.sensitivity ?? "L3", s.visibility ?? "people",
+  s.subject.uid, s.text, s.nature, s.sensitivity ?? "L3", s.visibility ?? "people",
   [...s.people].map(p => p.uid).sort(), [...s.addresses].map(a => a.uid).sort(),
 ])).digest("hex");
 export function pendingCuration(note: NoteResource) {
