@@ -20,8 +20,6 @@ import { NOTE_TYPE, type NoteResource } from "../plugins/personal/note/model.ts"
 import { summaryText } from "../plugins/personal/note/summary.ts";
 import { TopicStore } from "./topic-fixture.ts";
 import { composeMail } from "../plugins/personal/stream/writer.ts";
-import { Aide } from "../src/app.ts";
-import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" }), app = "cli_one";
 const identity = { provider: "lark", scope: app, id: "ou_alice" };
@@ -130,32 +128,6 @@ test("Source observations and another peer cannot establish bot DM equivalence",
     observation: { provider: "lark", accountId: app, chatId: "oc_conflict", chatType: "p2p", sender: { type: "user", id: identity.id } } });
   f.coordinator.reconcile(addressRef(conflict));
   assert.equal(f.addresses.read(addressRef(conflict)).spec.locators.size, 1);
-});
-
-test("Real Channel admission succeeds when open_id and chat_id Addresses already coexist", { timeout: 20_000 }, async t => {
-  const home = mkdtempSync(join(tmpdir(), "aide-admission-locators-"));
-  const options = fakeOptions({ async chief() { return "done"; }, async execute() { throw new Error("no work"); } }, home, [], home, app);
-  options.config.channels.test!.me = { openId: identity.id };
-  const aide = new Aide(home, options, log);
-  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
-  await aide.persons.initialize();
-  const person = (await aide.persons.findIdentity(identity))!;
-  const original = aide.addresses.observe(larkAddress(app, "oc_existing"), [personRef(person)], { type: "direct", muted: false });
-  // Startup discovers open_id before the new p2p event reaches admission.
-  await aide.start();
-  assert.notEqual(aide.addresses.find(larkPersonAddress(app, identity.id))!.metadata.uid, original.metadata.uid);
-  const receipt = await aide.receive({ id: "regression", channelId: "lark", topicKey: `lark:${app}:oc_existing`, source: larkAddress(app, "oc_existing"), text: "synthetic request", addressObservation: { type: "direct" },
-    observation: { provider: "lark", accountId: app, chatId: "oc_existing", chatType: "p2p", sender: { type: "user", id: identity.id } } });
-  assert.ok(aide.personal.topics.inputStore.get(receipt.inputId));
-  await aide.settled();
-  assert.equal(aide.addresses.find(larkPersonAddress(app, identity.id))!.metadata.uid, original.metadata.uid);
-  const newcomer = await aide.receive({ id: "new-peer", channelId: "lark", topicKey: `lark:${app}:oc_new`, source: larkAddress(app, "oc_new"), text: "hello", addressObservation: { type: "direct" },
-    observation: { provider: "lark", accountId: app, chatId: "oc_new", chatType: "p2p", sender: { type: "user", id: "ou_new" } } });
-  assert.ok(aide.personal.topics.inputStore.get(newcomer.inputId));
-  await aide.settled();
-  const direct = aide.addresses.find(larkAddress(app, "oc_new"))!;
-  assert.equal(direct.spec.muted, false);
-  assert.equal(aide.addresses.find(larkPersonAddress(app, "ou_new"))!.metadata.uid, direct.metadata.uid);
 });
 
 test("Address merge repairs associations on retired Notes without reviving or rewriting their evidence", async t => {

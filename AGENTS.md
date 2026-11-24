@@ -176,6 +176,6 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 根目录 `make test` 接收空格分隔的 `TEST_FILES`，路径相对于仓库根目录；未传或空值执行全套测试。devloop 先选择受影响的 Component，再自动传入文件列表，通常不手动指定。Bun 接收明确文件路径，避免 `npm test -- ...` 在原有 `tests` 参数之外追加筛选条件导致仍执行全量。
 
-`make lint` 接收 `LINT_FILES`，但当前静态检查只有 TypeScript typecheck，会保留 tsconfig 并扩展到整个 Component 的类型依赖图。`packages/plugin` 使用自己的 tsconfig；没有包内测试，`make test` 委托根目录现有的 `plugin-*`、`runner-*`、`resource-*` 契约集成测试，不重新执行 Personal、Channel 与 replay 等整套测试。根目录 `make test` 仍保留完整测试。未配置 formatter，因此不添加空操作的 `make fix`。
+根目录 `make lint` 按 tsconfig 检查整个 TypeScript Component。`packages/plugin` 使用自己的 tsconfig；没有包内测试，`make test` 委托根目录现有的 `plugin-*`、`runner-*`、`resource-*` 契约集成测试，不重新执行 Personal、Channel 与 replay 等整套测试。根目录 `make test` 仍保留完整测试。未配置 formatter，因此不添加空操作的 `make fix`。
 
 - Address 是 Personal 的独立沟通场合；Input.source / Output.spec.target 引用其 UID，平台 locators 留在 Address，回复消息坐标留在 Input/Output。status.people 累积已知参与者，不声明名单完整。muted 约束原文、进度卡和 Channel 错误提示；Output Reconcile 对 Immediate Input 在原地址发送固定禁言提示，其它禁言 Output 转投 Me 的 defaultAddress。Chief 提交 raw Output，Agent 不自行解除禁言。
