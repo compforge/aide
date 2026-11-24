@@ -63,7 +63,7 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
     if (current.spec.origin === "aide:followup" && !previous.status.assess?.completedAt && assessment?.completedAt
       && assessment.result?.disposition === "completed" && typeof current.spec.observation?.noteUid === "string") {
       const note = context.get<NoteSpec, NoteStatus>(NOTE_TYPE, current.spec.observation.noteUid);
-      if (note && followupInputId(note) === current.metadata.name && note.status.askedFollowupId !== current.metadata.name)
+      if (note?.spec.followup?.question && followupInputId(note) === current.metadata.name && note.status.askedFollowupId !== current.metadata.name)
         throw new Error("Resolve the scheduled question from evidence or ask Me before completing this followup");
     }
     if (assessmentFinished(previous.status.assess) && !equalResourceValue({ ...previous.status.assess, topic: undefined }, { ...current.status.assess, topic: undefined })) throw new Error(previous.status.assess?.lastError ? "Input assessment has failed; submit a new Input" : "Input assessment is already completed");

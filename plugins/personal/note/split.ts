@@ -5,7 +5,7 @@ import type { InputOrigin } from "../input/model.ts";
 import { resourceRef } from "../input/state.ts";
 import type { TopicResource } from "../topic/model.ts";
 import { readTopicRoot } from "../topic/tree.ts";
-import { NOTE_TYPE, NoteNameSchema, NoteNatureSchema, SubjectSchema, WriterResourceSchema, noteVersion, pendingCuration, type NoteResource, type NoteSpec, type NoteStatus } from "./model.ts";
+import { NOTE_TYPE, defaultFollowupCheckAt, NoteNameSchema, NoteNatureSchema, SubjectSchema, WriterResourceSchema, noteVersion, pendingCuration, type NoteResource, type NoteSpec, type NoteStatus } from "./model.ts";
 import { noteReceipt, PruneNoteSchema, requireSummaryOrigin } from "./service.ts";
 import { publishSummaryRevision, type SummaryResource } from "./summary.ts";
 
@@ -47,7 +47,7 @@ export async function splitNote(resources: ResourceClient, actor: TopicResource,
   const updated = { ...source, spec: { ...source.spec, text: args.text }, status: { ...source.status, updatedAt: now, writer,
     pruned: { at: now, reason: args.reason, writer }, ...(!source.spec.summaryOf ? { curationRoot: root?.metadata.uid, pendingSince: pendingCuration(source) ?? now } : {}) } };
   const writes: ResourceCommit[] = args.parts.map((part, i) => ({ operation: "create", type: NOTE_TYPE, name: ids[i]!,
-    spec: { ...part, subject: part.subject ?? source.spec.subject, people: source.spec.people, addresses: source.spec.addresses,
+    spec: { ...part, ...(part.nature === "episodic" ? { followup: { checkAt: defaultFollowupCheckAt(Date.parse(now)) } } : {}), subject: part.subject ?? source.spec.subject, people: source.spec.people, addresses: source.spec.addresses,
       sensitivity: source.spec.sensitivity, visibility: source.spec.visibility, maxChars: source.spec.maxChars },
     status: { writer, updatedAt: now, pendingSince: now, curationRoot: root?.metadata.uid, splitFrom: { uid: source.metadata.uid, version: args.version } } }));
   writes.push({ operation: "replace", resource: source, spec: updated.spec, status: updated.status });

@@ -16,7 +16,7 @@ type MaintenanceOrigin = "aide:curate" | "aide:followup" | "aide:organize";
 const maintenanceTask: Record<MaintenanceOrigin, string> = {
   "aide:organize": "Organize the Topic tree and file Inputs, Work and Notes within its scope. Recheck all direct capacity limits. Preserve processing receipts when filing material.",
   "aide:curate": "Curate ordinary Notes and durable understanding. Classify and consolidate related material, and verify closure.",
-  "aide:followup": "Verify the scheduled question against current evidence and related Work.",
+  "aide:followup": "Check the open episode against current evidence and related Work.",
 };
 
 /** @spec Internal requests use ordinary Input assignment/admission; origin determines scheduling, text carries the task.
@@ -25,7 +25,7 @@ const maintenanceTask: Record<MaintenanceOrigin, string> = {
  * @link docs/personal/secretary.md#容量与维护请求
  */
 export async function createMaintenanceInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" = "idle", preparation?: { notes?: { noteId: string; version: string }[]; note?: NoteResource; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" | "episode_check_due" = "idle", preparation?: { notes?: { noteId: string; version: string }[]; note?: NoteResource; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
   const target = resourceRef(topic);
   const maintenance = preparation?.plan, instructions = preparation?.instructions ?? "";
   const input = await retryOnConflict(async () => {
@@ -43,7 +43,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
     const at = new Date().toISOString();
     const spec: InputSpec = {
       origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
-      text: `${maintenanceTask[origin]} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; ${origin === "aide:followup" ? "If the current evidence leaves the scheduled question unanswered, ask Me privately." : "Do not communicate or hand off business Work."} Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
+      text: `${maintenanceTask[origin]} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; ${origin === "aide:followup" ? "Ask Me privately if a consequential fact is still missing." : "Do not communicate or hand off business Work."} Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
       observation: { ...(preparation?.notes ? { notes: preparation.notes } : {}), ...(scheduledNote ? { noteId: scheduledNote.metadata.name, noteUid: scheduledNote.metadata.uid } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
         completed: chiefWorkload(current).completed, weaveRevision: maintenance?.weaveRevision ?? 0,
         pressure: (maintenance?.notePressure ?? []).map(({ uid, pressure }) => ({ uid, version: pressure.version })),

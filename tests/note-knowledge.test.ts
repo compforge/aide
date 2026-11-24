@@ -509,6 +509,61 @@ test("Secretary separates curation from one-shot followup and fences stale quest
   await assert.rejects(ask("late"), /Only the active followup/);
 });
 
+test("Upsert persists a 24-hour check that Secretary requests only once", async t => {
+  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
+  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
+  const f = await setup(t);
+  const policy = topicPolicy();
+  const episode = await f.note({ text: "Awaiting the rollout decision", nature: "episodic" }, "episode-fallback");
+  const initial = await f.get(episode.noteId);
+  const due = Date.parse(initial.status.updatedAt) + 24 * 60 * 60_000;
+  assert.deepEqual(initial.spec.followup, { checkAt: new Date(due).toISOString() });
+  const edited = await f.note({ ...episode, text: "The rollout is still pending" }, "episode-progress");
+  const note = await f.get(episode.noteId);
+  assert.deepEqual(note.spec.followup, initial.spec.followup);
+  const requests = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:followup");
+
+  await prepareNoteMaintenance(f.context, note, policy, due - 1);
+  assert.equal(requests().length, 0);
+  await Promise.all([prepareNoteMaintenance(f.context, note, policy, due), prepareNoteMaintenance(f.context, note, policy, due)]);
+  assert.equal(requests().length, 1);
+  const request = requests()[0]!;
+  assert.equal(request.spec.observation?.trigger, "episode_check_due");
+  assert.equal(request.spec.observation?.dueAt, new Date(due).toISOString());
+  assert.equal((await f.get(episode.noteId)).status.followupInputId, request.metadata.name);
+
+  await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "live", startedAt: new Date().toISOString() } });
+  await assessChiefInput(f.resources, f.read(), "live", { inputId: request.metadata.name, summary: "No outstanding action" }, "assess");
+  assert.ok(requests()[0]!.status.assess?.completedAt);
+
+  const changed = await f.note({ ...edited, text: "More context on the rollout decision" }, "episode-update");
+  await prepareNoteMaintenance(f.context, await f.get(changed.noteId), policy, due + 48 * 60 * 60_000);
+  assert.equal(requests().length, 1);
+});
+
+test("An explicit deadline takes priority over the unscheduled episodic fallback", async t => {
+  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
+  const f = await setup(t);
+  const deadline = Date.now() + 72 * 60 * 60_000;
+  const episode = await f.note({ text: "Waiting for a decision on Friday", nature: "episodic",
+    followup: { question: "What was decided?", checkAt: new Date(deadline).toISOString() } }, "explicit-followup");
+  const note = await f.get(episode.noteId);
+  const requests = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:followup");
+  await prepareNoteMaintenance(f.context, note, topicPolicy(), deadline - 1);
+  assert.equal(requests().length, 0);
+  await prepareNoteMaintenance(f.context, note, topicPolicy(), deadline);
+  assert.equal(requests()[0]!.spec.observation?.trigger, "question_due");
+  assert.equal((await f.get(episode.noteId)).spec.followup?.checkAt, new Date(deadline).toISOString());
+
+  const questionOnly = await f.note({ text: "Waiting for sign-off", nature: "episodic",
+    followup: { question: "Has it been signed off?" } }, "question-with-default-time");
+  const pending = await f.get(questionOnly.noteId);
+  assert.deepEqual(pending.spec.followup, { question: "Has it been signed off?",
+    checkAt: new Date(Date.parse(pending.status.updatedAt) + 24 * 60 * 60_000).toISOString() });
+});
+
 test("curate batches classified drafts and acknowledges only final versions it actually reviewed", async t => {
   const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
@@ -540,7 +595,9 @@ test("curate batches classified drafts and acknowledges only final versions it a
   assert.equal(pendingCuration(await f.get(first.noteId)), undefined);
   assert.equal(pendingCuration(await f.get(destination.noteId)), undefined);
   assert.ok(pendingCuration(await f.get(concurrent.noteId)));
-  assert.equal(await prepareNoteMaintenance(f.context, await f.get(first.noteId), policy), undefined);
+  const curatedEpisode = await f.get(first.noteId);
+  const checkAt = Date.parse(curatedEpisode.spec.followup!.checkAt);
+  assert.deepEqual(await prepareNoteMaintenance(f.context, curatedEpisode, policy, checkAt - 100), { requeueAfterMs: 100 });
   const renamed = await f.note({ ...revised, name: "Metrics handover", maxChars: 500 }, "display");
   assert.equal(pendingCuration(await f.get(renamed.noteId)), undefined);
   const closed = await f.note({ ...renamed, closedAt: new Date().toISOString() }, "closure");

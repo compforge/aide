@@ -9,10 +9,10 @@ import type { Resource, ResourceClient, ResourceCommit } from "@compforge/aide-p
 import { personRefs, PersonRefsSchema } from "../person/model.ts";
 import { readTopicRoot } from "../topic/tree.ts";
 import { resourceRef } from "../input/state.ts";
-import { NOTE_TYPE, pendingCuration, noteMaterial, NoteNameSchema, NoteNatureSchema, FollowupSchema, MaxCharsSchema, noteMaxChars, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
+import { NOTE_TYPE, pendingCuration, noteMaterial, NoteNameSchema, NoteNatureSchema, FollowupSchema, defaultFollowupCheckAt, MaxCharsSchema, noteMaxChars, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
 
 export const NoteUpdateSchema = z.object({ version: z.string().min(1).optional(), noteId: z.string().min(1).optional(),
-  name: NoteNameSchema.optional(), nature: NoteNatureSchema.optional(), closedAt: z.iso.datetime().optional(), followup: FollowupSchema.nullable().optional(), maxChars: MaxCharsSchema.optional(),
+  name: NoteNameSchema.optional(), nature: NoteNatureSchema.optional(), closedAt: z.iso.datetime().optional(), followup: FollowupSchema.partial({ checkAt: true }).nullable().optional(), maxChars: MaxCharsSchema.optional(),
   sensitivity: SensitivitySchema.optional(), visibility: VisibilitySchema.optional(),
   addresses: AddressRefsSchema.optional(), subject: SubjectSchema.optional(), text: z.string().trim().max(16000).optional(), people: PersonRefsSchema().optional(),
 }).strict().refine(a => !a.noteId || !!a.version, "Updating a Note requires its version")
@@ -58,9 +58,16 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
     ...(args.maxChars !== undefined ? { maxChars: args.maxChars } : !previous ? { maxChars: noteMaxChars({}) } : {}), sensitivity: args.sensitivity ?? previous?.spec.sensitivity ?? "L3", visibility,
     subject: args.subject ?? previous?.spec.subject ?? writer.resource, text: args.text ?? previous?.spec.text ?? "",
     people: args.people ?? previous?.spec.people ?? personRefs([]), addresses: args.addresses ?? previous?.spec.addresses ?? addressRefs([]) };
+  const now = Date.now();
   if (args.closedAt !== undefined) spec.closedAt = args.closedAt;
-  if (args.followup) spec.followup = args.followup;
-  if (args.followup === null || args.closedAt && args.followup === undefined) delete spec.followup;
+  if (args.followup) {
+    spec.followup = { ...args.followup, checkAt: args.followup.checkAt ?? defaultFollowupCheckAt(now) };
+  } else if (args.followup === null || args.closedAt || (spec.nature !== "episodic" && !spec.followup?.question)) {
+    delete spec.followup;
+  } else if (!pruning && spec.nature === "episodic" && !spec.followup && !spec.summaryOf && !spec.closedAt && !previous?.status.followupInputId) {
+    // Once a check has been requested, another check requires an explicit plan.
+    spec.followup = { checkAt: defaultFollowupCheckAt(now) };
+  }
   if ((spec.closedAt || spec.followup) && (spec.summaryOf || spec.nature !== "episodic" || spec.closedAt && spec.followup))
     throw new Error("Only ordinary episodic Notes can close or schedule an open question");
   if (previous && !equalResourceValue(previous.spec.subject, spec.subject)) throw new Error("Use move_note to change an existing Note subject");
@@ -76,11 +83,11 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
     }
   }
   if (previous && equalResourceValue(previous.spec, spec)) return noteReceipt(previous);
-  const now = new Date().toISOString();
+  const updatedAt = new Date(now).toISOString();
   const topic = actor.kind === "Topic" ? writer.resource : (actor.status as import("../work/model.ts").WorkStatus).topic;
   const root = topic && await readTopicRoot(resources, topic);
-  const status = { ...previous?.status, updatedAt: now, writer, curationRoot: root?.metadata.uid,
-    pendingSince: previous && noteMaterial(previous.spec) === noteMaterial(spec) ? previous.status.pendingSince : (previous && pendingCuration(previous)) ?? now, ...(pruning ? { pruned: pruning } : {}) };
+  const status = { ...previous?.status, updatedAt, writer, curationRoot: root?.metadata.uid,
+    pendingSince: previous && noteMaterial(previous.spec) === noteMaterial(spec) ? previous.status.pendingSince : (previous && pendingCuration(previous)) ?? updatedAt, ...(pruning ? { pruned: pruning } : {}) };
   try {
     const updated = previous ? await resources.replace(previous, spec, status)
       : await resources.create(NOTE_TYPE, { name: id, spec, status });

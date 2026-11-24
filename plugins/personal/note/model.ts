@@ -23,11 +23,15 @@ export const SubjectSchema = WriterResourceSchema.extend({ kind: z.enum(["Topic"
  * @why Differently classified facts belong in separate Notes, even when they concern the same matter.
  * @link docs/personal/disclosure.md
  */
-export const FollowupSchema = z.object({ question: z.string().trim().min(1).max(1000), checkAt: z.iso.datetime() }).strict();
-/** Stable across unrelated edits, executions and restarts. */
+export const FollowupSchema = z.object({ question: z.string().trim().min(1).max(1000).optional(), checkAt: z.iso.datetime() }).strict();
+export const defaultFollowupCheckAt = (now: number) => new Date(now + 24 * 60 * 60_000).toISOString();
+/** @spec One Input per Note UID, question and stored checkAt. An omitted question requests a general check.
+ * @link docs/personal/note.md#梳理与跟进
+ */
 export function followupInputId(note: NoteResource) {
+  if (note.spec.nature !== "episodic" || note.spec.summaryOf || note.spec.closedAt || note.status.retired || note.metadata.deletionTimestamp) return;
   const plan = note.spec.followup;
-  if (!plan || note.spec.closedAt || note.status.retired || note.metadata.deletionTimestamp) return;
+  if (!plan) return;
   return "followup-" + createHash("sha256").update(JSON.stringify([note.metadata.uid, plan.question, plan.checkAt])).digest("hex");
 }
 export const NoteSpecSchema = z.object({ name: NoteNameSchema.optional(), subject: SubjectSchema, summaryOf: SubjectSchema.optional(), people: PersonRefsSchema().prefault([]),

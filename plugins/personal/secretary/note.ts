@@ -7,7 +7,8 @@ import { maintenanceAgenda } from "./maintenance.ts";
 import { tryCreateMaintenanceInput } from "./input.ts";
 import { digest } from "../identity.ts";
 
-/** @spec Batch changed ordinary Notes by their current root. A scheduled question has its own deadline and receipt.
+/** @spec Secretary schedules each persisted checkAt once. A time without a question requests a general review.
+ * @case tests/note-knowledge.test.ts
  * @link docs/personal/note.md
  */
 export async function prepareNoteMaintenance(context: PluginContext, note: NoteResource, policy: TopicPolicy, now = Date.now()) {
@@ -15,16 +16,18 @@ export async function prepareNoteMaintenance(context: PluginContext, note: NoteR
   const since = pendingCuration(note);
   const followup = note.spec.followup;
   const requestId = followupInputId(note);
-  const checkAt = followup && requestId && requestId !== note.status.followupInputId ? Date.parse(followup.checkAt) : Infinity;
+  const checkAt = followup && requestId !== note.status.followupInputId ? Date.parse(followup.checkAt) : Infinity;
   if (!since && !Number.isFinite(checkAt)) return;
   const topic = await noteRoot(context, note);
   if (!topic || !isRootTopic(topic)) return;
   let next = checkAt;
   const cooldown = policy.capacityCooldownSeconds;
-  if (followup && requestId && checkAt <= now) {
-    const instructions = `Check Note ${note.metadata.name}. Scheduled question: ${followup.question}. Read the current Note, related Work and any new evidence to determine the outcome.`;
-    await tryCreateMaintenanceInput(context, topic, followup.checkAt, await maintenanceAgenda(context.resources, [], policy),
-      "aide:followup", "question_due", { note, instructions, cooldownSeconds: cooldown }, policy, requestId);
+  if (requestId && checkAt <= now) {
+    const task = followup?.question ? `Scheduled question: ${followup.question}.`
+      : "Review this open episode and check whether it still needs a response.";
+    const instructions = `Check Note ${note.metadata.name}. ${task} Read the current Note, related Inputs, Work and any reply from Me.`;
+    await tryCreateMaintenanceInput(context, topic, new Date(checkAt).toISOString(), await maintenanceAgenda(context.resources, [], policy),
+      "aide:followup", followup?.question ? "question_due" : "episode_check_due", { note, instructions, cooldownSeconds: cooldown }, policy, requestId);
     next = now + cooldown * 1000;
   }
   if (since) {

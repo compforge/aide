@@ -20,7 +20,7 @@ Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为
 
 ## Note 维护
 
-Secretary 合并领域内的梳理需求，并为 episodic Note 的具体问题按约定时间生成 followup。curate 整理普通 Note；followup 只核实未决问题，必要时私下询问 Me。[Note 生命周期](note.md#梳理与跟进)
+Secretary 合并领域内的梳理需求，并按约定时间为开放 episodic Note 生成 followup。`upsert_note` 保存核实时间，首次缺省为写入后 24 小时。curate 整理普通 Note；followup 只核实未决问题，必要时私下询问 Me。[Note 生命周期](note.md#梳理与跟进)
 
 ### 摘要复核
 
@@ -49,7 +49,7 @@ Chief 完成 Input 时同时记录对象的 `summaryReviewedAt`，即使正文�
 | origin | 触发与目的 |
 | --- | --- |
 | aide:organize | 任一直属容量超限时，汇总 Input、Work、child 的计数与样本。所有超限都消失后可取消尚未接纳的议程 |
-| aide:followup | 跟进需要回应的事项；当前按开放 episodic Note 的问题与核实时间调度 |
+| aide:followup | 跟进需要回应的事项；按开放 episodic Note 保存的 `followup.checkAt` 一次性调度，核实具体问题或复核事项是否仍需跟进 |
 | aide:curate | 普通 Note 的改动达到批量或等待上限，或工作量、子摘要、结构与预算变化需要梳理；核对证据并整理普通 Note |
 
 内置请求复用 Input，status.topic 指向目标节点，未领取时 status.assess.topic 收敛到当前 root，领取后保留实际负责人。origin 决定 Chief 的工具与处理路径，text 描述任务。Secretary 统一准备 Curate／Followup／Organize，每个节点、每种 origin 最多一条未完成请求；可重试失败仍处理原 Input。创建与请求记账原子提交，结果与完成水位原子提交，无需二次结算。`maintenanceRequests` 保留请求身份、时间、需求指纹与尝试次数；同一需求从 `capacityCooldownSeconds`（默认 60 秒）指数退避到 2 小时（基础冷却更长时保留基础冷却），新需求重新安排。已完成 Input 回收后仍可从 Topic 保留的事实继续调度。
