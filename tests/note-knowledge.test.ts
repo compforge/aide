@@ -488,17 +488,17 @@ test("Chief declares all responsibilities through Work tools and keeps Ongoing o
   };
   const input = await f.aide.topics.submit("approval-input", { origin: "source", originId: "test", text: "Materials submitted", topicId: "knowledge" });
   const args = { kind: "ongoing", title: "Approval", question: "Was it accepted?" };
-  const matter = await call("create_work", args);
-  assert.equal((await call("create_work", args)).id, matter.id);
+  const matter = await call("upsert_work", args);
+  assert.equal((await call("upsert_work", args)).id, matter.id);
   assert.equal(matter.kind, "ongoing");
   assert.equal((await call("list_work", {})).some((w: { id: string }) => w.id === matter.id), true);
   assert.equal((await call("read_work", { id: matter.id })).version, matter.version);
   await assert.rejects(call("append_input", { workId: matter.id, input: { id: input.metadata.name } }), /Unknown work/);
   assert.equal(f.aide.topics.inputStore.get(input.metadata.name)?.status.handle?.[matter.uid], undefined);
   const followupTools = toolsForInput(tools, "aide:followup");
-  assert.ok(followupTools.includes("update_ongoing"));
-  assert.ok(!followupTools.includes("create_work"));
-  await call("update_ongoing", { id: matter.id, version: matter.version, outcome: "Confirmed receipt of approval" });
+  assert.ok(followupTools.includes("upsert_work"));
+  assert.ok(!followupTools.includes("append_input"));
+  await call("upsert_work", { kind: "ongoing", workId: matter.id, version: matter.version, outcome: "Confirmed receipt of approval" });
   assert.deepEqual(await call("list_work", { kind: "ongoing" }), []);
   assert.equal((await call("list_work", { kind: "ongoing", includeClosed: true }))[0].status, "closed");
 });
@@ -580,6 +580,61 @@ test("curating or retiring evidence leaves its Ongoing open; updated plans fence
   assert.equal((await read()).status.planRevision, 3);
 });
 
+test("retrospective decisions reuse sourced Work across rounds and retain the Note's independent evidence", async t => {
+  const f = await setup(t);
+  const { workTools } = await import("../plugins/personal/chief/agent/work-tools.ts");
+  const tools = workTools(f.aide.work("knowledge"));
+  assert.ok(toolsForInput(tools, "aide:curate").includes("append_input"));
+  const upsert = tools.find(tool => tool.name === "upsert_work")!;
+  const note = await f.note({ text: "The handover happened. An audit and recurring checks are authorized; await acknowledgment." }, "handover");
+  const source = await f.get(note.noteId);
+  const create = async (args: object, callId: string) => {
+    const response = await upsert.execute(callId, { ...args, sourceId: note.noteId }, undefined, undefined, {} as never);
+    return JSON.parse((response.content[0] as { text: string }).text);
+  };
+  const task = { kind: "task", title: "Audit handover", instruction: "Check the signed handover", trigger: null };
+  const routine = { kind: "routine", title: "Review each handover", instruction: "Check the handover on receipt",
+    trigger: { cron: null, timezone: "UTC", event: "handover" } };
+  const ongoing = { kind: "ongoing", title: "Await acknowledgment" };
+  for (const args of [task, routine, ongoing]) {
+    const created = await create(args, "first");
+    assert.equal(created.sourceUid, source.metadata.uid);
+    assert.equal((await create(args, "later")).id, created.id);
+    if (args.kind === "task") {
+      const decision = f.aide.topics.inputStore.list().find(i => i.status.handle?.[created.uid]);
+      assert.equal(decision?.spec.origin, "chief");
+      assert.equal(decision?.spec.text, task.instruction);
+    }
+  }
+  assert.equal(f.aide.work("knowledge").listItems().length, 3);
+  assert.equal((await f.get(note.noteId)).spec.text, source.spec.text);
+  const secondGoal = await create({ ...task, title: "Deliver audit report" }, "second-goal");
+  assert.notEqual(secondGoal.id, (await create(task, "repeat")).id);
+});
+
+test("two stale-only assessments defer that material behind other pending drafts", async t => {
+  const { pendingCuration } = await import("../plugins/personal/note/model.ts");
+  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
+  const f = await setup(t);
+  const policy = topicPolicy({ curation: { count: 1 } });
+  const draft = await f.note({ nature: "semantic", text: "Waiting for the receipt" }, "first");
+  await prepareNoteMaintenance(f.context, await f.get(draft.noteId), policy);
+  const req = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
+  await f.resources.patchStatus(req, { assess: { ...req.status.assess, executionId: "live" } });
+  await f.note({ ...draft, text: "Receipt arrived" }, "changed");
+  const other = await f.note({ text: "Another handover" }, "another");
+  const finish = () => assessChiefInput(f.resources, f.read(), "live", { inputId: req.metadata.name, summary: "Revisit changed evidence", curatedNotes: [draft] }, "finish");
+  assert.equal((await finish()).needsReview, req.metadata.name);
+  const deferred = await finish();
+  assert.ok("assessed" in deferred);
+  assert.equal(deferred.assessed, req.metadata.name);
+  assert.deepEqual(deferred.noteResults, [{ noteId: draft.noteId, status: "version_changed" }]);
+  assert.deepEqual(await finish(), deferred);
+  assert.ok(pendingCuration(await f.get(other.noteId))! <= pendingCuration(await f.get(draft.noteId))!);
+  assert.equal((await f.get(draft.noteId)).status.curated, undefined);
+});
+
 test("curate batches classified drafts and acknowledges only final versions it actually reviewed", async t => {
   const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
@@ -606,8 +661,9 @@ test("curate batches classified drafts and acknowledges only final versions it a
   const concurrent = await f.note({ ...other, text: "Rotation now takes place monthly" }, "business-update");
   const assess = () => assessChiefInput(f.resources, f.read(), "live", { inputId: request!.metadata.name,
     summary: "Clarified the handover", curatedNotes: [revised, destination, other] }, "finish");
-  await assess();
-  await assess(); // Replay preserves the original completion.
+  const receipt = await assess();
+  assert.deepEqual(receipt.noteResults?.map(n => n.status), ["confirmed", "confirmed", "version_changed"]);
+  assert.deepEqual(await assess(), receipt); // Replay preserves the original completion.
   assert.equal(pendingCuration(await f.get(first.noteId)), undefined);
   assert.equal(pendingCuration(await f.get(destination.noteId)), undefined);
   assert.ok(pendingCuration(await f.get(concurrent.noteId)));
@@ -633,7 +689,7 @@ test("an unclassified draft stays pending through edits until its classified ver
   await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "live", startedAt: new Date().toISOString() } });
   const finish = (receipt: typeof draft) => assessChiefInput(f.resources, f.read(), "live",
     { inputId: request.metadata.name, summary: "Reviewed the method", curatedNotes: [receipt] }, "finish");
-  await assert.rejects(finish(edited), /a nature/);
+  assert.deepEqual((await finish(edited)).noteResults, [{ noteId: edited.noteId, status: "needs_nature" }]);
   assert.equal(f.aide.topics.inputStore.get(request.metadata.name)?.status.assess?.completedAt, undefined);
   const classified = await f.note({ ...edited, nature: "procedural" }, "classify");
   await finish(classified);

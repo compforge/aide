@@ -137,7 +137,7 @@ test("Maintenance agenda survives persistence for unnamed Topics and business In
   await f.resources.patchStatus(f.root(), { execution: null, idleSince: "2000-01-01T00:00:00.000Z" });
   const agenda = await maintenanceAgenda(f.resources, [f.root()], { maxUnfiledInput: 1 });
   const review = await createMaintenanceInput({ resources: f.resources, logger }, f.root(), new Date(Date.now() + 60_000).toISOString(), agenda);
-  assert.match(review.spec.text, /Curate ordinary Notes/);
+  assert.match(review.spec.text, /Review ordinary Notes and Work/);
   assert.deepEqual(review.spec.observation!.facts, agenda);
   const { inputPreview } = await import("../plugins/personal/input/prompt.ts");
   assert.ok(inputPreview(review).includes(`Facts: ${JSON.stringify(agenda)}`), "Chief receives the selected pressure and counts in automatic context");

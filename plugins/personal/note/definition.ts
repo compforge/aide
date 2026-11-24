@@ -55,9 +55,23 @@ function validateSplitPart(part: NoteResource, context: ResourceValidationContex
   requireOrganization({ actorUid: writer.resource.uid, executionId: writer.executionId, at: part.status.updatedAt, reason: "Split Note" }, context, topics);
 }
 export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
-  type: NOTE_TYPE, indexVersion: 7, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
-  validator: { create: (note, context) => { if (note.status.curated || note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts"); validateAddresses(note, context); validate(note, context); validateSplitPart(note, context); }, update: (before, after, context) => {
+  type: NOTE_TYPE, indexVersion: 8, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
+  validator: { create: (note, context) => { if (note.status.curationRetry || note.status.curated || note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts"); validateAddresses(note, context); validate(note, context); validateSplitPart(note, context); }, update: (before, after, context) => {
     if (!equalResourceValue(before.status.splitFrom, after.status.splitFrom)) throw new Error("Split provenance is immutable");
+    if (!equalResourceValue(before.status.curationRetry, after.status.curationRetry)) {
+      const retry = after.status.curationRetry;
+      const input = retry && context.get<InputSpec, InputStatus>(INPUT_TYPE, retry.inputUid);
+      const assess = input?.status.assess;
+      if (!retry || input?.spec.origin !== "aide:curate" || !assess?.executionId || assess.completedAt !== retry.at
+        || !assess.result?.noteResults?.some(n => n.noteId === before.metadata.name && ["deferred", "needs_nature", "version_changed"].includes(n.status))
+        || retry.material !== noteMaterial(before.spec) || !equalResourceValue(before.spec, after.spec)
+        || !equalResourceValue({ ...before.status, curationRetry: retry }, after.status))
+        throw new Error("Curation deferral requires the corresponding assessment");
+      const subject = context.get(before.spec.subject, before.spec.subject.uid);
+      if (!subject) throw new Error("Note subject no longer exists");
+      requireContentWriter(subject, { resource: WriterResourceSchema.parse(input.status.topic), executionId: assess.executionId }, context);
+      return;
+    }
     if (!equalResourceValue(before.status.curated, after.status.curated)) {
       const receipt = after.status.curated;
       const input = receipt && context.get<InputSpec, InputStatus>(INPUT_TYPE, receipt.inputUid);

@@ -2,7 +2,7 @@
 
 ## 项目定位与边界
 
-Aide 是小型、自托管的 personal agent，将持续到来的信息转化为认识、行动与有价值的沟通，围绕用户目标跨执行与等待持续跟进。Personal 结合已有 Note 与最新 Input 作判断，按需更新近期事项认识和长期摘要 Note、调整 Topic tree，并产生必要的 Output。近期与长期认识统一保存为 Note；认知更新可以静默发生，私下答复 Me 不必先写 Note；对外正文须引用可分类的 Note。Web / Lark Channel 与 Source 提交输入，Chief 直接处理简单事情。需要后续承接时，统一通过 create_work 声明 Work：一次性目标或循环职责交给 Task / Routine Agent，Ongoing 留给领域 Chief 自己跟进。Host / Runner 提供通用运行机制。
+Aide 是小型、自托管的 personal agent，将持续到来的信息转化为认识、行动与有价值的沟通，围绕用户目标跨执行与等待持续跟进。Personal 结合已有 Note 与最新 Input 作判断，按需更新近期事项认识和长期摘要 Note、调整 Topic tree，并产生必要的 Output。近期与长期认识统一保存为 Note；认知更新可以静默发生，私下答复 Me 不必先写 Note；对外正文须引用可分类的 Note。Web / Lark Channel 与 Source 提交输入，Chief 直接处理简单事情。需要后续承接时，统一通过 upsert_work 声明 Work：一次性目标或循环职责交给 Task / Routine Agent，Ongoing 留给领域 Chief 自己跟进。Host / Runner 提供通用运行机制。
 
 项目有两个目标：做好 personal agent，并积累可复用的 TypeScript controller-runtime 底座。Personal 是底座的首个应用与验证场景，领域模型留在插件，通用资源、查询和调度能力沉淀到底座。按绿地视角开发，不建设账号权限中心或多实例平台。业务判断放在 Personal 与 Chief Agent；修改通用机制前先说明具体需求和现有能力缺口。
 

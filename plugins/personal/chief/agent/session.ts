@@ -56,7 +56,8 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
     const assess = async (input: AssessInput, toolCallId: string) => {
       const c = active();
       const result = await assessChiefInput(plugins.resourceClient("personal"), c, c.status.execution!.id, input, toolCallId);
-      log.info({ topicId, inputId: input.inputId }, "Chief assessment completed");
+      log.info({ topicId, inputId: input.inputId, noteResults: "noteResults" in result ? result.noteResults : undefined },
+        "needsReview" in result ? "Chief assessment needs fresh Notes" : "Chief assessment completed");
       return result;
     };
     const tools = chiefTools(connectors, async (id, input) => {

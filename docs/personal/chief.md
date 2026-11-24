@@ -10,7 +10,17 @@ Chief 使用独立的 `chief` Harness 身份，Agent 位于 `plugins/personal/ch
 
 Chief 没有独立 CRD；持久状态由 [Topic.spec/status](topic.md#crd) 承载，接纳和执行由 Chief Reconciler 负责，后续维护的安排由 [Secretary](secretary.md) 负责。
 
-领域 Chief 用 `create_work` 声明当轮之后的责任。资源的 Topic 归属确定负责的 Chief。Task 和 Routine 的 Reconcile 分别调度对应 Agent。Ongoing 留在当前 Chief，`aide:followup` 只为它安排一次新的研判。创建、发现与三种责任的结束条件见[办理与沟通](README.md#后续处理的三种责任)。
+Chief 有两个研判时机。**业务 Input 受理**从刚收到的消息、观察或决定出发，判断本轮如何回应、要留下哪些认识、谁来继续办。**事后复盘**由 `aide:curate` 触发，Chief 对照同一领域后来积累的材料，重新判断已有 Note 和 Work 是否仍准确表达事实和责任。两者共用普通 Note 与 Work 工具。
+
+| Chief 得出的判断 | 落到的对象和操作 |
+|---|---|
+| 有值得保留的事实或方法 | 用 `upsert_note` 记录或修订普通 Note |
+| 有明确的一次性交付或循环职责 | 查已有 Task / Routine；已有委托用 `append_input` 补材料、调整要求或暂停，新委托用 `upsert_work` 创建 |
+| Chief 自己要等结果、核实或收尾 | 用 `upsert_work` 创建 Ongoing；已有事项按 `workId` 和 `version` 更新进展、核实时间或结论 |
+
+同一件事可以同时留下 Note 和 Work。例如，Note 记载某项交接已经发生，Ongoing 负责核实对方是否收到。复盘发现一次性安排演变为固定职责时，先确认新的 Routine 已接手，再根据原委托的剩余目标决定继续、暂停或收尾。
+
+领域 Chief 用 `upsert_work` 声明当轮之后的责任。资源的 Topic 归属确定负责的 Chief。Task 和 Routine 的 Reconcile 分别调度对应 Agent。Ongoing 留在当前 Chief，`aide:followup` 只为它安排一次新的研判。创建、发现与三种责任的结束条件见[办理与沟通](README.md#后续处理的三种责任)。
 
 ## Reconciler
 
@@ -60,7 +70,7 @@ Chief Agent 负责判断，Personal Route 负责话题归位。Chief 的接收 C
 | --- | --- |
 | channel / source / chief | say、cite_output、Work 创建和请求、文件与 CLI 操作 |
 | aide:followup | 跟进需要回应的事项。按 Ongoing 保存的时间核实指定问题，或复核事项是否仍需回应。有证据就记录结论，缺少决定性信息就通过 ask_me 私下询问 Me |
-| aide:curate | 普通 Note 回顾与归位、Topic 回收许可、Hermes memory/skill 写入 |
+| aide:curate | 复核普通 Note 与三类 Work，按证据调整认识与责任、Topic 回收许可、Hermes memory/skill 写入 |
 | aide:organize | 创建或移动 Topic，归位 Input、Work 和 Note。跨 Topic 的 Note 先写目标再削减或退役来源。|
 | aide:summary | 复核指定 Topic、Person 或 Address 的默认认识，按需修订其摘要 |
 

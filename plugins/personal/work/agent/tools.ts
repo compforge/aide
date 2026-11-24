@@ -29,25 +29,33 @@ export function workTools(work: WorkService): ToolDefinition[] {
       async execute(_id, args, signal) { signal?.throwIfAborted(); return result(await work.readItem(args.id)); },
     }),
     tool({ name: "create_input", label: "Record independent decision",
-      description: "Record a new independent Chief decision within existing entrusted authority. For a received Input use its existing ID instead. Returns inputId for create_work or append_input.",
+      description: "Record a new independent Chief decision within existing entrusted authority. For a received Input use its existing ID instead. Returns inputId for upsert_work or append_input.",
       parameters: Type.Object({ text: Type.String({ minLength: 1, maxLength: 32000 }) }, { additionalProperties: false }),
       async execute(callId, { text }, signal) { signal?.throwIfAborted(); return result(await work.createInput(text, callId)); },
     }),
-    tool({ name: "create_work", label: "Create work",
-      description: "Declare a responsibility that outlasts this Input. Delegate a finite goal to a Task Agent or a recurring duty to a Routine Agent. For ongoing, Chief keeps the matter and follows it to a conclusion. Task and routine require instruction and trigger (null for task). A task requires inputId. Ongoing requires title, optionally progress, question and checkAt; it stays with Chief and defaults to a check in 24 hours.",
-      parameters: Type.Object({ kind: workKindField, title: definition.title,
-        instruction: Type.Optional(definition.instruction), trigger: Type.Optional(definition.trigger), inputId: Type.Optional(id),
-        progress: Type.Optional(id), question: Type.Optional(id), checkAt: Type.Optional(Type.String({ format: "date-time" })) }, { additionalProperties: false }),
-      async execute(callId, { kind, title, inputId, instruction, trigger, progress, question, checkAt }, signal) {
+    tool({ name: "upsert_work", label: "Maintain work",
+      description: "Create a delegated Task or Routine, or create/update an Ongoing kept by Chief. Look up existing Work first. sourceId identifies the Note, Work or business Input supporting creation. For a Task supply its business inputId or a sourceId supporting a new Chief decision. To update Ongoing supply workId and version from read_work; outcome closes it, checkAt=null clears its timer. Append new material or control requests to delegated Work with append_input.",
+      parameters: Type.Object({ kind: workKindField, title: Type.Optional(definition.title), workId: Type.Optional(id), version: Type.Optional(id),
+        instruction: Type.Optional(definition.instruction), trigger: Type.Optional(definition.trigger), inputId: Type.Optional(id), sourceId: Type.Optional(id),
+        progress: Type.Optional(id), question: Type.Optional(Type.Union([id, Type.Null()])), outcome: Type.Optional(id),
+        checkAt: Type.Optional(Type.Union([Type.String({ format: "date-time" }), Type.Null()])) }, { additionalProperties: false }),
+      async execute(callId, { kind, title, workId, version, inputId, sourceId, instruction, trigger, progress, question, outcome, checkAt }, signal) {
         signal?.throwIfAborted();
+        if (workId) {
+          if (kind !== "ongoing" || !version || inputId || sourceId || instruction || trigger !== undefined) throw new Error("Updating requires an Ongoing workId and version");
+          return result(await work.updateOngoing(workId, version, { title, progress, question, outcome, checkAt }, callId));
+        }
+        if (!title || version || outcome) throw new Error("Creating Work requires a title and a new responsibility");
+        const sourceUid = sourceId ? await work.sourceUid(sourceId) : undefined;
         if (kind === "ongoing") {
-          if (instruction !== undefined || trigger !== undefined || inputId !== undefined) throw new Error("Ongoing accepts title, progress, question and checkAt");
-          return result(await work.create({ kind, title, progress, question, checkAt }, undefined, callId));
+          if (instruction !== undefined || trigger !== undefined || inputId || checkAt === null || question === null) throw new Error("Invalid initial Ongoing plan");
+          return result(await work.create({ kind, title, progress, question, checkAt }, undefined, callId, sourceUid));
         }
         if (progress !== undefined || question !== undefined || checkAt !== undefined) throw new Error("Only Ongoing accepts progress, question or checkAt");
-        if (kind === "task" && !inputId) throw new Error("Task creation requires inputId; use the received Input or create an independent Chief request first");
         if (!instruction || trigger === undefined) throw new Error("Task and Routine require instruction and trigger");
-        return result(await work.create({ kind, title, instruction, trigger }, inputId, callId));
+        if (kind === "task" && !inputId && !sourceUid) throw new Error("Task needs a business inputId or sourceId");
+        if (kind === "routine" && inputId) throw new Error("Use sourceId for a Routine's supporting material");
+        return result(await work.create({ kind, title, instruction, trigger }, inputId, callId, sourceUid));
       },
     }),
     tool({ name: "append_input", label: "Append input", description: "Send material or a decision to an existing Task or Routine. Set input.id to reference original material (a member ID for a batch). For a new Chief decision within existing authority, supply input.text and optionally input.id. Inline creation and attachment commit together. Returns inputId.",

@@ -25,6 +25,7 @@ export const WorkSchema = z.object({ recent: z.array(NoteViewSchema).default([])
   conditions: ConditionsSchema,
   uid: z.string().optional(),
   id: z.string(),
+  sourceUid: z.string().optional(),
   topicId: z.string(),
   kind: z.enum(["task", "routine"]),
   title: z.string(),
@@ -40,7 +41,7 @@ export const WorkSchema = z.object({ recent: z.array(NoteViewSchema).default([])
 });
 export type Work = z.infer<typeof WorkSchema>;
 
-export type WorkSpecFields = Pick<Work, "title" | "instruction"> & { paused?: boolean };
+export type WorkSpecFields = Pick<Work, "title" | "instruction" | "sourceUid"> & { paused?: boolean };
 export interface WorkStatus {
   topic: import("@compforge/aide-plugin").ResourceRef & { uid: string };
   organization?: z.infer<typeof OrganizationSchema>;
@@ -75,7 +76,7 @@ export function validateTrigger(kind: Work["kind"], trigger: Trigger | null, now
   }
 }
 
-export const WorkSpecSchema = WorkSchema.pick({ title: true, instruction: true }).extend({ paused: z.boolean().default(false) }).strict();
+export const WorkSpecSchema = WorkSchema.pick({ title: true, instruction: true, sourceUid: true }).extend({ paused: z.boolean().default(false) }).strict();
 export const WorkOutcomeSchema = z.object({ at: z.string().datetime(), text: z.string(), observedGeneration: z.number().int().positive(), executionId: z.string().optional() }).strict();
 export const WorkStatusSchema = z.object({ ...ContextFields, topic: ResourceRefSchema, organization: OrganizationSchema.optional(), conditions: ConditionsSchema,
   waiting: z.object({ question: z.string().min(1).optional(), until: z.string().datetime().optional() }).strict().nullable().optional(),

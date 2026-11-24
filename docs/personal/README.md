@@ -25,11 +25,11 @@ Chief 处理一条 Input 后仍要承接的责任统称 Work。先判断由谁�
 | [Routine](routine.md) | Chief 将循环职责委托给 Routine Agent | 当轮完成后等待下一次时间或事件触发 | 每周五汇总本周的审批结果 |
 | [Ongoing](ongoing.md) | 领域 Chief 留下事项，自己跟进 | 有下文就更新进展，有结论就收尾 | 材料已提交，周五核实这次审批结果 |
 
-Chief 用 `list_work` 查找已有责任。需要新增时，`create_work` 在当前 Topic 下创建对应资源并返回。Task 和 Routine 各自的 Reconcile 根据资源状态调度专门的 Agent。后来收到与已有委托相关的材料，Chief 可用 `append_input` 转交原始 Input。Ongoing 的新进展由 Chief 直接记录。约定时间到了，Secretary 递交 `aide:followup`，仍由 Chief 查证、回应并决定是否收尾。需要沟通时，Chief 或受托 Agent 创建 Output。见[输出](output.md)。
+Chief 用 `list_work` 查找已有责任。需要新增时，`upsert_work` 在当前 Topic 下创建对应资源并返回。Task 和 Routine 各自的 Reconcile 根据资源状态调度专门的 Agent。后来收到与已有委托相关的材料，Chief 可用 `append_input` 转交原始 Input。Ongoing 的新进展由 Chief 直接记录。约定时间到了，Secretary 递交 `aide:followup`，仍由 Chief 查证、回应并决定是否收尾。需要沟通时，Chief 或受托 Agent 创建 Output。见[输出](output.md)。
 
 ### 认识与沉淀
 
-Chief 在处理 Input 时按需留下普通 Note，记录对具体事项的初步认识、依据和待核实之处。后续材料可以修订同一篇 Note。处理 `aide:curate` 时，Chief 对照来源和相关 Note 核实事实、归类、合并重复内容，并复核披露范围。整理过的普通 Note 可以就是这件事的完整记录。具体生命周期见[梳理与提炼](note.md#梳理与提炼)，分类与投递契约见[披露边界](disclosure.md)。
+Chief 在处理 Input 时按需留下普通 Note，记录对具体事项的初步认识、依据和待核实之处。后续材料可以修订同一篇 Note。事后复盘也会重新核对 Work；例如 Note 同时记录了已知事实和待兑现的承诺，Chief 可以保留事实，把承诺交给已有 Work 或明确由谁继续办理。处理 `aide:curate` 时，Chief 对照来源和相关 Note 核实事实、归类、合并重复内容，并复核披露范围。整理过的普通 Note 可以就是这件事的完整记录。具体生命周期见[梳理与提炼](note.md#梳理与提炼)，分类与投递契约见[披露边界](disclosure.md)。
 
 #### 有界认识与近期依据
 

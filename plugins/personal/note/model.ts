@@ -29,6 +29,7 @@ export const NoteWriterSchema = z.object({ resource: WriterResourceSchema, execu
 const ReductionReceiptSchema = z.object({ at: z.string().datetime(), reason: z.string().trim().min(1).max(2000), writer: NoteWriterSchema }).strict();
 export const NoteStatusSchema = z.object({ updatedAt: z.string().datetime(), writer: NoteWriterSchema.optional(),
   curationRoot: z.string().optional(), pendingSince: z.iso.datetime().optional(),
+  curationRetry: z.object({ inputUid: z.string(), material: z.string(), at: z.iso.datetime() }).strict().optional(),
   curated: z.object({ inputUid: z.string(), material: z.string() }).strict().optional(),
   splitFrom: z.object({ uid: z.string(), version: z.string() }).strict().optional(),
   retired: ReductionReceiptSchema.optional(),
@@ -47,9 +48,10 @@ export const noteMaterial = (s: NoteSpec) => createHash("sha256").update(JSON.st
   [...s.people].map(p => p.uid).sort(), [...s.addresses].map(a => a.uid).sort(),
 ])).digest("hex");
 export function pendingCuration(note: NoteResource) {
-  if (!note.spec.summaryOf && !note.metadata.deletionTimestamp && !note.status.retired
-    && (!note.spec.nature || note.status.curated?.material !== noteMaterial(note.spec)))
-    return note.status.pendingSince ?? note.status.updatedAt;
+  if (note.spec.summaryOf || note.metadata.deletionTimestamp || note.status.retired) return;
+  const material = noteMaterial(note.spec);
+  if (note.spec.nature && note.status.curated?.material === material) return;
+  return note.status.curationRetry?.material === material ? note.status.curationRetry.at : note.status.pendingSince ?? note.status.updatedAt;
 }
 /** A query projection; never embedded in another persisted Resource. */
 export interface Note extends Omit<NoteSpec, "people" | "addresses"> { nameMissing?: boolean; retired?: NoteStatus["retired"]; people: PersonRef[]; addresses: AddressRef[]; id: string; uid: string; version: string; createdAt: string; updatedAt: string }

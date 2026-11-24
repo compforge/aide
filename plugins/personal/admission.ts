@@ -7,7 +7,7 @@ import { GATE_TOPIC_ID, TOPIC_TYPE, type TopicSpec, type TopicStatus } from "./t
 import { digest } from "./identity.ts";
 import { resourceRef } from "./input/state.ts";
 import type { ResourceAdmission } from "../../src/host/plugin/resource/client.ts";
-import { INPUT_TYPE, type InputSpec, type InputStatus } from "./input/model.ts";
+import { INPUT_TYPE, isInternalInput, type InputSpec, type InputStatus } from "./input/model.ts";
 import { OUTPUT_TYPE } from "./output/model.ts";
 import type { InputStore } from "./input/store.ts";
 import type { OutputStore } from "./output/store.ts";
@@ -35,6 +35,7 @@ export function personalAdmission(inputs: InputStore, outputs: OutputStore): Res
       const attached = input && input.status.topic && members.has(input.status.topic.uid);
       if (topic.metadata.deletionTimestamp || !input || input.metadata.deletionTimestamp || !attached)
         throw new Error("Initial Input is not assigned to the Task Topic");
+      if (isInternalInput(input.spec)) throw new Error("Maintenance Input cannot be delegated");
       const existing = inputs.resources.find(TASK_TYPE, init.name);
       if (existing) {
         if (existing.metadata.deletionTimestamp || !isDeepStrictEqual(existing.spec, spec)) throw new Error("Task creation identity is already used");

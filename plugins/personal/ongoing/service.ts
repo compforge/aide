@@ -21,7 +21,7 @@ export async function readOngoing(resources: ResourceClient, actor: TopicResourc
   return matter;
 }
 
-export async function upsertOngoing(resources: ResourceClient, actor: TopicResource, raw: unknown, callId: string) {
+export async function upsertOngoing(resources: ResourceClient, actor: TopicResource, raw: unknown, callId: string, sourceUid?: string) {
   const args = UpdateSchema.parse(raw);
   const executionId = actor.status.execution?.id;
   if (!executionId || !callId) throw new Error("Ongoing requires a Chief execution and tool-call identity");
@@ -30,9 +30,9 @@ export async function upsertOngoing(resources: ResourceClient, actor: TopicResou
   const updatedAt = now.toISOString();
   if (!args.ongoingId) {
     if (!args.title || args.outcome || args.checkAt === null || args.version) throw new Error("Creating an Ongoing requires a title and an open check");
-    const id = `ongoing-${digest([actor.metadata.uid, executionId, callId]).slice(0, 32)}`;
+    const id = `ongoing-${digest(sourceUid ? [actor.metadata.uid, sourceUid, args.title] : [actor.metadata.uid, executionId, callId]).slice(0, 32)}`;
     const ref = { ...ONGOING_TYPE, namespace: "v1" as const, name: id };
-    const spec = { topic: writer.resource, title: args.title, ...(args.question ? { question: args.question } : {}),
+    const spec = { topic: writer.resource, ...(sourceUid ? { sourceUid } : {}), title: args.title, ...(args.question ? { question: args.question } : {}),
       checkAt: args.checkAt ?? new Date(now.getTime() + 86_400_000).toISOString() };
     const existing = await resources.get<OngoingSpec, OngoingStatus>(ref);
     if (existing) return ongoingView(existing);
@@ -50,7 +50,7 @@ export async function upsertOngoing(resources: ResourceClient, actor: TopicResou
   if (args.question && !checkAt) throw new Error("Set checkAt to schedule this question");
   const question = args.outcome || args.question === null ? undefined : args.question ?? matter.spec.question;
   const revised = checkAt !== matter.spec.checkAt || question !== matter.spec.question;
-  const spec = { topic: matter.spec.topic, title: args.title ?? matter.spec.title, ...(checkAt ? { checkAt } : {}), ...(question ? { question } : {}) };
+  const spec = { ...(matter.spec.sourceUid ? { sourceUid: matter.spec.sourceUid } : {}), topic: matter.spec.topic, title: args.title ?? matter.spec.title, ...(checkAt ? { checkAt } : {}), ...(question ? { question } : {}) };
   const status = { ...matter.status, writer, updatedAt, ...(args.progress ? { progress: args.progress } : {}),
     planRevision: matter.status.planRevision + Number(revised), ...(args.outcome ? { closure: { at: updatedAt, outcome: args.outcome } } : {}) };
   return ongoingView(await resources.replace(matter, spec, status));

@@ -39,9 +39,9 @@ Succeeded 只确认 completion 对应当前 metadata.generation；NeedsAttention
 
 ### 创建与输入
 
-Chief 创建 Task 时通过 `create_work` 传入 `inputId`。Task.spec.initialInputId 和该 Input 的 handle 在同一事务建立；事务提交后 Task 才能执行。Chief 的 assess 回执独立确认，一个 Input 可以创建多个不同目标的 Task。创建去重包含 Topic UID、初始 Input ID 和工具调用身份，同一次调用重试复用原 Task，不同目标使用不同身份。
+Chief 创建 Task 时通过 `upsert_work` 传入 `inputId`。Task.spec.initialInputId 和该 Input 的 handle 在同一事务建立；事务提交后 Task 才能执行。Chief 的 assess 回执独立确认，一个 Input 可以创建多个不同目标的 Task。引用来源时，创建按 Topic、来源、工作类型、目标标题及显式初始 Input 标识去重。同一来源可以支持不同目标；新证据出现时先查已有 Work。
 
-没有外部 Input 的主动决定先经 `create_input` 记录为独立的 origin=chief Input，再创建 Task；它不会扩大已有委托授权。程序调用 WorkService.create 省略 inputId 时，将等价的独立 Input 与 Task 一起创建。
+复盘 Note 或 Work 时，如果已有授权支持一项新委托，可向 `upsert_work` 提供 `sourceId` 和明确的 instruction。系统将委托记录为独立的 Chief 决定，与 Task 在同一事务创建。Work 保存来源 UID，维护 Input 只记录此次复盘。
 
 后续材料通过 append_input 交给已有 Task，input.id 指向原始 Input。接收 Controller 应用确定性请求；agent Controller 负责持续执行。空闲时调用 prompt，运行中普通输入 followUp、immediate 输入 steer。Input.handle.executionId 先于提交持久化；一个 invocation 可以处理多条 Input，但每条办理结果独立确认。
 

@@ -22,9 +22,9 @@ const instructions: Record<InputOrigin, string> = {
   channel: "Respond to the business Input. Answer, maintain matter Notes and hand off ongoing Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
   source: "Assess the observed business facts within existing authority. Update continuing matter Notes and relevant Work as needed. Observation is not new authorization. Leave tree organization and durable summary maintenance to their own Inputs.",
   chief: "Handle the recorded business decision within its existing authorization. Maintain matter Notes and Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
-  "aide:followup": "Read the specified Ongoing, related Inputs, Work results and replies from Me. If the plan was superseded or the matter closed, finish silently. When evidence establishes closure, update_ongoing with the outcome and basis. If still open, record progress and the next check. When a consequential fact is missing, ask Me privately with ask_me, then await the reply. Finish this check with assess_input.",
+  "aide:followup": "Read the specified Ongoing, related Inputs, Work results and replies from Me. If the plan was superseded or the matter closed, finish silently. When evidence establishes closure, upsert_work with the outcome and basis. If still open, record progress and the next check. When a consequential fact is missing, ask Me privately with ask_me, then await the reply. Finish this check with assess_input.",
   "aide:summary": "Review only the named owner. Use the owner-specific question in the Input. Read its whole current summary and relevant Notes. What is worth reading by default next time? If you wrote the summary today, would each existing claim still hold at the same scope and certainty? Keep lasting, supported conclusions. Narrow or remove outdated claims. Use the evidenced outcome of a concluded matter before generalizing from it. Preserve disclosure, attribution and explicit corrections. Re-read on version conflict. Finish with assess_input even if nothing warrants a write.",
-  "aide:curate": "Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Use split_note for mixed material. For duplicate Notes, update the existing destination before pruning or retiring the source. Finish this Input with assess_input.curatedNotes listing the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Leave unresolved versions pending.",
+  "aide:curate": "Review ordinary Notes and Task, Routine and Ongoing in this Topic using current evidence and existing authority. Identify missing or changed responsibilities, look up existing Work before creating any, and use append_input for delegated work. Confirm the destination before retiring a redundant source Note or winding down superseded Work. Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Use split_note for mixed material. For duplicate Notes, update the existing destination before pruning or retiring the source. Finish this Input with assess_input.curatedNotes listing the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Use versions returned by fresh reads or writes. If assess_input returns needsReview, reread and correct rejected entries, or omit unresolved Notes to defer them explicitly.",
   "aide:organize": "Organize the Topic tree and its material. Create or move Topics and file Inputs, idle Work and Notes according to responsibility. If a Note spans Topics, use split_note to extract ordinary Notes into the appropriate Topics. Preserve evidence and disclosure. Preserve business assessment receipts. Finish this maintenance Input with assess_input.",
 };
 // Bundled tools have no Personal metadata upstream; their capabilities are declared at this assembly boundary.
@@ -130,11 +130,17 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
       if (!uid || !selected || !live.inputs.some(i => i.id === selected.id && i.summaryOwnerUid === uid))
         return { block: true, reason: "Only the admitted Summary owner may be edited" };
     }
-    if (context.toolCall.name === "update_ongoing" && current.origin === "aide:followup") {
-      const id = (context.args as { id?: string }).id;
+    if (context.toolCall.name === "upsert_work" && current.origin === "aide:followup") {
+      const args = context.args as { kind?: string; workId?: string };
+      const id = args.kind === "ongoing" && args.workId;
       const plan = id && await binding.ongoingCheck?.(id);
-      if (!plan || !current.inputs.some(i => i.id === plan))
+      if (!plan || !current.inputs.some(i => i.id === plan) || !live.inputs.some(i => i.id === plan))
         return { block: true, reason: "Update only the Ongoing and check plan admitted for this followup" };
+    }
+    if (context.toolCall.name === "upsert_work" && current.origin === "aide:curate") {
+      const args = context.args as { workId?: string; sourceId?: string; inputId?: string };
+      if (!args.workId && !args.sourceId && !args.inputId)
+        return { block: true, reason: "Identify the source Note, Work or business Input for the new responsibility" };
     }
     if (context.toolCall.name === "ask_me" && !current.inputs.some(i => i.origin === "aide:followup" && i.id === (context.args as { inputId?: string }).inputId))
       return { block: true, reason: "Ask only about the admitted followup" };
@@ -143,7 +149,7 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
       const origin = current.inputs.find(i => i.id === args.inputId)?.origin ?? (args.inputId ? binding.inputOrigin(args.inputId) : undefined);
       const maintenance = isInternalInput(current);
       if (!origin || (maintenance ? origin !== current.origin || !current.inputs.some(i => i.id === args.inputId) : isInternalInput({ origin })))
-        return { block: true, reason: "Assess only Inputs supported by the current task; maintenance cannot hand off business Work" };
+        return { block: true, reason: "Assess only business material or the specific maintenance Input admitted for this task" };
     }
     return beforeTool?.(context, signal);
   };

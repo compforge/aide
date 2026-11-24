@@ -15,7 +15,7 @@ Channel / Source → Input
                                          ↓
                     Topic Reconcile → Chief Agent
                          ├─ assess_input → 研判回执
-                         └─ 按需 create_work → Task / Routine / Ongoing
+                         └─ 按需 upsert_work → Task / Routine / Ongoing
 ```
 
 ## CRD
