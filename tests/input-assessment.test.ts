@@ -118,8 +118,8 @@ test("Topic Notes are bounded independently of long-lived summary and reject sta
   assert.ok(notes(aide.topics.resources, current.metadata.uid, "subject").length <= 40);
   assert.ok(notes(aide.topics.resources, current.metadata.uid, "subject").reduce((sum, entry) => sum + entry.text.length, 0) <= 16000);
   assert.equal(contentVersion(stale), contentVersion(current), "Independent notes do not change summary version");
-  await assert.rejects(upsertTopicNote(resources, current, "wrong-execution", { summaryOf: resourceRef(current), version: contentVersion(current), text: "stale" }, "summary", 4000, "aide:curate"), /no longer active/);
-  await assert.rejects(upsertTopicNote(resources, current, "review", { summaryOf: resourceRef(current), version: contentVersion(current), text: "x".repeat(16001) }, "summary", 4000, "aide:curate"));
+  await assert.rejects(upsertTopicNote(resources, current, "wrong-execution", { summaryOf: resourceRef(current), version: contentVersion(current), text: "stale" }, "summary", 4000, "aide:summary"), /no longer active/);
+  await assert.rejects(upsertTopicNote(resources, current, "review", { summaryOf: resourceRef(current), version: contentVersion(current), text: "x".repeat(16001) }, "summary", 4000, "aide:summary"));
   assert.deepEqual(aide.topics.resource("me")!.status, current.status);
 });
 
@@ -142,7 +142,7 @@ test("quiet assessments retain topic understanding; explicit synthesis can updat
   const current = aide.topics.resource("me")!;
   assert.equal(summaryText(aide.topics.resources, current), "OOM unresolved; investigation delegated");
   assert.deepEqual(notes(aide.topics.resources, current.metadata.uid, "subject"), storedNotes);
-  const receipt = await upsertTopicNote(resources, current, "live", { summaryOf: resourceRef(current), version: contentVersion(current), text: "OOM cause confirmed; fix pending" }, "summary", 4000, "aide:curate");
+  const receipt = await upsertTopicNote(resources, current, "live", { summaryOf: resourceRef(current), version: contentVersion(current), text: "OOM cause confirmed; fix pending" }, "summary", 4000, "aide:summary");
   assert.equal(receipt.version, aide.topics.resource("me")!.status.summaryRevision);
   assert.deepEqual(notes(aide.topics.resources, current.metadata.uid, "subject"), storedNotes);
   assert.equal(summaryText(aide.topics.resources, aide.topics.resource("me")!), "OOM cause confirmed; fix pending");

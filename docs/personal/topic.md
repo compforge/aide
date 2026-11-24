@@ -158,9 +158,9 @@ Chief 拆分时留下原因和所依据的主题状态，Weave 归拢时读取�
 
 Topic 的长期 summary 与近期事项均保存为独立 Note；Topic 记录自身摘要的内容指纹。子 Topic 没有独立 Chief，局部认识由当前 root Chief 维护。父 Topic 按需综合子主题，保留来源、分歧、作者和授权边界；已有层级的综合认识也可以供后续 root 阅读。
 
-经过梳理的普通 Note 可以持续作为理解该事项的依据。Chief 处理 `aide:curate` 时，结合相关材料判断哪些结论在该事项之外仍然成立，并对理解当前 Topic 有持续价值，再按需提炼到 Topic summary。
+Chief 处理一条 Input 时，可能留下对某个事项的初步记录。随着更多材料到来，`aide:curate` 核实、归类和整合普通 Note，让同一事项的依据与进展可以持续查阅。若某项结论超出原事项仍然成立，`aide:summary` 再判断它是否值得成为下次接触该 Topic 时默认读到的背景。许多事项在普通 Note 中就有了完整记录。
 
-父子 Topic 按各自的职责范围保存认识。Chief 处理 `aide:organize` 时，若材料归位改变了某个 Topic 所涵盖的事项，就核对该 Topic 的摘要是否仍准确。子摘要变化后，父摘要只吸收适用于父主题的结论。维护 Input 完成时使用通常的研判回执。
+父子 Topic 按各自的职责范围保存认识。`aide:organize` 调整 Topic 和材料归属。下次复核该 Topic 的 Summary 时，Chief 按当前范围重新审视已有判断。
 
 新建父 Topic 保留子 Note 的原始 subject，综合时创建自己的 Note。认识维护的工具、按需读取和上下文预算见 [Chief](chief.md#上下文与记忆)，Note 本身的存储及引用契约见 [Note](note.md)。
 

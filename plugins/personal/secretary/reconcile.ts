@@ -1,3 +1,4 @@
+import { checkSummary } from "./summary.ts";
 import { NOTE_TYPE, followupInputId, type NoteResource } from "../note/model.ts";
 import { topicWatch, materialWatch } from "../topic/watch.ts";
 import { assignmentWatch } from "../input/state.ts";
@@ -25,7 +26,7 @@ import { topicReview } from "../topic/review.ts";
 function maintenanceInstructions(plan: ReviewPreparation, maxChars: number): string {
   return [
     plan.weaveRevision ? "Topic structure changed. Inspect current Topic structure and preserve responsibility boundaries." : "",
-    plan.notePressure.length ? `Note consolidation (reason: note_pressure): ${JSON.stringify(plan.notePressure.map(({ uid, pressure: p }) => ({ uid, maxNotes: p.maxNotes, count: p.count, oversized: p.oversized.slice(0, 3).map(n => n.noteId), moreOversized: p.oversized.length > 3 })))}. Counts are lower bounds. Page list_notes by each subject and read complete Notes. Budgets are soft limits, not deletion targets. Merge compatible matters, use split_note for mixed material and move misplaced Notes. Follow subject, people and addresses to update durable Topic/Person/Address summaries when useful. Confirm destination writes before pruning sources; preserve evidence, uncertainty, unresolved work and disclosure. Inspect at most 8 Notes per Topic. Leave unfinished maintenance pending; otherwise assess_input even if no safe reduction is useful.` : "",
+    plan.notePressure.length ? `Note consolidation (reason: note_pressure): ${JSON.stringify(plan.notePressure.map(({ uid, pressure: p }) => ({ uid, maxNotes: p.maxNotes, count: p.count, oversized: p.oversized.slice(0, 3).map(n => n.noteId), moreOversized: p.oversized.length > 3 })))}. Counts are lower bounds. Page list_notes by each subject and read complete Notes. Budgets are soft limits, not deletion targets. Merge compatible matters, use split_note for mixed material and move misplaced Notes. Follow subject, people and addresses to locate related ordinary Notes. Confirm destination writes before pruning sources; preserve evidence, uncertainty, unresolved work and disclosure. Inspect at most 8 Notes per Topic. Leave unfinished maintenance pending; otherwise assess_input even if no safe reduction is useful.` : "",
     `Topic summary budget: ${maxChars}. Preparation is a snapshot; recheck current evidence before writing.`,
   ].filter(Boolean).join("\n");
 }
@@ -71,7 +72,7 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
   let topic = initial;
   if (!isRootTopic(topic)) await reconcileBatches(context, topic);
   const next = isRootTopic(topic) ? await prepareInputs(context, topic, policy) : policy.trigger.intervalSeconds * 1000;
-  if (isGateTopic(topic)) return { requeueAfterMs: next };
+  if (isGateTopic(topic)) return { requeueAfterMs: Math.min(next, await checkSummary(context, topic)) };
   await refreshNotePressure(context, topic);
   await cancelObsolete(context, topic, policy);
   await ensureOrganizationInput(context, topic, policy);

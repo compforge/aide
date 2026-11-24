@@ -4,6 +4,7 @@ import { isGateTopic } from "../../topic/boundary.ts";
 import type { MailSender } from "../../stream/sender.ts";
 import { Addresses } from "../../address/service.ts";
 import { addressReadTools } from "../../address/tools.ts";
+import { SummaryOwnerSchema } from "../../input/review.ts";
 import { readNote } from "../../note/service.ts";
 import { topicTools } from "./topic-tools.ts";
 import { inputPreview } from "../../input/prompt.ts";
@@ -69,6 +70,7 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
         return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "chief",
           inputs: [...store.topics.inputStore.query("assessExecution", c.status.execution!.id).map(i => ({
             id: i.metadata.name, deliveryId: i.status.assess?.deliveryId ?? `input:${i.metadata.uid}`, initial: !i.status.assess?.deliveryId && i.status.assess?.startedAt === c.status.execution!.startedAt,
+            summaryOwnerUid: i.spec.origin === "aide:summary" ? SummaryOwnerSchema.parse(i.spec.observation?.summaryOwner).uid : undefined,
             origin: i.spec.origin, immediate: immediate(i.spec), text: inputPreview(i, Math.floor(policy.contextChars / 8)),
           })), ...store.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "execution", value: c.status.execution!.id } }).flatMap(batch => {
             const members = store.topics.inputStore.query("batch", batch.metadata.uid);
@@ -79,6 +81,7 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
             }));
           }) ] };
       },
+      noteSummaryOwner: async id => (await readNote(store.client, id)).summaryOf?.uid,
       inputOrigin: id => {
         const input = store.topics.inputStore.get(id);
         return input?.status.batchId ? undefined : input?.spec.origin;

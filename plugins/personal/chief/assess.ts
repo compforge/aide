@@ -1,3 +1,5 @@
+import { SummaryOwnerSchema } from "../input/review.ts";
+import type { ResourceContext } from "../context.ts";
 import { CuratedNotesSchema } from "../input/assessment.ts";
 import { NOTE_TYPE, noteMaterial, noteVersion, pendingCuration, type NoteSpec, type NoteStatus } from "../note/model.ts";
 import { inputOutcome } from "./input-outcome.ts";
@@ -55,6 +57,15 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
       }
     }
     const outcome = inputOutcome(input, c, at);
+    if (input.spec.origin === "aide:summary") {
+      if (input.status.assess?.executionId !== executionId) throw new Error("Only the admitted Summary review may finish");
+      const ref = SummaryOwnerSchema.parse(input.spec.observation?.summaryOwner);
+      const subject = await resources.get<unknown, ResourceContext>(ref);
+      if (subject?.metadata.uid === ref.uid && !subject.metadata.deletionTimestamp) {
+        if (subject.metadata.uid === c.metadata.uid) outcome.summaryReviewedAt = at;
+        else receipts.push({ operation: "patchStatus", resource: subject, patch: { summaryReviewedAt: at } });
+      }
+    }
     try {
       await commitStatus(resources, [
         ...guards,

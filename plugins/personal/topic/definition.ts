@@ -63,7 +63,7 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
   }
 }
 export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
-  type: TOPIC_TYPE, indexVersion: 7,
+  type: TOPIC_TYPE, indexVersion: 8,
   schema: { spec: z.object({ maxNotes: z.number().int().min(1).max(999).optional(), id: z.string(), address: AddressRefSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     people: PersonRefsSchema(1000).optional(), review: TopicReviewSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
     status: z.object({ conditions: ConditionsSchema, organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
@@ -80,6 +80,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       yieldToInput: z.boolean().optional(),
       idleReviewReset: z.object({ at: z.string().datetime(), previousCount: z.number().int().nonnegative() }).strict().nullable().optional(),
       lastInputAt: z.string().datetime().optional(),
+      summaryCheckAt: z.iso.datetime().optional(),
       reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict().transform(({ noteReviewQueue: _queue, ...status }) => status) },
   validator: { create: (resource, context) => { validateSummary(resource, context); validateDefault(resource, context); guardTopicOrganization(resource, context); }, update: (previous, current, context) => {
     guardContext(previous, current, context);
@@ -118,6 +119,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     liveParent: r => !r.metadata.deletionTimestamp && r.spec.parentRef ? [r.spec.parentRef.uid] : [],
     parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], weaveRoot: r => !r.metadata.deletionTimestamp && isRootTopic(r) && !r.spec.default ? ["root"] : [], root: r => !r.metadata.deletionTimestamp && isRootTopic(r) ? ["root"] : [] },
   orderedIndexes: {
+    summaryReview: r => !r.metadata.deletionTimestamp && !isGateTopic(r) ? [{ value: "owner", order: r.status.summaryReviewedAt ?? "0" }] : [],
     notePressure: r => !r.metadata.deletionTimestamp && r.status.notePressure
       ? [{ value: r.status.notePressure.rootUid, order: r.status.notePressure.nextAt }] : [],
     weavePending: r => !r.metadata.deletionTimestamp && isRootTopic(r) && !r.spec.default && r.status.weaveReview?.version !== candidateVersion(r)

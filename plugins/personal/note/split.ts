@@ -20,8 +20,8 @@ const SplitNoteSchema = PruneNoteSchema.extend({ parts: z.array(PartSchema).min(
  */
 export async function splitNote(resources: ResourceClient, actor: TopicResource, raw: unknown, origin: InputOrigin) {
   const args = SplitNoteSchema.parse(raw);
-  if (!actor.status.execution || (origin !== "aide:curate" && origin !== "aide:organize"))
-    throw new Error("Splitting requires an active Chief handling curate or organize");
+  if (!actor.status.execution || (origin !== "aide:curate" && origin !== "aide:organize" && origin !== "aide:summary"))
+    throw new Error("Splitting requires an active Chief handling Note maintenance");
   const get = (name: string) => resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name });
   const source = await get(args.noteId);
   if (!source || source.metadata.deletionTimestamp || source.status.retired) throw new Error("Read an active Note before splitting");

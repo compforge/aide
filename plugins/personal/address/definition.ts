@@ -34,7 +34,8 @@ function validateLocators(resource: import("./model.ts").AddressResource, contex
 }
 
 export const AddressDefinition: ResourceDefinition<AddressSpec, AddressStatus> = {
-  type: ADDRESS_TYPE, schema: { spec: AddressSpecSchema, status: z.object({ ...ContextFields, people: PersonRefsSchema().prefault([]), retiring: z.boolean().optional(), mergeSources: AddressRefsSchema.optional() }).strict() },
+  type: ADDRESS_TYPE, indexVersion: 2, schema: { spec: AddressSpecSchema, status: z.object({ ...ContextFields, people: PersonRefsSchema().prefault([]), retiring: z.boolean().optional(), mergeSources: AddressRefsSchema.optional() }).strict() },
+  orderedIndexes: { summaryReview: r => !r.metadata.deletionTimestamp && !r.status.retiring ? [{ value: "owner", order: r.status.summaryReviewedAt ?? "0" }] : [] },
   indexes: { uid: r => [r.metadata.uid], locator: r => r.metadata.deletionTimestamp || r.status.retiring ? [] : [...r.spec.locators].map(locator => JSON.stringify(locator)), people: r => [...r.status.people].map(p => p.uid) },
   validator: { create(r, context) {
     if (r.metadata.namespace !== "v1" || r.metadata.owner) throw new Error("Address requires an independent shared identity");

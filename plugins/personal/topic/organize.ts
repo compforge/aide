@@ -1,7 +1,5 @@
 import { ensureGateTopic } from "../gate/topic.ts";
 import { isRootTopic } from "./boundary.ts";
-import { writeSummary } from "../note/summary.ts";
-import { WriterResourceSchema } from "../note/model.ts";
 import { commitStatus } from "../status.ts";
 import { ORGANIZATION_COOLDOWN_MS } from "../weave/config.ts";
 import { OrganizationSchema } from "./ref.ts";
@@ -27,7 +25,7 @@ async function scope(resources: ResourceClient, actor: TopicResource) {
     throw new Error("Organization requires the active root Chief");
   return { root, topics };
 }
-export async function createChildTopic(resources: ResourceClient, actor: TopicResource, args: { parentUid?: string; name: string; summary?: string; people?: Iterable<import("../person/model.ts").PersonRef>; reason: string }, callId: string) {
+export async function createChildTopic(resources: ResourceClient, actor: TopicResource, args: { parentUid?: string; name: string; reason: string }, callId: string) {
   const { root, topics } = await scope(resources, actor);
   const parent = topics.find(t => t.metadata.uid === (args.parentUid ?? root.metadata.uid));
   if (!parent) throw new Error("Child parent is unavailable");
@@ -35,16 +33,13 @@ export async function createChildTopic(resources: ResourceClient, actor: TopicRe
   const existing = await resources.get<TopicResource["spec"], TopicResource["status"]>({ ...TOPIC_TYPE, namespace: "v1", name });
   if (existing) {
     if (!topics.some(t => t.metadata.uid === existing.metadata.uid)) throw new Error("Created Topic has moved; reread the tree");
-    if (!existing.status.summaryRevision && (args.summary || args.people)) return writeSummary(resources, existing, { text: z.string().max(16000).optional().parse(args.summary), people: args.people }, { resource: WriterResourceSchema.parse(resourceRef(root)), executionId: root.status.execution!.id });
     return existing;
   }
   const organization = OrganizationSchema.parse({ at: new Date().toISOString(), reason: args.reason, actorUid: root.metadata.uid, executionId: root.status.execution!.id, toUid: parent.metadata.uid });
   await commitStatus(resources, [{ operation: "create", type: TOPIC_TYPE, name,
     spec: { id, name: z.string().trim().min(1).max(200).parse(args.name), parentRef: resourceRef(parent) },
     status: { receipts: [], organization } }]);
-  const created = (await resources.get<TopicResource["spec"], TopicResource["status"]>({ ...TOPIC_TYPE, namespace: "v1", name }))!;
-  if (!args.summary && !args.people) return created;
-  return writeSummary(resources, created, { text: z.string().max(16000).optional().parse(args.summary), people: args.people }, { resource: WriterResourceSchema.parse(resourceRef(root)), executionId: root.status.execution!.id });
+  return (await resources.get<TopicResource["spec"], TopicResource["status"]>({ ...TOPIC_TYPE, namespace: "v1", name }))!;
 }
 export async function moveMaterial(resources: ResourceClient, actor: TopicResource, args: { kind: "Input" | "Task" | "Routine"; id: string; topicUid: string; reason: string }) {
   const { root, topics } = await scope(resources, actor);

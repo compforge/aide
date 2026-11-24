@@ -31,7 +31,7 @@ async function fixture(t: TestContext) {
   const topic = await aide.topics.ensure("root");
   await resources.patchStatus(topic, { execution: { id: "chief", startedAt: new Date().toISOString() } });
   const root = () => aide.topics.resource("root")!;
-  const child = () => createChildTopic(resources, root(), { name: "Aide ownership", summary: "Topic assignment", reason: "A coherent implementation topic" }, "child");
+  const child = () => createChildTopic(resources, root(), { name: "Aide ownership", reason: "A coherent implementation topic" }, "child");
   const input = async (id: string) => {
     const fact = aide.topics.inputStore.submit("fixture", id, { origin: "source", originId: "fixture", text: `${id}: ${"recent evidence ".repeat(100)}` });
     await deliver({ resources, logger }, fact, [root().metadata], "Initial decision");
@@ -83,7 +83,7 @@ test("Work moves without changing objective, schedule or history, and running co
 test("Detaching preserves a subtree, releases its root responsibility and prevents immediate Weave reversal", async t => {
   const f = await fixture(t), child = await f.child();
   await f.resources.patchStatus(child, { idleReviewCount: 3, reviewCheckedAt: new Date().toISOString() });
-  const grandchild = await createChildTopic(f.resources, f.root(), { parentUid: child.metadata.uid, name: "Details", summary: "Details", reason: "Group details" }, "grandchild");
+  const grandchild = await createChildTopic(f.resources, f.root(), { parentUid: child.metadata.uid, name: "Details", reason: "Group details" }, "grandchild");
   await assert.rejects(moveTopic(f.resources, f.root(), { uid: child.metadata.uid, parentUid: grandchild.metadata.uid, reason: "Cycle" }), /cycle/);
   const independent = await moveTopic(f.resources, f.root(), { uid: child.metadata.uid, parentUid: null, reason: "Distinct sustained responsibility" });
   assert.equal(independent.spec.parentRef?.name, digest("gate"));
@@ -156,11 +156,12 @@ test("Chief organizes trees larger than the transaction limit without writing un
   const before = await f.resources.list(TOPIC_TYPE);
   const writes: number[] = [];
   const resources: ResourceClient = { ...f.resources, async commit(items) { writes.push(items.length); return f.resources.commit(items); } };
-  const target = await createChildTopic(resources, f.root(), { name: "New", summary: "New", reason: "Specific subject" }, "large-target");
+  const target = await createChildTopic(resources, f.root(), { name: "New", reason: "Specific subject" }, "large-target");
   await moveMaterial(resources, f.root(), { kind: "Input", id: input.metadata.name, topicUid: target.metadata.uid, reason: "Relevant" });
   await moveMaterial(resources, f.root(), { kind: "Task", id: task.id, topicUid: target.metadata.uid, reason: "Relevant" });
   await moveTopic(resources, f.root(), { uid: branch.metadata.uid, parentUid: null, reason: "Independent responsibility" });
-  assert.deepEqual(writes, [1, 2, 2, 1, 2]);
+  assert.deepEqual(writes, [1, 2, 1, 2]);
+  assert.equal(target.status.summaryRevision, "", "organizing a child does not initialize its Summary");
   const after = await f.resources.list(TOPIC_TYPE);
   for (const topic of before.filter(topic => ![branch.metadata.uid, f.root().metadata.uid].includes(topic.metadata.uid)))
     assert.equal(after.find(a => a.metadata.uid === topic.metadata.uid)!.metadata.resourceVersion, topic.metadata.resourceVersion, "unrelated observations are not writes");
@@ -169,7 +170,7 @@ test("Chief organizes trees larger than the transaction limit without writing un
 test("Transaction checks detect changed intermediate ancestry and expired Chief executions", async t => {
   for (const race of ["ancestor", "execution"] as const) {
     const f = await fixture(t), branch = await f.child();
-    const target = await createChildTopic(f.resources, f.root(), { parentUid: branch.metadata.uid, name: "Target", summary: "", reason: "Specific" }, "nested");
+    const target = await createChildTopic(f.resources, f.root(), { parentUid: branch.metadata.uid, name: "Target", reason: "Specific" }, "nested");
     const input = await f.input(`race-${race}`);
     const resources: ResourceClient = { ...f.resources, async commit(writes) {
       if (race === "ancestor") {
@@ -207,7 +208,7 @@ test("Detaching checks newly admitted Inputs in the transaction, including arriv
 
 test("Transaction ancestry checks reject two competing edge changes that would form a cycle", async t => {
   const f = await fixture(t), a = await f.child();
-  const b = await createChildTopic(f.resources, f.root(), { name: "B", summary: "", reason: "Sibling" }, "sibling");
+  const b = await createChildTopic(f.resources, f.root(), { name: "B", reason: "Sibling" }, "sibling");
   const resources: ResourceClient = { ...f.resources, async commit(writes) {
     await f.resources.replace(b, { ...b.spec, parentRef: resourceRef(a) }, b.status);
     return f.resources.commit(writes);

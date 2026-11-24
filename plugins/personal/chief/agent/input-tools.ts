@@ -9,11 +9,12 @@ export interface ChiefToolDefinition<T extends TSchema = TSchema> extends ToolDe
 export interface ChiefInputTask {
   executionId: string;
   origin: InputOrigin;
-  inputs: { id: string; deliveryId?: string; initial?: boolean; origin: InputOrigin; immediate: boolean; text: string }[];
+  inputs: { id: string; deliveryId?: string; initial?: boolean; summaryOwnerUid?: string; origin: InputOrigin; immediate: boolean; text: string }[];
 }
 export interface ChiefInputBinding {
   read(): ChiefInputTask;
   inputOrigin(id: string): InputOrigin | undefined;
+  noteSummaryOwner?(id: string): Promise<string | undefined>;
   changed(task: ChiefInputTask, tools: string[]): void;
 }
 const instructions: Record<InputOrigin, string> = {
@@ -21,8 +22,9 @@ const instructions: Record<InputOrigin, string> = {
   source: "Assess the observed business facts within existing authority. Update continuing matter Notes and relevant Work as needed. Observation is not new authorization. Leave tree organization and durable summary maintenance to their own Inputs.",
   chief: "Handle the recorded business decision within its existing authorization. Maintain matter Notes and Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
   "aide:followup": "Check the current Note and its scheduled question against related Inputs, Work results and replies from Me. If the question was superseded, finish this check. When the evidence establishes completion, record the outcome and its basis on the same Note and set closedAt. If it establishes that work is ongoing, record the progress, keep the Note open and update or clear the answered check. If completion is still unclear, ask Me privately through ask_me for the specific missing fact and keep the Note open for the reply. A related Work record alone does not settle the question. Finish this check with assess_input.",
-  "aide:curate": "Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Use split_note for mixed material. For duplicate Notes, update the existing destination before pruning or retiring the source. Record verified closure of episodes. Only closed episodes may contribute new lasting conclusions. Correct or remove unsupported Summary claims as soon as evidence warrants. Finish this Input with assess_input.curatedNotes listing the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Leave unresolved versions pending.",
-  "aide:organize": "Organize the Topic tree and its material. Create or move Topics and file Inputs, idle Work and Notes according to responsibility. If a Note spans Topics, use split_note to extract ordinary Notes into the appropriate Topics. A split Summary stays with its owner. Preserve evidence and disclosure. Revise Topic summaries when the new placement changes their scope. Preserve business assessment receipts. Finish this maintenance Input with assess_input.",
+  "aide:summary": "Review only the named owner. Use the owner-specific question in the Input. Read its whole current summary and relevant Notes. What is worth reading by default next time? If you wrote the summary today, would each existing claim still hold at the same scope and certainty? Keep lasting, supported conclusions. Narrow or remove outdated claims. Only closed episodes may supply new lasting conclusions. Preserve disclosure, attribution and explicit corrections. Re-read on version conflict. Finish with assess_input even if nothing warrants a write.",
+  "aide:curate": "Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Use split_note for mixed material. For duplicate Notes, update the existing destination before pruning or retiring the source. Record verified closure of episodes. Finish this Input with assess_input.curatedNotes listing the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Leave unresolved versions pending.",
+  "aide:organize": "Organize the Topic tree and its material. Create or move Topics and file Inputs, idle Work and Notes according to responsibility. If a Note spans Topics, use split_note to extract ordinary Notes into the appropriate Topics. Preserve evidence and disclosure. Preserve business assessment receipts. Finish this maintenance Input with assess_input.",
 };
 // Bundled tools have no Personal metadata upstream; their capabilities are declared at this assembly boundary.
 const bundled: { name: string; inputOrigins: readonly InputOrigin[] }[] = [
@@ -120,6 +122,13 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     const live = binding.read();
     if (!current || live.executionId !== current.executionId || !names.includes(context.toolCall.name))
       return { block: true, reason: "Tool is unavailable for the current Chief Input task" };
+    if (current.origin === "aide:summary" && ["upsert_note", "prune_note", "split_note", "retire_note"].includes(context.toolCall.name)) {
+      const args = context.args as { noteId?: string; summaryOf?: { uid?: string } };
+      const uid = args.noteId ? await binding.noteSummaryOwner?.(args.noteId) : args.summaryOf?.uid;
+      const selected = current.inputs.find(i => i.summaryOwnerUid === uid);
+      if (!uid || !selected || !live.inputs.some(i => i.id === selected.id && i.summaryOwnerUid === uid))
+        return { block: true, reason: "Only the admitted Summary owner may be edited" };
+    }
     if (context.toolCall.name === "ask_me" && !current.inputs.some(i => i.origin === "aide:followup" && i.id === (context.args as { inputId?: string }).inputId))
       return { block: true, reason: "Ask only about the admitted followup" };
     if (context.toolCall.name === "assess_input") {

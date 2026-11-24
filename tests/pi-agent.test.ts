@@ -1347,7 +1347,7 @@ test("Weave queues a review Input after busy Chief business without mixing tools
   assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Topic structure changed/);
   assert.equal(aide.invocations().filter(i => i.topicId === "parent").length, 1);
   assert.equal(aide.topics.resource("parent")!.status.notifiedWeaveRevision, 1);
-  assert.equal(summaryText(aide.topics.resources, aide.topics.resource("parent")!), "Combined understanding");
+  assert.equal(summaryText(aide.topics.resources, aide.topics.resource("parent")!), "");
   assert.ok(aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!.status.assess?.completedAt);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
   assert.equal([...state.harnessInputs.values()].filter(i => i.delivery === "followUp").length, 1);
@@ -1475,4 +1475,25 @@ test(`Chief changes tools only when Pi delivers ${origin} followUp after ${initi
     assert.doesNotMatch(JSON.stringify(fixture.requests[1]!.messages), /Normal business fact/);
     assert.ok(JSON.stringify(fixture.requests[2]!.messages).includes(`Current Input origin: ${origin}`));
   } finally { session.dispose(); }
+});
+
+test("Chief Summary tools edit only the owner of the admitted Input", async t => {
+  const args = [
+    { noteId: "unrelated", version: "v1", text: "Unrelated" },
+    { summaryOf: { apiVersion: "aide.dev/v1alpha3", kind: "Person", namespace: "v1", name: "other", uid: "other-id" }, text: "Misattributed" },
+    { noteId: "selected", version: "v1", text: "Verified scope" },
+  ];
+  const fixture = await setup(t, (_request, index) => index < args.length ? { tool: "upsert_note", args: args[index] } : { text: "Done" }, "chief");
+  const written: unknown[] = [];
+  const session = await createChiefAgent({ ...fixture.config, work: fixture.work,
+    topicNote: async update => { written.push(update); return {}; },
+    inputBinding: {
+      read: () => ({ executionId: "review", origin: "aide:summary", inputs: [
+        { id: "request", origin: "aide:summary", immediate: false, text: "Review selected Person", summaryOwnerUid: "selected-id" }] }),
+      inputOrigin: () => "aide:summary", changed() {},
+      noteSummaryOwner: async id => id + "-id",
+    } });
+  try { await session.prompt("Review this person"); }
+  finally { session.dispose(); }
+  assert.deepEqual(written, [args[2]]);
 });

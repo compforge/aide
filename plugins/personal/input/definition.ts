@@ -50,6 +50,7 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   }).strict().refine(s => !!s.batchId === !!s.batchAt, { message: "batchId and batchAt must be set or cleared together" }) },
   validator: { create(current, context) {
     if (current.status.batchId) throw new Error("Assign Batch membership after Input creation");
+    if (current.spec.origin === "aide:summary" && current.spec.originId !== "personal.topic") throw new Error("Summary reviews require Secretary scheduling");
     if (isInternalInput(current.spec) && current.spec.originId === "personal.topic") validateReviewRequest(current, context);
     if (isInternalInput(current.spec) && current.status.topic && !assessmentFinished(current.status.assess)
       && context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "internalPending", value: JSON.stringify([current.status.topic.uid, current.spec.origin]) } })

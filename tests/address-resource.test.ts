@@ -73,7 +73,7 @@ test("Address discovery unifies threads and accumulates known people without ove
 test("Address summary uses a protected Note and recent address association preserves matter ownership", async t => {
   const f = await setup(t), place = f.addresses.observe(group, [personRef(f.a)]), ref = addressRef(place);
   const actor = await f.addresses.client.patchStatus(f.topic, { execution: { id: "chief", startedAt: new Date().toISOString() } });
-  await upsertTopicNote(f.addresses.client, actor, "chief", { summaryOf: ref, version: contentVersion(place), text: "讨论发布风险", people: [personRef(f.a)], sensitivity: "L1", visibility: "people" }, "summary", 4000, "aide:curate");
+  await upsertTopicNote(f.addresses.client, actor, "chief", { summaryOf: ref, version: contentVersion(place), text: "讨论发布风险", people: [personRef(f.a)], sensitivity: "L1", visibility: "people" }, "summary", 4000, "aide:summary");
   const view = f.addresses.view(ref);
   assert.equal(view.summaryNote!.summaryOf!.kind, "Address");
   const summary = f.addresses.resources.get<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, view.summaryNote!.id);

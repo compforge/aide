@@ -19,9 +19,10 @@ function validate(resource: Readonly<Resource<Person, PersonStatus>>, context: R
     if (owners.some(p => p.metadata.uid !== resource.metadata.uid)) throw new Error("Person identity already belongs to another Person");
   }
 }
-export const PersonDefinition: ResourceDefinition<Person, PersonStatus> = { type: PERSON_TYPE,
+export const PersonDefinition: ResourceDefinition<Person, PersonStatus> = { type: PERSON_TYPE, indexVersion: 2,
   schema: { spec: PersonSchema, status: z.object({ ...ContextFields, updatedAt: z.string(), updatedBy: z.enum(["user", "chief", "connector"]), participantSources: PersonRefsSchema().optional() }).strict() },
   retention: { releasedAt: () => undefined, references: () => [] },
+  orderedIndexes: { summaryReview: r => !r.metadata.deletionTimestamp ? [{ value: "owner", order: r.status.summaryReviewedAt ?? "0" }] : [] },
   indexes: { identity: r => r.metadata.deletionTimestamp ? [] : r.spec.identities.map(identityKey) },
   validator: { create: (r, c) => { validateSummary(r, c); validate(r, c); }, update: (previous, resource, context) => { guardContext(previous, resource, context); validate(resource, context, previous); } },
   printer: { describe: r => `${r.spec.name}\n${JSON.stringify({ ...r.spec, summaryRevision: r.status.summaryRevision }, null, 2)}`, summarize: r => r.spec.name },
