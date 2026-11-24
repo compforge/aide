@@ -4,9 +4,9 @@ Personal 是 Aide 的内置个人助手插件。Me 与 Aide 单聊时，[Gate](g
 
 ## 从 Input 到认识与成果
 
-同一条 Input 可以同时推进两条线。Input 保留当时收到的内容和来源，Route 为领域输入确定 Topic 归属，Secretary 按需将 Deferred 待办整理成批。当前领域 root 的 Chief 结合新材料、已有 Note 和相关工作，判断当下要办什么，以及哪些认识值得留给以后。
+从本轮到下轮，Chief 可以围绕同一条 Input 继续办事，也可以留下供以后判断的认识。Input 保留当时收到的内容和来源，Route 为领域输入确定 Topic 归属，Secretary 按需将 Deferred 待办整理成批。当前领域 root 的 Chief 结合新材料、已有 Note 和相关工作，判断当下要办什么，以及哪些认识值得留给以后。
 
-![领域 Chief 按需办理工作并沟通，也可留下普通 Note，经整理形成可供后续判断的近期认识和长期摘要](../assets/personal-flow.svg)
+![从本轮研判到下轮研判的两条泳道。办理线上，Chief 可当轮办妥、委托 Agent 或自己跟进，按需对外沟通。认识线上，普通 Note 供下次按需查证，对象的 Summary Note 提供默认背景。](../assets/personal-flow.svg)
 
 ### 办理与沟通
 
