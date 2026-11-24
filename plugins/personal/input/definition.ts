@@ -4,19 +4,18 @@ import { inputExpiry, inputHardExpiry, inputPressure } from "./retention.ts";
 import { InputClassificationFields } from "../disclosure.ts";
 import { channelPromotion } from "./identity.ts";
 import { obsoleteReplies, replyIdentity } from "../address/reply.ts";
-import { ONGOING_TYPE, followupInputId, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
 import { validateReviewRequest } from "./review.ts";
 import { PersonRefSchema } from "../person/model.ts";
 import { ConditionsSchema } from "../conditions.ts";
-import { AttemptSchema, AssessmentSchema } from "./assessment.ts";
+import { AttemptSchema, ReceiptSchema } from "./receipt.ts";
 import { WorkInputRequestSchema } from "../work/model.ts";
 import { ResourceRefSchema, OrganizationSchema } from "../topic/ref.ts";
-import { guardAssessment } from "./assignment.ts";
+import { guardDelivery } from "./assignment.ts";
 import { guardInputTopic } from "../topic/ownership.ts";
 import { z } from "zod";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { ResourceVersionConflict, type ResourceDefinition } from "@compforge/aide-plugin";
-import { assessmentFinished, INPUT_TYPE, INPUT_ORIGINS, InputAttention, isInternalInput, inputQueue, type InputSpec, type InputStatus } from "./model.ts";
+import { deliveryFinished, INPUT_TYPE, INPUT_ORIGINS, InputAttention, isInternalInput, inputQueue, type InputSpec, type InputStatus } from "./model.ts";
 import { AddressRefSchema } from "../address/model.ts";
 import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { inputPrinter } from "./printer.ts";
@@ -39,34 +38,25 @@ const ref = z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.st
  * @case tests/topic-review.test.ts
  */
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
-  type: INPUT_TYPE, indexVersion: 3,
+  type: INPUT_TYPE, indexVersion: 4,
   schema: { spec: InputSpecSchema, status: z.object({
     batchId: z.string().min(1).optional(), batchAt: z.iso.datetime().optional(),
     retention: InputPolicySchema.shape.retention.optional(), conditions: ConditionsSchema, topic: ResourceRefSchema.optional(), organization: OrganizationSchema.optional(),
     route: AttemptSchema.extend({ nextAttemptAt: z.string().optional(), attempts: z.number().int().nonnegative().optional(),
       result: z.object({ topics: z.array(ref), reason: z.string() }).strict().optional() }).optional(),
-    assess: AssessmentSchema.extend({ topic: ResourceRefSchema.optional() }).optional(),
-    handle: z.record(z.string(), AssessmentSchema.extend({ resource: ref, assignedAt: z.string(), appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
+    assess: ReceiptSchema.extend({ topic: ResourceRefSchema.optional() }).optional(),
+    handle: z.record(z.string(), ReceiptSchema.extend({ resource: ref, assignedAt: z.string(), appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
   }).strict().refine(s => !!s.batchId === !!s.batchAt, { message: "batchId and batchAt must be set or cleared together" }) },
   validator: { create(current, context) {
     if (current.status.batchId) throw new Error("Assign Batch membership after Input creation");
     if (current.spec.origin === "aide:summary" && current.spec.originId !== "personal.topic") throw new Error("Summary reviews require Secretary scheduling");
     if (isInternalInput(current.spec) && current.spec.originId === "personal.topic") validateReviewRequest(current, context);
-    if (isInternalInput(current.spec) && current.status.topic && !assessmentFinished(current.status.assess)
+    if (isInternalInput(current.spec) && current.status.topic && !deliveryFinished(current.status.assess)
       && context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "internalPending", value: JSON.stringify([current.status.topic.uid, current.spec.origin]) } })
         .some(i => i.metadata.uid !== current.metadata.uid)) throw new ResourceVersionConflict("Topic already has this internal Input pending");
   }, update(previous, current, context) {
     validateMembership(previous, current, context);
-    // @spec An admitted check can finish once the question is settled, superseded, or asked privately. Asking leaves the matter open.
-    // @link docs/personal/ongoing.md
-    const assessment = current.status.assess;
-    if (current.spec.origin === "aide:followup" && !previous.status.assess?.completedAt && assessment?.completedAt
-      && assessment.result?.disposition === "completed" && typeof current.spec.observation?.ongoingUid === "string") {
-      const matter = context.get<OngoingSpec, OngoingStatus>(ONGOING_TYPE, current.spec.observation.ongoingUid);
-      if (matter?.spec.question && followupInputId(matter) === current.metadata.name && matter.status.askedFollowupId !== current.metadata.name)
-        throw new Error("Resolve the scheduled question from evidence or ask Me before completing this followup");
-    }
-    if (assessmentFinished(previous.status.assess) && !equalResourceValue({ ...previous.status.assess, topic: undefined }, { ...current.status.assess, topic: undefined })) throw new Error(previous.status.assess?.lastError ? "Input assessment has failed; submit a new Input" : "Input assessment is already completed");
+    if (deliveryFinished(previous.status.assess) && !equalResourceValue({ ...previous.status.assess, topic: undefined }, { ...current.status.assess, topic: undefined })) throw new Error(previous.status.assess?.lastError ? "Input assessment has failed; submit a new Input" : "Input assessment is already completed");
     if (previous.status.assess?.lastError && !previous.status.assess.retryable && !previous.status.assess.completedAt
       && Object.keys(current.status.handle ?? {}).some(uid => !previous.status.handle?.[uid]))
       throw new Error("Failed Input cannot be assigned to new Work");
@@ -74,12 +64,12 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
     if (previous.status.topic && previous.status.topic.uid !== current.status.topic?.uid
       && current.status.assess && !current.status.assess.executionId && !current.status.assess.completedAt && current.status.assess.topic)
       throw new Error("Moving pending Input requires invalidating processing assignment");
-    if (!current.status.batchId) guardAssessment(previous, current, context);
+    if (!current.status.batchId) guardDelivery(previous, current, context);
     if (previous.status.assess?.executionId && current.status.assess?.executionId
       && previous.status.assess.executionId !== current.status.assess.executionId) throw new Error("Input is already admitted to a Chief execution");
     if (!equalResourceValue(previous.spec, current.spec) && !(channelPromotion(previous.spec, current.spec) && equalResourceValue(previous.status, current.status))) throw new Error("Input content is immutable except Channel promotion of the same platform message");
     if (previous.status.route?.completedAt && !equalResourceValue(previous.status.route.result, current.status.route?.result)) throw new Error("Input routing receipt is immutable");
-  }, delete(current, context) { if (!memberCanEvict(current, context)) throw new Error("Finish or cancel Batch before deleting a member"); } },
+  }, delete(current, context) { if (!memberCanEvict(current, context)) throw new Error(current.status.batchId ? "Finish or cancel Batch and release its Chief execution before deleting a member" : "Release the Chief execution before deleting its Input"); } },
   printer: inputPrinter,
   indexes: {
     followup: r => r.spec.origin === "aide:followup" ? [r.metadata.name] : [],
@@ -87,29 +77,26 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
     obsoleteReply: r => obsoleteReplies(r.spec),
     message: r => { const identity = replyIdentity(r); return identity ? [identity.key] : []; },
     address: r => r.spec.source ? [r.spec.source.uid] : [],
-    assessActive: r => r.status.topic && r.status.assess?.executionId && !assessmentFinished(r.status.assess) ? [r.status.topic.uid] : [],
+    assessActive: r => r.status.topic && r.status.assess?.executionId && !deliveryFinished(r.status.assess) ? [r.status.topic.uid] : [],
     topic: r => r.status.topic ? [r.status.topic.uid] : [],
-    assignmentPending: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.executionId && !assessmentFinished(r.status.assess) ? [r.status.topic.uid] : [],
-    unassigned: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.topic && !r.status.assess.executionId && !assessmentFinished(r.status.assess) ? [r.status.topic.uid] : [],
+    assignmentPending: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.executionId && !deliveryFinished(r.status.assess) ? [r.status.topic.uid] : [],
+    unassigned: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.topic && !r.status.assess.executionId && !deliveryFinished(r.status.assess) ? [r.status.topic.uid] : [],
     unfiled: r => !r.metadata.deletionTimestamp && !isInternalInput(r.spec) && !r.spec.topicKey && r.status.topic ? [r.status.topic.uid] : [],
-    internalPending: r => !r.metadata.deletionTimestamp && isInternalInput(r.spec) && r.status.topic && !assessmentFinished(r.status.assess)
+    internalPending: r => !r.metadata.deletionTimestamp && isInternalInput(r.spec) && r.status.topic && !deliveryFinished(r.status.assess)
       ? [JSON.stringify([r.status.topic.uid, r.spec.origin])] : [],
-    assignedPending: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.assess?.topic && !assessmentFinished(r.status.assess) ? [r.status.assess.topic.uid] : [],
-    assessReadyAttention: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.assess?.topic
-      && !assessmentFinished(r.status.assess) && !r.status.assess.executionId
-      ? [JSON.stringify([r.status.assess.topic.uid, inputQueue(r.spec)])] : [],
+    assignedPending: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.assess?.topic && !deliveryFinished(r.status.assess) ? [r.status.assess.topic.uid] : [],
     routePending: r => r.metadata.deletionTimestamp || r.status.route?.completedAt ? [] : ["pending"],
-    assessPending: r => !r.metadata.deletionTimestamp && r.status.assess && !assessmentFinished(r.status.assess) ? (r.status.topic ? [r.status.topic.uid] : []) : [],
-    assessExecution: r => !r.metadata.deletionTimestamp && r.status.assess?.executionId && !assessmentFinished(r.status.assess) ? [r.status.assess.executionId] : [],
+    assessPending: r => !r.metadata.deletionTimestamp && r.status.assess && !deliveryFinished(r.status.assess) ? (r.status.topic ? [r.status.topic.uid] : []) : [],
+    deliveryExecution: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.assess?.executionId ? [r.status.assess.executionId] : [],
     handle: r => Object.keys(r.status.handle ?? {}),
     handlePending: r => r.metadata.deletionTimestamp ? [] : Object.entries(r.status.handle ?? {}).filter(([, s]) => !s.completedAt).map(([uid]) => uid),
   },
   orderedIndexes: {
     secretaryPending: r => r.spec.attention === InputAttention.Deferred && !isInternalInput(r.spec) && !r.spec.handoff && !r.status.batchId && !r.metadata.deletionTimestamp && r.status.assess?.topic
-      && !assessmentFinished(r.status.assess) && !r.status.assess.executionId
+      && !deliveryFinished(r.status.assess) && !r.status.assess.executionId
       ? [{ value: r.status.assess.topic.uid, order: r.metadata.creationTimestamp }] : [],
     assessReadyArrival: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.assess?.topic
-      && !assessmentFinished(r.status.assess) && !r.status.assess.executionId
+      && !deliveryFinished(r.status.assess) && !r.status.assess.executionId
       ? [{ value: JSON.stringify([r.status.assess.topic.uid, inputQueue(r.spec)]), order: r.metadata.creationTimestamp }] : [],
     topicActivity: r => !r.metadata.deletionTimestamp && r.status.topic
     ? [{ value: r.status.topic.uid, order: r.metadata.creationTimestamp }] : [] },

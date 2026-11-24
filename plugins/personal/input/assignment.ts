@@ -1,9 +1,9 @@
-import { batchAssessment } from "../batch/membership.ts";
+import { batchDelivery } from "../batch/membership.ts";
 import { batchById, batchMembers } from "../batch/members.ts";
 import { BATCH_TYPE, batchFinished, type Batch } from "../batch/model.ts";
 import { reconcileInputRetention } from "./retention.ts";
 import { retryOnConflict, type PluginContext, type ResourceValidationContext, type Watch } from "@compforge/aide-plugin";
-import { INPUT_TYPE, assessmentFinished } from "./model.ts";
+import { INPUT_TYPE, deliveryFinished } from "./model.ts";
 import { resourceRef, type Input } from "./state.ts";
 import { patchStatus } from "../status.ts";
 import { readTopicRoot } from "../topic/tree.ts";
@@ -28,7 +28,7 @@ export async function assignInput(context: Pick<PluginContext, "resources" | "lo
 }
 
 /** Validate the real ancestry in the same transaction as assignment/admission, including ancestor-only moves. */
-export function guardAssessment(previous: Input, current: Input, context: ResourceValidationContext) {
+export function guardDelivery(previous: Input, current: Input, context: ResourceValidationContext) {
   const changed = previous.status.assess?.topic?.uid !== current.status.assess?.topic?.uid;
   const admitted = !previous.status.assess?.executionId && !!current.status.assess?.executionId;
   if (changed && (previous.status.assess?.executionId || previous.status.assess?.completedAt))
@@ -48,10 +48,10 @@ export function guardAssessment(previous: Input, current: Input, context: Resour
 /** @spec Batch results converge through Input reconciliation, including restart after Chief completion. */
 export async function reconcileBatchMember(context: Pick<PluginContext, "resources" | "logger">, input: Input) {
   const current = await context.resources.get<Input["spec"], Input["status"]>(resourceRef(input));
-  if (!current?.status.batchId || assessmentFinished(current.status.assess)) return;
+  if (!current?.status.batchId || deliveryFinished(current.status.assess)) return;
   const batch = await batchById(context.resources, current.status.batchId);
   if (!batch || !batchFinished(batch)) return;
-  await patchStatus(context.resources, current, { assess: batchAssessment(batch) });
+  await patchStatus(context.resources, current, { assess: batchDelivery(batch) });
   context.logger.info("Batch result projected to Input", { attributes: { inputId: current.metadata.name, batchId: batch.metadata.uid, phase: batch.status.phase } });
 }
 

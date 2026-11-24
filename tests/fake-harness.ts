@@ -1,5 +1,5 @@
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
-import { assessBatch } from "../plugins/personal/batch/assess.ts";
+import { recordDelivery } from "../plugins/personal/chief/delivery.ts";
 import { reconcileBatchMember } from "../plugins/personal/input/assignment.ts";
 import { isRootTopic } from "../plugins/personal/topic/boundary.ts";
 import { composeMail, mailView } from "../plugins/personal/stream/writer.ts";
@@ -13,7 +13,6 @@ type AgentWork = Resource<WorkSpec, WorkAgentStatus>;
 import { TASK_TYPE } from "../plugins/personal/task/model.ts";
 import { toWork } from "../plugins/personal/work/resources.ts";
 import { reportWork } from "../plugins/personal/work/report.ts";
-import { assessAll } from "./input-state-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { TOPIC_TYPE } from "../plugins/personal/topic/model.ts";
@@ -125,9 +124,8 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             if (!live && run && address && agent.notify !== false && typeof result === "string" && result) {
               composeMail(new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])), topicId, randomUUID(), mailDraft(c, { topicId, text: result }, { executionId: run.id, target: address, inputIds: ids, inputUids: Object.fromEntries(ids.map(id => [id, new InputStore(home).get(id)!.metadata.uid])) }));
             }
-            if (run && ids.length && agent.complete !== false) await assessAll(resources, c, run.id, { inputIds: ids, summary: String(result) || "Handled silently" });
-            if (run && agent.complete !== false) for (const batch of await resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "execution", value: run.id } })) {
-              await assessBatch(resources, c, run.id, { batchId: batch.metadata.uid, summary: String(result) || "Handled silently" });
+            if (run && agent.complete !== false) await recordDelivery(resources, c, run.id, run.id);
+            if (run && agent.complete !== false) for (const batch of await resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "deliveryExecution", value: run.id } })) {
               // This external fake writes through a separate client without Host watch callbacks.
               for (const input of new InputStore(home).query("batch", batch.metadata.uid))
                 await reconcileBatchMember({ resources, logger: { debug() {}, info() {}, warn() {}, error() {} } }, input);

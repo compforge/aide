@@ -1,7 +1,7 @@
 import { retryOnConflict, type PluginContext } from "@compforge/aide-plugin";
 import { assignInput } from "../input/assignment.ts";
 import { inputStatus } from "../input/conditions.ts";
-import { INPUT_TYPE, InputAttention, assessmentFinished, type InputSpec, type InputStatus } from "../input/model.ts";
+import { INPUT_TYPE, InputAttention, deliveryFinished, type InputSpec, type InputStatus } from "../input/model.ts";
 import { inputRef, resourceRef } from "../input/state.ts";
 import { TOPIC_TYPE, type TopicResource, type TopicStatus } from "../topic/model.ts";
 import type { TopicPolicy } from "../topic/config.ts";
@@ -44,7 +44,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
     const at = new Date().toISOString();
     const spec: InputSpec = {
       origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
-      text: `${maintenanceTask[origin]} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; ${origin === "aide:followup" ? "Ask Me privately if a consequential fact is still missing." : origin === "aide:curate" ? "Maintain existing mandates. Base new Work on the original business Input or source Note or Work. Keep this review silent." : "Do not communicate or hand off business Work."} Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
+      text: `${maintenanceTask[origin]} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; ${origin === "aide:followup" ? "Ask Me privately if a consequential fact is still missing." : origin === "aide:curate" ? "Maintain existing mandates. Base new Work on the original business Input or source Note or Work. Keep this review silent." : "Do not communicate or hand off business Work."} Work on at most 8 materials or 8 direct children this round.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
       observation: { ...(preparation?.notes ? { notes: preparation.notes } : {}), ...(scheduledMatter ? { ongoingId: scheduledMatter.metadata.name, ongoingUid: scheduledMatter.metadata.uid } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
         completed: chiefWorkload(current).completed, weaveRevision: maintenance?.weaveRevision ?? 0,
         pressure: (maintenance?.notePressure ?? []).map(({ uid, pressure }) => ({ uid, version: pressure.version })),
@@ -102,7 +102,7 @@ export async function tryCreateMaintenanceInput(context: Pick<PluginContext, "re
   const previous = current.status.maintenanceRequests?.[origin];
   if (previous) {
     const input = await context.resources.get<InputSpec, InputStatus>(inputRef(previous.inputId));
-    if (input && !assessmentFinished(input.status.assess)) return;
+    if (input && !deliveryFinished(input.status.assess)) return;
     const attempts = previous.fingerprint === fingerprint ? previous.attempts : 0;
     // Fourteen attempts reach the cap even with a one-second base cooldown.
     const delay = Math.min(Math.max(7200, policy.capacityCooldownSeconds), policy.capacityCooldownSeconds * 2 ** Math.max(0, attempts - 1));

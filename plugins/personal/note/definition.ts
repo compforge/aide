@@ -62,8 +62,7 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
       const retry = after.status.curationRetry;
       const input = retry && context.get<InputSpec, InputStatus>(INPUT_TYPE, retry.inputUid);
       const assess = input?.status.assess;
-      if (!retry || input?.spec.origin !== "aide:curate" || !assess?.executionId || assess.completedAt !== retry.at
-        || !assess.result?.noteResults?.some(n => n.noteId === before.metadata.name && ["deferred", "needs_nature", "version_changed"].includes(n.status))
+      if (!retry || input?.spec.origin !== "aide:curate" || !assess?.executionId || !assess.completedAt
         || retry.material !== noteMaterial(before.spec) || !equalResourceValue(before.spec, after.spec)
         || !equalResourceValue({ ...before.status, curationRetry: retry }, after.status))
         throw new Error("Curation deferral requires the corresponding assessment");
@@ -77,7 +76,6 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
       const input = receipt && context.get<InputSpec, InputStatus>(INPUT_TYPE, receipt.inputUid);
       const executionId = input?.status.assess?.executionId;
       if (!input || input.spec.origin !== "aide:curate" || !input.status.assess?.completedAt || !executionId
-        || !input.status.assess.result?.curatedNotes?.some(n => n.noteId === before.metadata.name && n.version === noteVersion(before))
         || !before.spec.nature || !pendingCuration(before) || receipt.material !== noteMaterial(before.spec)
         || !equalResourceValue(before.spec, after.spec) || !equalResourceValue({ ...before.status, curated: receipt }, after.status))
         throw new Error("Curation receipt requires the assessed Input and the reviewed Note material");

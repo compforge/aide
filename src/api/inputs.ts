@@ -4,7 +4,7 @@ import { outputWaitLabels } from "../../plugins/personal/output/view.ts";
 import { inputSessions } from "../../plugins/personal/observation/job.ts";
 import type { ResourceRef, ResourceNamespace } from "@compforge/aide-plugin";
 import { browseInputs, inputFacets, type InputBrowseQuery } from "../../plugins/personal/input/browse.ts";
-import type { Attempt, Assessment, Handling, InputSpec } from "../../plugins/personal/input/model.ts";
+import type { Attempt, ProcessingReceipt, Handling, InputSpec } from "../../plugins/personal/input/model.ts";
 import type { ChannelService } from "../channel/service.ts";
 import { inputPrinter } from "../../plugins/personal/input/printer.ts";
 
@@ -58,7 +58,7 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
       ...(typeof topicId === "string" ? { topicId } : {}) };
   };
   const attempt = (key: string, stage: "route" | "assess" | "handle", value: Attempt, assigned?: Handling) => {
-    const target = assigned && consumer(assigned.resource), label = stage === "route" ? "路由" : stage === "assess" ? "根主题研判" : "Work 办理";
+    const target = assigned && consumer(assigned.resource), label = stage === "route" ? "路由" : stage === "assess" ? "投递给 Chief" : "Work 办理";
     const append = (suffix: string, title: string, at?: string, text?: string, status?: string) => timeline.push({
       id: `${key}:${suffix}`, stage, title, at, text, status, consumer: target, executionId: value.executionId,
     });
@@ -66,8 +66,8 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
       stage === "handle" ? JSON.stringify((assigned as Handling).request, null, 2) : undefined, "assigned");
     if (stage === "handle" && (value as Handling).appliedAt) append("applied", "Work 已应用请求", (value as Handling).appliedAt, undefined, "applied");
     if (value.startedAt) append("started", `${label}开始（最近记录）`, value.startedAt, undefined, "started");
-    if (value.completedAt) append("completed", `${label}${(value as Assessment).result?.disposition === "cancelled" ? "取消" : (value as Assessment).result?.disposition === "rejected" ? "拒绝" : "完成"}`,
-      value.completedAt, (value as Assessment).result?.summary, (value as Assessment).result?.disposition ?? "completed");
+    if (value.completedAt) append("completed", `${label}${(value as ProcessingReceipt).result?.disposition === "cancelled" ? "取消" : (value as ProcessingReceipt).result?.disposition === "rejected" ? "拒绝" : "完成"}`,
+      value.completedAt, (value as ProcessingReceipt).result?.summary, (value as ProcessingReceipt).result?.disposition ?? "completed");
     const failed = stage === "assess" && !!value.lastError && !value.retryable && !value.completedAt;
     if (value.lastError) append("error", `${label}${failed ? "失败" : "异常记录"}`, undefined, value.lastError, failed ? "failed" : value.completedAt ? "recorded" : "attention");
     if (!value.completedAt && !failed) append("pending", `${label}尚未确认完成`, undefined, undefined, "pending");
@@ -85,7 +85,7 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
     timeline.push({ id: `batch:${batch.metadata.uid}`, stage: "assess", at: input.status.batchAt,
       title: "归入 Batch", text: batch.metadata.name, status: batch.status.phase });
     timeline.push({ id: `batch:${batch.metadata.uid}:result`, stage: "assess", at: batch.status.assess?.completedAt ?? batch.status.assess?.errorAt ?? batch.status.assess?.startedAt,
-      title: "Batch 处理状态", text: batch.status.assess?.result?.summary ?? batch.status.assess?.lastError, status: batch.status.phase,
+      title: batch.status.phase === "completed" ? "Batch 已投递给 Chief" : "Batch 投递状态", text: batch.status.assess?.result?.summary ?? batch.status.assess?.lastError, status: batch.status.phase,
       executionId: batch.status.assess?.executionId });
   } else if (input.status.assess) attempt("assess", "assess", input.status.assess);
   for (const [key, value] of Object.entries(input.status.handle ?? {})) attempt(`handle:${key}`, "handle", value, value);

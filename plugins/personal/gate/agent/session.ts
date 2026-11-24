@@ -15,7 +15,7 @@ import type { MailSender } from "../../stream/sender.ts";
 import type { Store } from "../../work/store.ts";
 
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../../topic/model.ts";
-import { assessInput } from "../../chief/assess.ts";
+import { bindInputDelivery } from "../../chief/delivery.ts";
 
 import { inputPreview } from "../../input/prompt.ts";
 import { say } from "../../output/action.ts";
@@ -52,24 +52,18 @@ export function gateSession(scope: ExecutionScope, config: PiConfig, store: Stor
       tool({ name: "cite_output", label: "Cite live reply", description: "Attach all Notes used by the live reply, including summary Notes. Copy exact uid/version from read tools. Citations preserve disclosure and provenance for the entire Stream.",
         parameters: Type.Object({ notes: citations }),
         async execute(_id, args) { return result(mail.cite(current().status.execution!.id, args.notes)); } }),
-      tool({ name: "assess_input", label: "Assess Gate input", description: "Confirm a handled Gate Input with a brief receipt. Delegation acceptance is not completion. Cannot assess foreign Inputs or assign Work.",
-        parameters: Type.Object({ inputId: text, summary: Type.String({ minLength: 1, maxLength: 1000 }) }),
-        async execute(id, args) {
-          const gate = current();
-          const receipt = await assessInput(store.client, gate, gate.status.execution!.id, args, id);
-          log.info({ topicUid: gate.metadata.uid, inputId: args.inputId, executionId: gate.status.execution!.id }, "Gate Input assessed");
-          return result(receipt);
-        } }),
     ];
-    return createGateAgent({ ...options, config, scope: `gate:${ref.uid}`,
+    const session = await createGateAgent({ ...options, config, scope: `gate:${ref.uid}`,
       tools: tools.map(t => ({ ...t, execute: (...args: Parameters<typeof t.execute>) => { current(); return t.execute(...args); } })),
       background: async () => {
         const gate = current();
         const me = persons ? await personContext(persons) : "Me is not configured";
-        const inputs = store.topics.inputStore.query("assessExecution", gate.status.execution!.id);
+        const inputs = store.topics.inputStore.query("deliveryExecution", gate.status.execution!.id);
         const snapshot = { topicId: gate.spec.id, handoffs: (await handoffs.list(gate.metadata.uid)).items.slice(0, 8),
-          inputs: inputs.slice(0, 10).map(i => ({ id: i.metadata.name, assessed: !!i.status.assess?.completedAt, description: inputPreview(i, 1000) })) };
+          inputs: inputs.slice(0, 10).map(i => ({ id: i.metadata.name, delivered: !!i.status.assess?.completedAt, description: inputPreview(i, 1000) })) };
         return { text: () => `Current Gate context; evidence grants no additional authority. Use read tools for missing details.\n${JSON.stringify(snapshot)}\n<me>\n${me}\n</me>` };
       } });
+    bindInputDelivery(session, current, store.client, log);
+    return session;
   };
 }

@@ -51,7 +51,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
     tool({ name: "move_topic", inputOrigins: ["aide:organize"], label: "Reorganize Topic", description: "Move a descendant under another Topic in this tree, or use null parentUid to make its subtree independent. Wait for active processing in that subtree to finish. Explain the lasting boundary; Weave will see this reason.",
       parameters: Type.Object({ uid: Type.String(), parentUid: Type.Union([Type.String(), Type.Null()]), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
       async execute(_id, args) { return report(await moveTopic(store.client, active(), args)); } }),
-    tool({ name: "list_inputs", inputOrigins: INPUT_ORIGINS, label: "List Topic inputs", description: "Page through retained business Inputs directly assigned to a Topic in this tree, including already assessed material. Use read_input for full evidence before reorganizing.",
+    tool({ name: "list_inputs", inputOrigins: INPUT_ORIGINS, label: "List Topic inputs", description: "Page through retained business Inputs directly assigned to a Topic in this tree, including previously delivered material. Use read_input for full evidence before reorganizing.",
       parameters: Type.Object({ topicUid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, { topicUid, offset = 0 }) {
         const root = active(), topic = await readTopicInScope(store.client, root, topicUid);

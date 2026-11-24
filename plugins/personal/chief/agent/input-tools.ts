@@ -1,5 +1,5 @@
 import { getCurrentTools, getToolStateChanges, toToolDeclaration } from "@earendil-works/pi-ai";
-import { inputDeliveryMarker } from "../../../../agents/pi/input.ts";
+import { deliveredMessageId } from "../../../../agents/pi/input.ts";
 import type { AgentSession, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 import { INPUT_ORIGINS, isInternalInput, type InputOrigin } from "../../input/model.ts";
@@ -9,23 +9,22 @@ export interface ChiefToolDefinition<T extends TSchema = TSchema> extends ToolDe
 export interface ChiefInputTask {
   executionId: string;
   origin: InputOrigin;
-  inputs: { id: string; deliveryId?: string; initial?: boolean; summaryOwnerUid?: string; origin: InputOrigin; immediate: boolean; text: string }[];
+  inputs: { id: string; deliveryId?: string; initial?: boolean; summaryOwnerUid?: string; origin: InputOrigin; text: string }[];
 }
 export interface ChiefInputBinding {
   read(): ChiefInputTask;
-  inputOrigin(id: string): InputOrigin | undefined;
   ongoingCheck?(id: string): Promise<string | undefined>;
   noteSummaryOwner?(id: string): Promise<string | undefined>;
   changed(task: ChiefInputTask, tools: string[]): void;
 }
 const instructions: Record<InputOrigin, string> = {
-  channel: "Respond to the business Input. Answer, maintain matter Notes and hand off ongoing Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
+  channel: "Decide from the message and its context whether a reply or action is needed. Answer, maintain matter Notes and hand off ongoing Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
   source: "Assess the observed business facts within existing authority. Update continuing matter Notes and relevant Work as needed. Observation is not new authorization. Leave tree organization and durable summary maintenance to their own Inputs.",
   chief: "Handle the recorded business decision within its existing authorization. Maintain matter Notes and Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
-  "aide:followup": "Read the specified Ongoing, related Inputs, Work results and replies from Me. If the plan was superseded or the matter closed, finish silently. When evidence establishes closure, upsert_work with the outcome and basis. If still open, record progress and the next check. When a consequential fact is missing, ask Me privately with ask_me, then await the reply. Finish this check with assess_input.",
-  "aide:summary": "Review only the named owner. Use the owner-specific question in the Input. Read its whole current summary and relevant Notes. What is worth reading by default next time? If you wrote the summary today, would each existing claim still hold at the same scope and certainty? Keep lasting, supported conclusions. Narrow or remove outdated claims. Use the evidenced outcome of a concluded matter before generalizing from it. Preserve disclosure, attribution and explicit corrections. Re-read on version conflict. Finish with assess_input even if nothing warrants a write.",
-  "aide:curate": "Review ordinary Notes and Task, Routine and Ongoing in this Topic using current evidence and existing authority. Identify missing or changed responsibilities, look up existing Work before creating any, and use append_input for delegated work. Confirm the destination before retiring a redundant source Note or winding down superseded Work. Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Use split_note for mixed material. For duplicate Notes, update the existing destination before pruning or retiring the source. Finish this Input with assess_input.curatedNotes listing the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Use versions returned by fresh reads or writes. If assess_input returns needsReview, reread and correct rejected entries, or omit unresolved Notes to defer them explicitly.",
-  "aide:organize": "Organize the Topic tree and its material. Create or move Topics and file Inputs, idle Work and Notes according to responsibility. If a Note spans Topics, use split_note to extract ordinary Notes into the appropriate Topics. Preserve evidence and disclosure. Preserve business assessment receipts. Finish this maintenance Input with assess_input.",
+  "aide:followup": "Read the specified Ongoing, related Inputs, Work results and replies from Me. If the plan was superseded or the matter closed, finish silently. When evidence establishes closure, upsert_work with the outcome and basis. If still open, record progress and the next check. When a consequential fact is missing, ask Me privately with ask_me, then await the reply.",
+  "aide:summary": "Review only the named owner. Use the owner-specific question in the Input. Read its whole current summary and relevant Notes. What is worth reading by default next time? If you wrote the summary today, would each existing claim still hold at the same scope and certainty? Keep lasting, supported conclusions. Narrow or remove outdated claims. Use the evidenced outcome of a concluded matter before generalizing from it. Preserve disclosure, attribution and explicit corrections. Re-read on version conflict.",
+  "aide:curate": "Review ordinary Notes and Task, Routine and Ongoing in this Topic using current evidence and existing authority. Identify missing or changed responsibilities, look up existing Work before creating any, and use append_input for delegated work. Confirm the destination before retiring a redundant source Note or winding down superseded Work. Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Use split_note for mixed material. For duplicate Notes, update the existing destination before pruning or retiring the source. Use confirm_curated_notes to confirm the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Use versions returned by fresh reads or writes. If a version changed, reread and correct rejected entries, or omit unresolved Notes to defer them explicitly.",
+  "aide:organize": "Organize the Topic tree and its material. Create or move Topics and file Inputs, idle Work and Notes according to responsibility. If a Note spans Topics, use split_note to extract ordinary Notes into the appropriate Topics. Preserve evidence and disclosure.",
 };
 // Bundled tools have no Personal metadata upstream; their capabilities are declared at this assembly boundary.
 const bundled: { name: string; inputOrigins: readonly InputOrigin[] }[] = [
@@ -56,11 +55,8 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     const admitted = binding.read();
     const newExecution = current?.executionId !== admitted.executionId;
     if (newExecution) delivered = new Set(admitted.inputs.filter(input => input.initial !== false).map(input => input.id));
-    const urgent = admitted.inputs.find(input => input.immediate && !delivered.has(input.id));
-    const origin = urgent?.origin ?? receivedOrigin ?? (newExecution ? admitted.origin : current!.origin);
-    // Once steering has selected the task, an unfinished receipt must not override a later delivered followUp.
-    for (const input of admitted.inputs.filter(input => input.immediate)) delivered.add(input.id);
-    const task = { ...admitted, origin, inputs: admitted.inputs.filter(input => (input.immediate || delivered.has(input.id)) && (isInternalInput({ origin }) ? input.origin === origin : !isInternalInput(input))) };
+    const origin = receivedOrigin ?? (newExecution ? admitted.origin : current!.origin);
+    const task = { ...admitted, origin, inputs: admitted.inputs.filter(input => delivered.has(input.id) && (isInternalInput({ origin }) ? input.origin === origin : !isInternalInput(input))) };
     const nextNames = toolsForInput(declarations, origin).filter(name => allowed?.has(name));
     if (newExecution || current?.origin !== origin) binding.changed(task, nextNames);
     current = task;
@@ -79,23 +75,19 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     select();
     return prepare?.(turn, signal);
   };
-  // FollowUp is appended after next-turn preparation. Resolve its delivery at the public request boundary.
+  // Switch the tool scope only when Pi actually appends the admitted user message.
+  session.agent.subscribe(event => {
+    if (event.type !== "message_end" || event.message.role !== "user") return;
+    const id = deliveredMessageId(event.message.content);
+    if (!id) return;
+    const inputs = binding.read().inputs.filter(input => (input.deliveryId ?? input.id) === id);
+    for (const input of inputs) delivered.add(input.id);
+    if (inputs.length) select(inputs[0]!.origin);
+  });
   const prepareRequest = session.agent.prepareRequest;
   session.agent.prepareRequest = async (request, signal) => {
     const prepared = await prepareRequest?.(request, signal);
     const context = prepared?.context ?? request.context;
-    const admitted = binding.read();
-    let receivedOrigin: InputOrigin | undefined;
-    for (const input of admitted.inputs) {
-      const marker = inputDeliveryMarker(input.deliveryId ?? input.id);
-      if (!delivered.has(input.id) && context.messages.some(message => message.role === "user" && (typeof message.content === "string"
-        ? message.content.startsWith(`${marker}\n`)
-        : message.content.some(part => part.type === "text" && part.text.startsWith(`${marker}\n`))))) {
-        delivered.add(input.id);
-        receivedOrigin = input.origin;
-      }
-    }
-    select(receivedOrigin);
     const tools = session.agent.state.tools.slice();
     // Pi declares its normal next-turn loadout before queued messages arrive. Project a late delivery's
     // delta with Pi's own transcript helpers so the very next provider request sees the matching tools.
@@ -116,7 +108,7 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     const prefix = at < 0 ? history.length : at;
     return [...history.slice(0, prefix), {
       role: "custom" as const, customType: "aide.chief-task", display: false, timestamp: 0,
-      content: `Current Input origin: ${current.origin}\n${instructions[current.origin]}\nAdmitted inputs for this task: ${JSON.stringify(current.inputs.slice(0, 10).map(({ id, text }) => ({ inputId: id, text })))}\nAssess each listed inputId once with assess_input. Other origins are background evidence only. An interrupted maintenance Input remains pending; do not acknowledge work you have not performed.`,
+      content: `Current Input origin: ${current.origin}\n${instructions[current.origin]}\nAdmitted inputs for this task: ${JSON.stringify(current.inputs.slice(0, 10).map(({ id, text }) => ({ inputId: id, text })))}\nOther origins are background evidence only.`,
     }, ...history.slice(prefix)];
   };
   session.agent.beforeToolCall = async (context, signal) => {
@@ -144,13 +136,6 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     }
     if (context.toolCall.name === "ask_me" && !current.inputs.some(i => i.origin === "aide:followup" && i.id === (context.args as { inputId?: string }).inputId))
       return { block: true, reason: "Ask only about the admitted followup" };
-    if (context.toolCall.name === "assess_input") {
-      const args = context.args as { inputId?: string };
-      const origin = current.inputs.find(i => i.id === args.inputId)?.origin ?? (args.inputId ? binding.inputOrigin(args.inputId) : undefined);
-      const maintenance = isInternalInput(current);
-      if (!origin || (maintenance ? origin !== current.origin || !current.inputs.some(i => i.id === args.inputId) : isInternalInput({ origin })))
-        return { block: true, reason: "Assess only business material or the specific maintenance Input admitted for this task" };
-    }
     return beforeTool?.(context, signal);
   };
 }

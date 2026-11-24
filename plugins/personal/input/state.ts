@@ -1,6 +1,6 @@
 import { patchStatus } from "../status.ts";
 import type { Resource, ResourceClient, ResourceRef, Watch } from "@compforge/aide-plugin";
-import { assessmentFinished, INPUT_TYPE, type InputSpec, type InputStatus, type Attempt } from "./model.ts";
+import { deliveryFinished, INPUT_TYPE, type InputSpec, type InputStatus, type Attempt } from "./model.ts";
 import type { TopicResource } from "../topic/model.ts";
 import { readTopicSubtree } from "../topic/tree.ts";
 export type Input = Readonly<Resource<InputSpec, InputStatus>>;
@@ -80,10 +80,10 @@ export async function cancelAssignments(resources: ResourceClient, owner: Resour
 }
 
 /** Update only this admission; a rejected notification cannot clear a completed or replacement claim. */
-export async function changeAssessment(resources: ResourceClient, original: Input, executionId: string, change: Partial<Attempt>) {
+export async function changeDelivery(resources: ResourceClient, original: Input, executionId: string, change: Partial<Attempt>) {
   for (let n = 0; ; n++) {
     const input = await resources.get<InputSpec, InputStatus>(resourceRef(original));
-    if (!input || input.metadata.uid !== original.metadata.uid || input.status.assess?.executionId !== executionId || assessmentFinished(input.status.assess)) return;
+    if (!input || input.metadata.uid !== original.metadata.uid || input.status.assess?.executionId !== executionId || deliveryFinished(input.status.assess)) return;
     const assess = Object.fromEntries(Object.entries({ ...input.status.assess, ...change }).filter(([, v]) => v !== undefined));
     try { await patchStatus(resources, input, { assess }); return; }
     catch (error) { if (n >= 8 || !/version conflict/.test(String(error))) throw error; }

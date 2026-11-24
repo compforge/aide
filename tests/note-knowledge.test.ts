@@ -1,3 +1,5 @@
+import { confirmCuratedNotes } from "../plugins/personal/note/confirm.ts";
+import { deliverInput } from "./input-state-fixture.ts";
 import { upsertOngoing, readOngoing } from "../plugins/personal/ongoing/service.ts";
 import { prepareOngoingCheck } from "../plugins/personal/secretary/ongoing.ts";
 import { topicPolicy } from "../plugins/personal/topic/config.ts";
@@ -432,12 +434,11 @@ test("stored per-Note review metadata is discarded without changing content or a
 
 /** Exercise the production creation/completion transactions, including root pressure updates. */
 async function completePressure(f: Awaited<ReturnType<typeof setup>>, pressure: import("../plugins/personal/note/pressure.ts").NotePressureTopic[], executionId?: string) {
-  const { assessInput } = await import("../plugins/personal/chief/assess.ts");
   if (executionId) await f.resources.patchStatus(f.read(), { execution: { id: executionId, startedAt: new Date().toISOString() } });
   const review = await createMaintenanceInput(f.context, f.read(), new Date().toISOString(),
     await maintenanceAgenda(f.resources, []), "aide:curate", "note_pressure", { cooldownSeconds: 60, instructions: "Review pressure",
       plan: { weaveRevision: 0, notePressure: pressure } });
-  if (executionId) await assessInput(f.resources, f.read(), executionId, { inputId: review.metadata.name, summary: "Pressure reviewed" });
+  if (executionId) await deliverInput(f.resources, f.read(), executionId, review.metadata.name);
 }
 
 test("Note renaming preserves pressure identity and backoff while text changes reset it", async t => {
@@ -525,15 +526,11 @@ test("Ongoing checks have an independent identity, one durable request and one p
   const ask = () => f.aide.topics.say("knowledge", undefined, args.question, "live",
     { to: { me: true }, inputIds: [request.metadata.name] });
   await fixtureMe(f.aide);
-  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
-  const finish = () => assessChiefInput(f.resources, f.read(), "live",
-    { inputId: request.metadata.name, summary: "Checked the metrics" }, "assess");
-  await assert.rejects(finish(), /ask Me/);
+  await deliverInput(f.resources, f.read(), "live", request.metadata.name);
   const first = await ask();
   assert.deepEqual(await ask(), first);
   assert.equal(f.aide.topics.outputStore.get(first.outputId)?.spec.target.uid, f.aide.defaultAddress().uid);
   assert.equal((await read()).status.askedFollowupId, request.metadata.name);
-  await finish();
   assert.equal((await read()).status.closure, undefined);
   const closed = await upsertOngoing(f.resources, f.read(), { ongoingId: initial.id,
     version: (await read()).metadata.resourceVersion, outcome: "Me confirmed final sign-off" }, "close");
@@ -551,8 +548,7 @@ test("a time-only Ongoing check can complete silently and does not repeat the co
   const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:followup")!;
   assert.equal(request.spec.observation?.trigger, "ongoing_check_due");
   await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "live", startedAt: new Date().toISOString() } });
-  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
-  await assessChiefInput(f.resources, f.read(), "live", { inputId: request.metadata.name, summary: "Awaiting the owner's reply" }, "assess");
+  await deliverInput(f.resources, f.read(), "live", request.metadata.name);
   assert.equal((await read()).status.closure, undefined);
   assert.equal(f.aide.outputs().length, 0);
   assert.equal(await prepareOngoingCheck(f.context, await read(), topicPolicy(), due + 86_400_000), undefined);
@@ -615,7 +611,6 @@ test("retrospective decisions reuse sourced Work across rounds and retain the No
 test("two stale-only assessments defer that material behind other pending drafts", async t => {
   const { pendingCuration } = await import("../plugins/personal/note/model.ts");
   const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
-  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
   const f = await setup(t);
   const policy = topicPolicy({ curation: { count: 1 } });
   const draft = await f.note({ nature: "semantic", text: "Waiting for the receipt" }, "first");
@@ -624,11 +619,10 @@ test("two stale-only assessments defer that material behind other pending drafts
   await f.resources.patchStatus(req, { assess: { ...req.status.assess, executionId: "live" } });
   await f.note({ ...draft, text: "Receipt arrived" }, "changed");
   const other = await f.note({ text: "Another handover" }, "another");
-  const finish = () => assessChiefInput(f.resources, f.read(), "live", { inputId: req.metadata.name, summary: "Revisit changed evidence", curatedNotes: [draft] }, "finish");
-  assert.equal((await finish()).needsReview, req.metadata.name);
+  const finish = () => confirmCuratedNotes(f.resources, f.read(), "live", { inputId: req.metadata.name, curatedNotes: [draft] });
+  await deliverInput(f.resources, f.read(), "live", req.metadata.name);
   const deferred = await finish();
-  assert.ok("assessed" in deferred);
-  assert.equal(deferred.assessed, req.metadata.name);
+
   assert.deepEqual(deferred.noteResults, [{ noteId: draft.noteId, status: "version_changed" }]);
   assert.deepEqual(await finish(), deferred);
   assert.ok(pendingCuration(await f.get(other.noteId))! <= pendingCuration(await f.get(draft.noteId))!);
@@ -638,7 +632,6 @@ test("two stale-only assessments defer that material behind other pending drafts
 test("curate batches classified drafts and acknowledges only final versions it actually reviewed", async t => {
   const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
-  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
   const { pendingCuration } = await import("../plugins/personal/note/model.ts");
   const f = await setup(t);
   await f.aide.topics.setReviewEnabled(f.root.spec.id, false);
@@ -659,11 +652,12 @@ test("curate batches classified drafts and acknowledges only final versions it a
   const revised = await f.note({ ...first, text: "Metrics ownership transferred to the new lead" }, "curate-edit");
   const destination = await f.note({ nature: "procedural", text: "Confirm the current owner in the oncall schedule" }, "curate-split");
   const concurrent = await f.note({ ...other, text: "Rotation now takes place monthly" }, "business-update");
-  const assess = () => assessChiefInput(f.resources, f.read(), "live", { inputId: request!.metadata.name,
-    summary: "Clarified the handover", curatedNotes: [revised, destination, other] }, "finish");
+  await deliverInput(f.resources, f.read(), "live", request!.metadata.name);
+  const assess = () => confirmCuratedNotes(f.resources, f.read(), "live", { inputId: request!.metadata.name,
+    curatedNotes: [revised, destination, other] });
   const receipt = await assess();
   assert.deepEqual(receipt.noteResults?.map(n => n.status), ["confirmed", "confirmed", "version_changed"]);
-  assert.deepEqual(await assess(), receipt); // Replay preserves the original completion.
+  assert.deepEqual((await assess()).noteResults.map(n => n.status), ["already_curated", "already_curated", "version_changed"]);
   assert.equal(pendingCuration(await f.get(first.noteId)), undefined);
   assert.equal(pendingCuration(await f.get(destination.noteId)), undefined);
   assert.ok(pendingCuration(await f.get(concurrent.noteId)));
@@ -678,7 +672,6 @@ test("an unclassified draft stays pending through edits until its classified ver
   const { pendingCuration } = await import("../plugins/personal/note/model.ts");
   const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
-  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
   const f = await setup(t), policy = topicPolicy();
   const draft = await f.note({ text: "Prepare oncall metrics and document the process" }, "draft");
   const since = pendingCuration(await f.get(draft.noteId))!;
@@ -687,10 +680,11 @@ test("an unclassified draft stays pending through edits until its classified ver
   await prepareNoteMaintenance(f.context, await f.get(draft.noteId), policy, Date.parse(since) + policy.curation.maxWaitSeconds * 1000);
   const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "live", startedAt: new Date().toISOString() } });
-  const finish = (receipt: typeof draft) => assessChiefInput(f.resources, f.read(), "live",
-    { inputId: request.metadata.name, summary: "Reviewed the method", curatedNotes: [receipt] }, "finish");
+  await deliverInput(f.resources, f.read(), "live", request.metadata.name);
+  const finish = (receipt: typeof draft) => confirmCuratedNotes(f.resources, f.read(), "live",
+    { inputId: request.metadata.name, curatedNotes: [receipt] });
   assert.deepEqual((await finish(edited)).noteResults, [{ noteId: edited.noteId, status: "needs_nature" }]);
-  assert.equal(f.aide.topics.inputStore.get(request.metadata.name)?.status.assess?.completedAt, undefined);
+  assert.ok(f.aide.topics.inputStore.get(request.metadata.name)?.status.assess?.completedAt);
   const classified = await f.note({ ...edited, nature: "procedural" }, "classify");
   await finish(classified);
   assert.equal(pendingCuration(await f.get(draft.noteId)), undefined);
@@ -698,7 +692,6 @@ test("an unclassified draft stays pending through edits until its classified ver
 
 test("evidence that a matter is still ongoing settles the old check without asking Me", async t => {
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
-  const { assessChiefInput } = await import("../plugins/personal/chief/inputs.ts");
   const f = await setup(t);
   const matter = await upsertOngoing(f.resources, f.read(), { title: "Awaiting final sign-off",
     question: "Has sign-off happened?", checkAt: new Date(0).toISOString() }, "signoff");
@@ -712,7 +705,7 @@ test("evidence that a matter is still ongoing settles the old check without aski
   await fixtureMe(f.aide);
   await assert.rejects(f.aide.topics.say("knowledge", undefined, "Has sign-off happened?", "live", {
     to: { me: true }, inputIds: [request.metadata.name] }), /no longer matches/);
-  await assessChiefInput(f.resources, f.read(), "live", { inputId: request.metadata.name, summary: "Owner confirmed the revised schedule" }, "assess");
+  await deliverInput(f.resources, f.read(), "live", request.metadata.name);
   const updated = await read();
   assert.equal(updated.status.closure, undefined);
   assert.equal(updated.spec.checkAt, followup.checkAt);

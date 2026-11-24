@@ -2,7 +2,7 @@ import type { PluginContext, ReconcileContext, ResourceClient } from "@compforge
 import type { LoopResource } from "./loop.ts";
 import { isProcessingRoot } from "../topic/boundary.ts";
 import { inputExpired } from "../input/retention.ts";
-import { InputAttention, inputAttention, assessmentFinished, type InputSpec } from "../input/model.ts";
+import { InputAttention, inputAttention, deliveryFinished, type InputSpec } from "../input/model.ts";
 import { pendingInputs, resourceRef, attemptOf, type Input } from "../input/state.ts";
 
 export const immediate = (input: InputSpec) => inputAttention(input) === InputAttention.Immediate;
@@ -13,7 +13,7 @@ export const canActivate = (input: InputSpec, owner: Pick<LoopResource, "kind">)
 export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
   if ((owner.kind === "Topic" && input.status.batchId) || input.metadata.deletionTimestamp || inputExpired(input)) return false;
   if (owner.kind === "Topic") return isProcessingRoot(owner as import("../topic/model.ts").TopicResource)
-    && input.status.assess?.topic?.uid === owner.metadata.uid && !!input.status.assess && !assessmentFinished(input.status.assess) && !input.status.assess.executionId;
+    && input.status.assess?.topic?.uid === owner.metadata.uid && !!input.status.assess && !deliveryFinished(input.status.assess) && !input.status.assess.executionId;
   const receipt = attemptOf(input, resourceRef(owner));
   if (receipt?.completedAt) return false;
   if (owner.kind === "Route") return !receipt?.executionId || (!!input.status.route?.nextAttemptAt && Date.parse(input.status.route.nextAttemptAt) <= Date.now());

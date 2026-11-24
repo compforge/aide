@@ -7,7 +7,7 @@ import { notes } from "../../note/query.ts";
 import { attemptOf, type Input } from "../../input/state.ts";
 import type { TopicResource } from "../../topic/model.ts";
 import { describeInput } from "../../input/printer.ts";
-import { assessmentFinished, InputAttention, inputAttention } from "../../input/model.ts";
+import { deliveryFinished, InputAttention, inputAttention } from "../../input/model.ts";
 import type { Store } from "../../work/store.ts";
 
 function evidencePage(materials: readonly Input[], offset: number, sourceIds = false) {
@@ -31,7 +31,7 @@ export function readChiefInput(store: Store, topic: TopicResource, id: string | 
     const items = Array.from(groups, ([inputId, materials]) => {
       const first = materials[0]!, batch = batchForInput(store.resources, first);
       return { inputId, attention: batch?.spec.attention ?? inputAttention(first.spec), status: batch?.status.assess ?? first.status.assess };
-    }).filter(item => !assessmentFinished(item.status));
+    }).filter(item => !deliveryFinished(item.status));
     const summaryNote = summaryReference(store.resources, topic);
     return { context: { version: contentVersion(topic), summary: summaryText(store.resources, topic), summaryUid: summaryNote?.uid,
       summaryNote, recent: notes(store.resources, topic.metadata.uid, "subject"), maxChars }, inputs: items.slice(offset, offset + 20),

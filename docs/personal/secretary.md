@@ -26,7 +26,7 @@ Secretary 合并领域内的梳理需求，并按约定时间为开放 Ongoing �
 
 Secretary 每到整刻钟检查一次，从已有 Summary 或相关普通 Note 的 Topic、Person 和 Address 中选择最久未复核的对象，未复核对象优先。Topic 的责任 root 承接检查；Person 与 Address 由 default Chief 承接。只有该 Chief 当前没有执行、没有排队的 Input 或 Batch，才递交一条 `aide:summary`。忙就跳过当轮，下一个整刻钟照常检查。时钟保存在 Gate，重启只检查当前一轮。
 
-Chief 完成 Input 时同时记录对象的 `summaryReviewedAt`，即使正文保持原样也算完成。Summary 的内容版本只随内容变化。判断标准见 [Note](note.md#事项归位与提炼回顾)。
+Summary 请求投递时记录对象的轮转时间 `summaryReviewedAt`；正文修订由 Note 的实际变更记录。Summary 的内容版本只随内容变化。判断标准见 [Note](note.md#事项归位与提炼回顾)。
 
 ## Reconciler
 
@@ -70,22 +70,22 @@ Secretary 根据 Weave 通知、工作量和 Note 本身的变化或容量压力
 
 Topic 配置区分 `trigger.intervalSeconds`（默认 60 秒，固定唤醒 Reconcile）和 `review`（业务回顾策略）。单个 Topic 的 `spec.review.enabled` 默认开启；关闭只停止后台回顾，不停止协调、业务输入或结构通知。Chief Harness 不持有业务调度配置。
 
-回顾截止时间从持久化事实与当前策略计算。调整配置后，下一次协调使用新策略，不从重启重新计时、不补跑错过的周期。Chief 执行结束只保存执行事实，不重置 Secretary 调度状态。失败或缺少终态回执时，Chief 重试原 Input／Batch；完成回执不再二次结算。关闭回顾或调整责任边界时，明确重置静默检查状态。
+回顾截止时间从持久化事实与当前策略计算。调整配置后，下一次协调使用新策略，不从重启重新计时、不补跑错过的周期。Chief 执行结束只保存执行事实，不重置 Secretary 调度状态。明确未投递的 Input／Batch 可以再次调度。执行中断时先核对原生会话，结果不明的投递留待核实。关闭回顾或调整责任边界时，明确重置静默检查状态。
 
-维护 Input 创建即绑定目标 Topic，无需 Route 模型；请求身份、冷却及 Curate 覆盖快照原子保存。Chief 使用 origin 选择工具，通过 `assess_input` 留下结果；系统 Input 不刷新 `lastInputAt`、不新增授权。日志区分请求生成、冷却等待、无事退避与执行结果，保留 origin、Topic、请求身份、触发原因与下一次检查时间。
+维护 Input 创建即绑定目标 Topic，无需 Route 模型；请求身份、冷却及 Curate 覆盖快照原子保存。Chief 使用 origin 选择工具，按需执行相应操作；系统 Input 不刷新 `lastInputAt`、不新增授权。日志区分请求生成、冷却等待、无事退避与执行结果，保留 origin、Topic、请求身份、触发原因与下一次检查时间。
 
 ## 与 Chief 及其它角色协作
 
-Chief Reconcile 关注抽到的非 Deferred Input／Batch，按其 origin、attention 和权限选择工具并触发 Agent，把当前待办处理好。Secretary 关注更多资源事实，它的工作产物是新的 Input 或就绪 Batch。Chief 角色内部使用 Agent 作判断，通过 `assess_input` 提交持久化结果；完成结果、Chief 工作量与本次 Curate 覆盖水位在同一事务中提交。Chief 不决定下一次维护何时发生，也不在执行结束时重置秘书的退避。
+Chief Reconcile 关注抽到的非 Deferred Input／Batch，按其 origin、attention 和权限选择工具并触发 Agent，把当前待办处理好。Secretary 关注更多资源事实，它的工作产物是新的 Input 或就绪 Batch。Chief 使用 Agent 作判断；运行时将投递回执、Chief 工作量与本次 Curate 覆盖水位在同一事务中提交。Chief 不决定下一次维护何时发生，也不在执行结束时重置秘书的退避。
 
 Secretary 观察 Chief 已持久化的完成事实，后续需求产生新 Input。结果写入与重试由 [Chief](chief.md#完成与重试) 负责，Batch 成员结果由 Input Reconcile 投影；这些完成路径无需秘书再次确认。
 
-Route 负责初始 Topic 归属，Weave 负责 Topic 之间的组织关系，Task／Routine 负责持续办理。Secretary 以这些角色留下的资源事实准备任务，角色之间不直接触发彼此的 Agent。完整流转见 [Personal](README.md#角色与协作) 和 [Input](input.md#路由研判与办理)。
+Route 负责初始 Topic 归属，Weave 负责 Topic 之间的组织关系，Task／Routine 负责持续办理。Secretary 以这些角色留下的资源事实准备任务，角色之间不直接触发彼此的 Agent。完整流转见 [Personal](README.md#角色与协作) 和 [Input](input.md#路由投递与办理)。
 
 ## 实现入口
 
 - [Secretary Reconcile](../../plugins/personal/secretary/reconcile.ts)：待办准备、空检查与过时请求取消。
 - [Batch 准备](../../plugins/personal/secretary/batching.ts)：Deferred 归组与未接纳 Batch 协调。
 - [维护请求](../../plugins/personal/secretary/input.ts)与[容量检查](../../plugins/personal/secretary/maintenance.ts)：请求去重、触发证据与准备阶段冷却。
-- [Chief 完成事务](../../plugins/personal/chief/assess.ts)与[完成记账](../../plugins/personal/chief/input-outcome.ts)：结果及调度事实原子提交。
+- [Chief 投递事务](../../plugins/personal/chief/delivery.ts)同时提交投递回执和[工作量记录](../../plugins/personal/chief/input-outcome.ts)。
 - [角色注册](../../plugins/personal/plugin.ts)与[协作测试](../../tests/topic-secretary.test.ts)：并行协调、完成与恢复边界。

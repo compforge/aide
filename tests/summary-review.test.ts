@@ -7,7 +7,7 @@ import { InputAttention } from "../plugins/personal/input/model.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { secretaryFixture } from "./secretary-fixture.ts";
 import { prepareInputs } from "../plugins/personal/secretary/batching.ts";
-import { assessInput } from "../plugins/personal/chief/assess.ts";
+import { deliverInput } from "./input-state-fixture.ts";
 import { ensureDefaultTopic } from "../plugins/personal/topic/default.ts";
 import { webAddress } from "../src/channel/address.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
@@ -39,7 +39,7 @@ test("Secretary skips a busy quarter-hour, ignores mid-slot wakeups and complete
   assert.equal(SummaryOwnerSchema.parse(request!.spec.observation?.summaryOwner).uid, f.root().metadata.uid);
   assert.match(request!.spec.text, /scope, constraints, decisions and reusable conclusions/);
   await reconcileChief(f.context, f.execution("review", async () => {
-    await assessInput(f.resources, f.root(), "review", { inputId: request!.metadata.name, summary: "Existing scope is supported" });
+    await deliverInput(f.resources, f.root(), "review", request!.metadata.name);
   }), f.root(), f.policy);
   const receipt = s.requests()[0]!.status.assess!;
   assert.ok(receipt.completedAt);
@@ -84,7 +84,7 @@ test("Shared Person and Address become eligible from ordinary Notes and rotate i
     seen.add(owner.uid);
     const current = () => f.aide.topics.resource("default")!;
     await reconcileChief(f.context, f.execution("shared-" + minutes, async () => {
-      await assessInput(f.resources, current(), "shared-" + minutes, { inputId: request.metadata.name, summary: "Reviewed evidence" });
+      await deliverInput(f.resources, current(), "shared-" + minutes, request.metadata.name);
     }), current(), f.policy);
     const updated = await f.resources.get<unknown, { summaryReviewedAt?: string; summaryRevision?: string }>(owner);
     assert.ok(updated?.status.summaryReviewedAt);

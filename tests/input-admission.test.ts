@@ -1,5 +1,5 @@
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
-import { assessBatch } from "../plugins/personal/batch/assess.ts";
+import { recordDelivery } from "../plugins/personal/chief/delivery.ts";
 import { reconcileBatchMember } from "../plugins/personal/input/assignment.ts";
 import { prepareInputs } from "../plugins/personal/secretary/batching.ts";
 import { topicPolicy } from "../plugins/personal/topic/config.ts";
@@ -19,8 +19,8 @@ import { deliver } from "../plugins/personal/route/delivery.ts";
 import { runInput, finalizeExecution } from "../plugins/personal/execution/loop.ts";
 import { nextInputs as nextRoleInputs } from "../plugins/personal/execution/input.ts";
 import { preparedInputs as nextInputs } from "../plugins/personal/chief/queue.ts";
-import { resourceRef, changeAssessment } from "../plugins/personal/input/state.ts";
-import { assessInput } from "../plugins/personal/chief/assess.ts";
+import { resourceRef, changeDelivery } from "../plugins/personal/input/state.ts";
+import { deliverInput } from "./input-state-fixture.ts";
 import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 import type { TopicResource } from "../plugins/personal/topic/model.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
@@ -69,7 +69,7 @@ async function running(f: ReturnType<typeof fixture>, c: TopicResource) {
 }
 
 /** @case Native steer and followUp must use the Chief execution ID, not the intake Reconcile execution ID. */
-test("Steer and followUp racing within one root dispatch once and release unfinished admission on recovery", async t => {
+test("Steer and followUp racing within one root dispatch once and retain uncertain delivery evidence on recovery", async t => {
   const f = fixture(t), a = await f.aide.topics.ensure("a"), b = await f.aide.topics.ensure("b");
   await running(f, a); await f.input("shared", [a], InputAttention.Immediate);
   let count = 0;
@@ -80,8 +80,8 @@ test("Steer and followUp racing within one root dispatch once and release unfini
   const receipt = f.aide.topics.inputStore.get("shared")!.status.assess!;
   assert.ok(["a", "b"].includes(receipt.executionId!));
   await f.aide.personal.recoverInterrupted();
-  assert.equal(f.aide.topics.inputStore.get("shared")!.status.assess!.executionId, undefined);
-  assert.equal(f.aide.topics.inputStore.get("shared")!.status.assess!.retryable, true);
+  assert.equal(f.aide.topics.inputStore.get("shared")!.status.assess!.executionId, receipt.executionId);
+  assert.equal(f.aide.topics.inputStore.get("shared")!.status.assess!.retryable, false);
   for (const c of [a, b]) assert.deepEqual(await nextInputs(f.resources, f.current(c), 8), []);
   assert.equal(count, 1);
 });
@@ -105,7 +105,7 @@ for (const outcome of ["rejected", "unknown", "completed"] as const) test(`Chief
   const fact = await f.input("fact", [a]);
   mockRunning(f, async () => {
     if (outcome === "unknown") throw new Error("transport timed out");
-    if (outcome === "completed") await assessInput(f.resources, f.current(a), "a", { inputId: "fact", summary: "Already handled" });
+    if (outcome === "completed") await deliverInput(f.resources, f.current(a), "a", "fact");
     return { state: "success", value: { outcome: "rejected", reason: "not_running" } };
   });
   const submit = f.aide.personal.submitTopic(intake(a), { inputId: "fact", operation: "followUp" });
@@ -113,9 +113,9 @@ for (const outcome of ["rejected", "unknown", "completed"] as const) test(`Chief
   const receipt = f.aide.topics.inputStore.get("fact")!.status.assess!;
   assert.equal(receipt.executionId, outcome === "rejected" ? undefined : "a");
   assert.equal((await nextInputs(f.resources, f.current(a), 8)).length, outcome === "rejected" ? 1 : 0);
-  if (outcome === "completed") assert.equal(receipt.result!.summary, "Already handled");
+  if (outcome === "completed") assert.ok(receipt.completedAt);
   if (outcome === "unknown") assert.match(receipt.lastError!, /timed out/);
-  await changeAssessment(f.resources, fact, "someone-else", { executionId: undefined });
+  await changeDelivery(f.resources, fact, "someone-else", { executionId: undefined });
   assert.deepEqual(f.aide.topics.inputStore.get("fact")!.status.assess, receipt);
 });
 
@@ -191,7 +191,7 @@ for (const closeFails of [false, true]) test(`Compaction failure unbinds Chief a
   assert.deepEqual((await nextInputs(f.resources, f.current(topic), 8)).map(i => i.metadata.name), ["fresh"]);
   await runInput(f.context, f.execution("fresh-run", async () => {
     assert.equal(f.current(topic).status.agent?.sessionId, "session-fresh-run");
-    await assessInput(f.resources, f.current(topic), "fresh-run", { inputId: "fresh", summary: "Handled" });
+    await deliverInput(f.resources, f.current(topic), "fresh-run", "fresh");
   }), f.current(topic), "chief", "fresh", "fresh");
   assert.deepEqual(f.aide.topics.inputStore.get("failed")!.status.assess, receipt);
   assert.ok(f.aide.topics.inputStore.get("fresh")!.status.assess?.completedAt);
@@ -273,7 +273,7 @@ test("Immediate business can interrupt internal maintenance and unfinished maint
   await f.input("urgent", [root], InputAttention.Immediate);
   mockRunning(f, async () => ({ state: "success", value: { outcome: "accepted" } }));
   assert.equal((await f.aide.personal.submitTopic(intake(root), { inputId: "urgent", operation: "steer" })).accepted, true);
-  await assessInput(f.resources, f.current(root), "a", { inputId: "urgent", summary: "Answered" });
+  await deliverInput(f.resources, f.current(root), "a", "urgent");
   await finalizeExecution(f.context, f.current(root), "a", "");
   const pending = f.aide.topics.inputStore.get(maintenance.metadata.name)!;
   assert.equal(pending.status.assess?.completedAt, undefined);
@@ -349,7 +349,8 @@ for (const outcome of ["accepted", "rejected", "uncertain"] as const) test(`Defe
     assert.equal(batch.status.assess?.retryable, true);
     await finalizeExecution(f.context, f.current(root), "a");
     const retry = (await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE))[0]!;
-    assert.equal(retry.status.phase, "ready"); assert.equal(retry.status.assess?.executionId, undefined);
+    assert.equal(retry.status.phase, "failed"); assert.equal(retry.status.assess?.executionId, "a");
+    assert.match(retry.status.assess!.lastError!, /outcome unknown/);
   }
 });
 
@@ -371,7 +372,7 @@ test("A running Chief admits one outstanding deferred batch and resumes after it
   await submitPending(f.context, execution, f.current(root));
   assert.equal(deliveries.length, 2); assert.equal(deliveries[1].operation, "steer");
   const activeBatch = (await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE)).find(b => b.status.phase === "running")!;
-  await assessBatch(f.resources, f.current(root), "a", { batchId: activeBatch.metadata.uid, summary: "Handled" });
+  await recordDelivery(f.resources, f.current(root), "a", activeBatch.status.assess!.deliveryId!);
   await prepareInputs(f.context, f.current(root), topicPolicy());
   await submitPending(f.context, execution, f.current(root));
   assert.equal(deliveries.length, 3); assert.equal(deliveries[2].operation, "followUp");

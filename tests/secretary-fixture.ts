@@ -1,5 +1,5 @@
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
-import { assessBatch } from "../plugins/personal/batch/assess.ts";
+import { recordDelivery } from "../plugins/personal/chief/delivery.ts";
 import { reconcileBatchMember } from "../plugins/personal/input/assignment.ts";
 import { type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -9,7 +9,7 @@ import pino from "pino";
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { routeTo, assessAll } from "./input-state-fixture.ts";
+import { routeTo } from "./input-state-fixture.ts";
 import { InputAttention, type InputOrigin, type InputSpec } from "../plugins/personal/input/model.ts";
 import { topicPolicy } from "../plugins/personal/topic/config.ts";
 
@@ -34,11 +34,7 @@ export async function secretaryFixture(t: TestContext) {
       if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "session" } };
       calls++;
       if (onPrompt) await onPrompt();
-      else {
-        for (const batch of await resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "execution", value: id } }))
-          await assessBatch(resources, root(), id, { batchId: batch.metadata.uid, summary: "checked" });
-        await assessAll(resources, root(), id, { inputIds: aide.topics.inputStore.list().filter(i => i.status.assess?.executionId === id).map(i => i.metadata.name), summary: "checked" }, policy);
-      }
+      else await recordDelivery(resources, root(), id, id);
       return { state: "success", value: { result: { stopReason: "end_turn" } } };
     },
   } } as unknown as ReconcileContext);

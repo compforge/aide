@@ -1,8 +1,9 @@
-import type { AssessInput } from "../assess.ts";
+import { confirmCuratedNotes, type NoteConfirmation } from "../../note/confirm.ts";
+import { bindInputDelivery } from "../delivery.ts";
 import { followupInputId } from "../../ongoing/model.ts";
 import { readOngoing } from "../../ongoing/service.ts";
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../../batch/model.ts";
-import { assessChiefInput, chiefPreviews } from "../inputs.ts";
+import { chiefPreviews } from "../inputs.ts";
 import { isGateTopic } from "../../topic/boundary.ts";
 import type { MailSender } from "../../stream/sender.ts";
 import { Addresses } from "../../address/service.ts";
@@ -15,7 +16,6 @@ import { Background as TopicBackground } from "./background.ts";
 import type { PiConfig } from "../../../../src/host/harness/pi/config.ts";
 import { upsertTopicNote } from "../../topic/state.ts";
 import { say } from "../../output/action.ts";
-import { immediate } from "../../execution/input.ts";
 import type { ExecutionScope } from "../../../../src/protocol/verbs.ts";
 import type { TopicSpec, TopicStatus } from "../../topic/model.ts";
 import type { Logger } from "pino";
@@ -53,11 +53,10 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
       plugins.executionVerbs(c.status.execution.id, { topicId });
       return c;
     };
-    const assess = async (input: AssessInput, toolCallId: string) => {
+    const confirm = async (input: NoteConfirmation) => {
       const c = active();
-      const result = await assessChiefInput(plugins.resourceClient("personal"), c, c.status.execution!.id, input, toolCallId);
-      log.info({ topicId, inputId: input.inputId, noteResults: "noteResults" in result ? result.noteResults : undefined },
-        "needsReview" in result ? "Chief assessment needs fresh Notes" : "Chief assessment completed");
+      const result = await confirmCuratedNotes(plugins.resourceClient("personal"), c, c.status.execution!.id, input);
+      log.info({ topicId, inputId: input.inputId, noteResults: result.noteResults }, "Chief confirmed reviewed Notes");
       return result;
     };
     const tools = chiefTools(connectors, async (id, input) => {
@@ -66,31 +65,27 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
     }, (id, offset) => {
       const c = active();
       return readChiefInput(store, c, id, offset, policy.maxChars);
-    }, assess, notes => mailSender.cite(active().status.execution!.id, notes));
+    }, confirm, notes => mailSender.cite(active().status.execution!.id, notes));
     let inputOrigin: import("../../input/model.ts").InputOrigin = "chief";
-    return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, inputBinding: {
+    const session = await createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, inputBinding: {
       read: () => {
         const c = active();
         return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "chief",
-          inputs: [...store.topics.inputStore.query("assessExecution", c.status.execution!.id).map(i => ({
+          inputs: [...store.topics.inputStore.query("deliveryExecution", c.status.execution!.id).map(i => ({
             id: i.metadata.name, deliveryId: i.status.assess?.deliveryId ?? `input:${i.metadata.uid}`, initial: !i.status.assess?.deliveryId && i.status.assess?.startedAt === c.status.execution!.startedAt,
             summaryOwnerUid: i.spec.origin === "aide:summary" ? SummaryOwnerSchema.parse(i.spec.observation?.summaryOwner).uid : undefined,
-            origin: i.spec.origin, immediate: immediate(i.spec), text: inputPreview(i, Math.floor(policy.contextChars / 8)),
-          })), ...store.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "execution", value: c.status.execution!.id } }).flatMap(batch => {
+            origin: i.spec.origin, text: inputPreview(i, Math.floor(policy.contextChars / 8)),
+          })), ...store.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "deliveryExecution", value: c.status.execution!.id } }).flatMap(batch => {
             const members = store.topics.inputStore.query("batch", batch.metadata.uid);
             return chiefPreviews(members, Math.floor(policy.contextChars / 8)).map(item => ({
               id: item.inputId, deliveryId: batch.status.assess?.deliveryId ?? `batch:${batch.metadata.uid}`,
               initial: !batch.status.assess?.deliveryId && batch.status.assess?.startedAt === c.status.execution!.startedAt,
-              origin: members[0]!.spec.origin, immediate: false, text: item.description,
+              origin: members[0]!.spec.origin, text: item.description,
             }));
           }) ] };
       },
       ongoingCheck: async id => followupInputId(await readOngoing(store.client, active(), id)),
       noteSummaryOwner: async id => (await readNote(store.client, id)).summaryOf?.uid,
-      inputOrigin: id => {
-        const input = store.topics.inputStore.get(id);
-        return input?.status.batchId ? undefined : input?.spec.origin;
-      },
       changed: (task, tools) => {
         inputOrigin = task.origin;
         log.info({ topicId, executionId: task.executionId, inputOrigin: task.origin,
@@ -102,5 +97,7 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
       log.info({ topicId, targetTopicId: input.topicId, noteId: result.noteId, version: result.version, sensitivity: result.sensitivity, visibility: result.visibility }, "Topic Note updated");
       return result;
     }, beforeWorkMutation: () => { active(); } });
+    bindInputDelivery(session, active, plugins.resourceClient("personal"), log);
+    return session;
   };
 }

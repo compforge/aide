@@ -1,4 +1,4 @@
-import { assessChiefInput, chiefPreviews } from "../plugins/personal/chief/inputs.ts";
+import { chiefPreviews } from "../plugins/personal/chief/inputs.ts";
 import { readChiefInput } from "../plugins/personal/execution/agent/read-input.ts";
 import { topicTools } from "../plugins/personal/chief/agent/topic-tools.ts";
 import { inputDetail } from "../src/api/inputs.ts";
@@ -9,13 +9,13 @@ import { cancelBatch } from "../plugins/personal/batch/reconcile.ts";
 import { prepareInputs } from "../plugins/personal/secretary/batching.ts";
 import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
 import { batchById, batchMembers } from "../plugins/personal/batch/members.ts";
-import { assessBatch } from "../plugins/personal/batch/assess.ts";
+import { recordDelivery, recoverInputDeliveries } from "../plugins/personal/chief/delivery.ts";
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
 import { preparedIntake } from "../plugins/personal/chief/intake.ts";
 import { commitStatus } from "../plugins/personal/status.ts";
 import { INPUT_TYPE, InputAttention } from "../plugins/personal/input/model.ts";
 import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
-import { assessInput } from "../plugins/personal/chief/assess.ts";
+import { deliverInput } from "./input-state-fixture.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { runInput } from "../plugins/personal/execution/loop.ts";
 
@@ -31,7 +31,6 @@ test("Deferred Batch seals its members and Chief completes only the Batch", asyn
   assert.deepEqual((await batchMembers(f.resources, batch)).map(i => i.metadata.name), ["a", "b"]);
   await reconcileChief(f.context, f.execution("one", async () => {
     assert.ok(f.aide.topics.inputStore.list().every(i => !i.status.assess?.executionId));
-    await assert.rejects(assessInput(f.resources, f.root(), "one", { inputId: "a", summary: "done" }), /assess the containing item/);
     const [item] = chiefPreviews(ready.inputs, 4000);
     assert.equal(item!.inputId, batch.metadata.uid);
     const store = f.aide.personal.store, id = item!.inputId;
@@ -43,24 +42,24 @@ test("Deferred Batch seals its members and Chief completes only the Batch", asyn
     assert.ok("text" in read);
     assert.match(read.text, /evidence a/); assert.match(read.text, /evidence b/);
     assert.doesNotMatch(read.text, /Scheduling batch/);
-    assert.deepEqual(await assessChiefInput(f.resources, f.root(), "one", { inputId: id, summary: "whole task checked" }, "first"), { assessed: id });
-    await assessChiefInput(f.resources, f.root(), "one", { inputId: id, summary: "duplicate completion" }, "second");
+    await recordDelivery(f.resources, f.root(), "one", "one");
+    await recordDelivery(f.resources, f.root(), "one", "one");
     const completed = readChiefInput(store, f.root(), id, 0, 8000);
     assert.ok("status" in completed);
-    assert.equal(completed.status?.result?.summary, "whole task checked");
+    assert.ok(completed.status?.completedAt);
     assert.equal(f.aide.topics.inputStore.get("a")!.status.assess?.completedAt, undefined);
   }), f.root(), f.policy);
   assert.equal((await batchById(f.resources, batch.metadata.uid))!.status.phase, "completed");
   assert.equal(f.root().status.chiefWorkload?.completed, 1, "one Batch, including duplicate receipt, counts once");
   const detail = inputDetail(f.aide, "a")!;
-  assert.equal(detail.batch!.status.assess?.result?.summary, "whole task checked");
+  assert.ok(detail.batch!.status.assess?.completedAt);
   assert.equal(detail.input.status.assess?.completedAt, undefined);
-  assert.ok(detail.timeline.some(e => e.status === "completed" && e.text === "whole task checked"));
+  assert.ok(detail.timeline.some(e => e.status === "completed" && e.title === "Batch 已投递给 Chief"));
   assert.equal(f.aide.topics.inputStore.storage.canCollect("personal", f.aide.topics.inputStore.get("a")!), false);
   await f.project();
   const first = f.aide.topics.inputStore.get("a")!;
   assert.equal(f.root().status.chiefWorkload?.completed, 1, "member projection cannot count again");
-  assert.equal(first.status.assess?.result?.summary, "whole task checked");
+  assert.ok(first.status.assess?.completedAt);
   assert.equal(first.status.assess?.executionId, "one");
   await f.project(); assert.equal(f.aide.topics.inputStore.get("a")!.metadata.resourceVersion, first.metadata.resourceVersion);
   assert.equal(f.aide.topics.inputStore.get("later")!.status.assess?.completedAt, undefined);
@@ -118,7 +117,7 @@ for (const failure of ["execution", "receipt"] as const) test(`Batch ${failure} 
   const batch = (await preparedIntake(f.resources, f.root())).batch!;
   await reconcileChief(f.context, f.execution("failure", async () => {
     if (failure === "execution") throw new Error("provider failed");
-    await assessBatch({ ...f.resources, async commit() { throw new Error("receipt write failed"); } }, f.root(), "failure", { batchId: batch.metadata.uid, summary: "done" });
+    await recordDelivery({ ...f.resources, async commit() { throw new Error("receipt write failed"); } }, f.root(), "failure", "failure");
   }), f.root(), f.policy);
   assert.equal((await batchById(f.resources, batch.metadata.uid))!.status.phase, "ready");
   assert.equal(f.aide.topics.inputStore.get("a")!.status.assess?.lastError, undefined);
@@ -167,16 +166,34 @@ test("Incompatible members roll back the entire readiness transaction", async t 
   assert.equal(f.aide.topics.inputStore.get("a")!.status.batchId, undefined);
 });
 
-test("Business assessment racing Secretary cannot claim a grouped Input", async t => {
-  const f = await secretaryFixture(t); await f.input("a"); await f.input("b");
-  await f.resources.patchStatus(f.root(), { execution: { id: "busy", startedAt: new Date().toISOString() } });
-  let raced = false;
-  const resources = { ...f.resources, async commit(writes: Parameters<typeof f.resources.commit>[0]) {
-    if (!raced) { raced = true; await prepareInputs(f.context, f.root(), f.policy); }
-    return f.resources.commit(writes);
-  } };
-  await assert.rejects(assessInput(resources, f.root(), "busy", { inputId: "a", summary: "stale claim" }), /assess the containing item|Batch member/);
-  assert.equal(f.aide.topics.inputStore.get("a")!.status.assess?.completedAt, undefined);
+test("A delivered Batch releases the queue even when Chief takes no action", async t => {
+  const f = await secretaryFixture(t);
+  for (const ids of [["a", "b"], ["c", "d"]]) {
+    for (const id of ids) await f.input(id);
+    await prepareInputs(f.context, f.root(), f.policy);
+  }
+  const first = (await preparedIntake(f.resources, f.root())).batch!;
+  await reconcileChief(f.context, f.execution("one", async () => {
+    await recordDelivery(f.resources, f.root(), "one", "one");
+    throw new Error("Provider failed after delivery");
+  }), f.root(), f.policy);
+  assert.equal((await batchById(f.resources, first.metadata.uid))?.status.phase, "completed");
+  const next = await preparedIntake(f.resources, f.root());
+  assert.deepEqual(next.inputs.map(i => i.metadata.name).sort(), ["c", "d"]);
+  await reconcileChief(f.context, f.execution("two"), f.root(), f.policy);
+  assert.equal(f.root().status.chiefWorkload?.completed, 2);
+});
+
+test("An undelivered Batch yields to waiting work during and after its cooldown", async t => {
+  const f = await secretaryFixture(t);
+  for (const ids of [["a", "b"], ["c", "d"]]) {
+    for (const id of ids) await f.input(id);
+    await prepareInputs(f.context, f.root(), f.policy);
+  }
+  await reconcileChief(f.context, f.execution("miss", async () => {}), f.root(), f.policy);
+  for (const delay of [60_000, 0]) {
+    assert.deepEqual((await preparedIntake(f.resources, f.root(), false, delay)).inputs.map(i => i.metadata.name).sort(), ["c", "d"]);
+  }
 });
 
 test("A business assessment during preparation rolls back the Batch membership", async t => {
@@ -184,7 +201,7 @@ test("A business assessment during preparation rolls back the Batch membership",
   await f.resources.patchStatus(f.root(), { execution: { id: "busy", startedAt: new Date().toISOString() } });
   let raced = false;
   const resources = { ...f.resources, async commit(writes: Parameters<typeof f.resources.commit>[0]) {
-    if (!raced) { raced = true; await assessInput(f.resources, f.root(), "busy", { inputId: "a", summary: "directly inspected" }); }
+    if (!raced) { raced = true; await deliverInput(f.resources, f.root(), "busy", "a"); }
     return f.resources.commit(writes);
   } };
   await assert.rejects(prepareInputs({ ...f.context, resources }, f.root(), f.policy), /version conflict/);
@@ -224,7 +241,7 @@ test("Chief can pass original Batch materials to existing Work independently of 
     await assert.rejects(service.appendInput(work.id, { id: "a" }, { action: "pause" }), /Source facts/);
     for (const inputId of ["a", "b"]) await service.appendInput(work.id, { id: inputId });
     assert.equal((await batchById(f.resources, batch.metadata.uid))!.status.phase, "running");
-    await assessChiefInput(f.resources, f.root(), "handoff", { inputId: batch.metadata.uid, summary: "Delegated evidence" }, "call");
+    await recordDelivery(f.resources, f.root(), "handoff", "handoff");
     for (const id of ["a", "b"]) {
       const input = f.aide.topics.inputStore.get(id)!;
       assert.ok(input.status.handle?.[work.uid!]); assert.equal(input.status.assess?.completedAt, undefined);
@@ -261,4 +278,21 @@ test("Channel promotion preserves fixed Batch membership without granting steer"
   } } } as unknown as import("@compforge/aide-plugin").ReconcileContext, f.root());
   assert.equal(calls[0]!.operation, "followUp"); assert.equal(calls[0]!.batchId, ready.metadata.uid);
   assert.deepEqual(new Set((await batchMembers(f.resources, ready)).map(i => i.metadata.name)), new Set([original.metadata.name, "b"]));
+});
+
+test("Recovery restores delivery from the admitted native user message exactly once", async t => {
+  const f = await secretaryFixture(t);
+  await f.input("a"); await f.input("b");
+  await prepareInputs(f.context, f.root(), f.policy);
+  const batch = (await preparedIntake(f.resources, f.root())).batch!;
+  await reconcileChief(f.context, f.execution("recover", async () => {
+    const session = { source: "pi", id: "session" };
+    const view = { schema_version: "agent-ledger/session@1" as const, session,
+      nodes: [{ id: "user", kind: "input" as const, started_at: f.root().status.execution!.startedAt,
+        content: { role: "user", content: [{ type: "text", text: "[aide-input:recover]\nmaterials" }] } }] };
+    await recoverInputDeliveries(f.resources, f.root(), async () => view);
+    await recoverInputDeliveries(f.resources, f.root(), async () => view);
+  }), f.root(), f.policy);
+  assert.equal((await batchById(f.resources, batch.metadata.uid))?.status.phase, "completed");
+  assert.equal(f.root().status.chiefWorkload?.completed, 1);
 });

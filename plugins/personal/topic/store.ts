@@ -154,7 +154,7 @@ export class TopicStore {
     const initial = await this.ensure(topicId);
     const request = options.inputIds?.length === 1 ? this.inputStore.get(options.inputIds[0]!) : undefined;
     const followup = request?.spec.origin === "aide:followup" ? request : undefined;
-    if (followup && (!executionId || followup.status.assess?.executionId !== executionId || followup.status.assess.completedAt
+    if (followup && (!executionId || initial.status.execution?.id !== executionId || followup.status.assess?.executionId !== executionId
       || !options.to?.me || options.target || options.receivers || options.respondToInputId || options.respondToHandoffId))
       throw new Error("Only the active followup may ask Me");
     const id = followup ? followup.metadata.name : options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();

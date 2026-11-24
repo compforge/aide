@@ -32,7 +32,7 @@ import { maintenanceAgenda } from "../plugins/personal/secretary/maintenance.ts"
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { assessAll, routeTo } from "./input-state-fixture.ts";
+import { deliverInput, routeTo } from "./input-state-fixture.ts";
 
 const log = pino({ level: "silent" });
 const past = () => new Date(Date.now() - 901_000).toISOString();
@@ -63,7 +63,7 @@ async function fixture(t: import("node:test").TestContext) {
       if (fail) throw newHarnessError("harness_execution_failed", "provider disconnected");
       await hooks.beforeAssess?.();
       const admitted = aide.topics.inputStore.list().filter(i => i.status.assess?.executionId === executionId && !i.status.assess?.completedAt);
-      if (!hooks.skipAssessment) await assessAll(resources, read(), executionId, { inputIds: admitted.map(i => i.metadata.name), summary: "Nothing needs action" }, config.topic);
+      if (!hooks.skipAssessment) for (const i of admitted) await deliverInput(resources, read(), executionId, i.metadata.name);
       await hooks.afterAssess?.();
       return { state: "success", value: { result: { stopReason: "end_turn" } } };
     } } } as unknown as ReconcileContext;

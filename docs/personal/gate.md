@@ -31,7 +31,7 @@ Gate 使用独立 `plugins/personal/gate/agent/`、`gate` Harness、提示词、
 | Gate：delegate_request | 将原始 Me 请求交给一个负责领域；未确定领域时交由 Route / Default 选择 |
 | Gate：followup_request | 将 Me 的新回答、补充或变更交给原交办，保留同一责任关系 |
 | Gate：list_handoffs / read_handoff | 分页读取请求、接手、执行进展和关联 Work |
-| Gate：assess_input、cite_output / say | 确认本次输入处理，引用证据并答复原单聊 |
+| Gate：cite_output / say | 确认本次输入处理，引用证据并答复原单聊 |
 | Chief / Task / Routine：read_handoff / report_handoff | 读取原请求、报告业务进展；有明确协调需要时请求 Gate 介入 |
 
 简单询问和跨域比较由 Gate 直接回答。需要具体行动、持续跟进或更新领域认识时交给负责的 root Chief，由它选择直接处理、已有 Work、新 Task 或 Routine。交办前查询已有关系和工作，避免重复。跨领域事情明确牵头领域和各自有界的贡献，Gate 负责协调。
@@ -42,7 +42,7 @@ Gate 使用独立 `plugins/personal/gate/agent/`、`gate` Harness、提示词、
 
 Chief / Work 使用 `say(respondToHandoffId=交办ID)`（也可在 Input 保留期内使用 `respondToInputId`） 沿原单聊 Address、消息坐标和收件人答复。Output 同时关联 Gate conversation 与 Handoff，Web Gate 历史直接展示领域回复，不强制改投 Web，也不需要 Gate 再调用模型改写一遍。
 
-`assess_input` 表示已研判输入；Handoff 的 `submitted / accepted / working / waiting / completed / failed` 表示交办进展；Output 的投递状态表示送达事实。这三者独立，不能从“已经接纳”推断业务完成或送达。Task / Routine 仍须报告自己的生命周期。
+Input 回执表示已投递给 Gate；Handoff 的 `submitted / accepted / working / waiting / completed / failed` 表示交办进展；Output 的投递状态表示送达事实。这三者独立，不能从“已经接纳”推断业务完成或送达。Task / Routine 仍须报告自己的生命周期。
 
 普通 Output 和报告不会唤醒 Gate。只有 `report_handoff(coordinate=true)` 产生一次幂等的协调 Input；协调通知不是新的 Me 授权，不能通过 delegate / followup 自动递归交办。Gate 不循环等待工作完成。
 

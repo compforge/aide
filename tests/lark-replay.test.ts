@@ -106,9 +106,9 @@ test("Collection follows pages, keeps context separate and records gaps without 
 
 test("Replay allowlist excludes shell, tool discovery, work writes and delivery tools", () => {
   let active: string[] = [];
-  restrictSession({ getAllTools: () => ["bash", "read", "write", "upsert_work", "append_input", "tool_search", "say", "assess_input", "group_topics", "read_chat_messages"].map(name => ({ name })),
+  restrictSession({ getAllTools: () => ["bash", "read", "write", "upsert_work", "append_input", "tool_search", "say", "group_topics", "read_chat_messages"].map(name => ({ name })),
     setActiveToolsByName(names: string[]) { active = names; } } as unknown as AgentSession);
-  assert.deepEqual(active, ["say", "assess_input", "group_topics", "read_chat_messages"]);
+  assert.deepEqual(active, ["say", "group_topics", "read_chat_messages"]);
 });
 
 test("Malformed discovery references are rejected before replay", () => {

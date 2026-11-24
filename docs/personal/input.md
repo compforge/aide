@@ -6,7 +6,7 @@
 
 Input 保存收到的内容及来源证据，各组件在同一资源上留下自己的处理进展。它使一条信息从接收到路由、研判和办理的过程可追溯。值得持续保留的事项认识由 [Note](note.md) 整合，再按其价值提炼长期认识或调整主题结构；原始内容仍由 Input 保存。认知沉淀与行动的关系见 [Personal](README.md#从-input-到认识与成果)。
 
-`status.topic` 保存唯一的当前 Topic 归属，引用固定 UID。`status.route` 只保存首次路由处理记录；spec 中的 topicId / topicKey 保存入站定位信息。Chief 在树内移动 Input 时更新当前归属和迁移原因，保留原始事实与 route / assess / handle 回执；已接纳但尚未完成研判的 Input 先完成处理再迁移。内容查询使用 status.topic；自动待办查询使用 status.assess.topic。
+`status.topic` 保存唯一的当前 Topic 归属，引用固定 UID。`status.route` 只保存首次路由处理记录；spec 中的 topicId / topicKey 保存入站定位信息。Chief 在树内移动 Input 时更新当前归属和迁移原因，保留原始事实与 route / assess / handle 回执；已接纳的 Input 在确认投递后可以迁移。内容查询使用 status.topic；自动待办查询使用 status.assess.topic。
 
 ## CRD
 
@@ -45,15 +45,15 @@ Chief 可从这些证据维护 Note 的相关人物；Topic 的近期人物继�
 
 | 条件 | 含义与维护者 |
 | --- | --- |
-| Assessed | Chief 的研判完成回执已提交 |
-| HandlingComplete | 未完成研判时为 Unknown；研判后全部办理义务结束时为 True，成功与否仍读取各回执 |
-| NeedsAttention | 未完成的研判或办理存在需核对的执行异常 |
+| Delivered | 运行时已记录材料进入 Chief 上下文 |
+| HandlingComplete | 投递前为 Unknown；投递后全部办理义务结束时为 True，成功与否仍读取各回执 |
+| NeedsAttention | 投递或办理存在需核对的执行异常 |
 
 处理回执构造函数将这些条件与事实一起提交，通用规则见 [Conditions](../plugin/resource.md#conditions-契约)。
 
 ## 处理组件的协作
 
-Input Reconcile 负责确定研判分派、投影 Batch 结果和解析保留策略；Secretary Reconcile 整理待办，两者都不启动 Agent；Route、Topic、Task、Routine 的 Reconciler 观察并处理属于自己的阶段。Agent 通过各角色工具提交判断。
+Input Reconcile 负责确定投递归属、投影 Batch 回执和解析保留策略；Secretary Reconcile 整理待办，两者都不启动 Agent；Route、Topic、Task、Routine 的 Reconciler 观察并处理属于自己的阶段。Agent 通过各角色工具提交判断。
 
 ### 内容、身份与调度
 
@@ -67,21 +67,21 @@ Immediate 在 Chief 空闲时启动处理，运行中通过 steer 加入；Norma
 
 Normal、Immediate、内部维护和显式 handoff 保持独立 Input。Batch 的执行事实先保存在自身 status，Input Reconcile 再将终态投影到成员 assess；Chief 不逐条领取和确认成员。批次准备、并发接纳与保留规则见 [Batch](batch.md)。
 
-### 路由、研判与办理
+### 路由、投递与办理
 
 | status 阶段 | 写入者与完成条件 |
 | --- | --- |
 | route | Route 的规则或 route_input 保存完整去向与理由；内置 Input 在创建时直接写入待处理 Topic |
-| assess | Topic Reconcile 原子记录 Chief 接纳；Chief 用 assess_input 确认 Input 的唯一研判 |
+| assess | Topic Reconcile 接纳材料。运行时确认材料进入 Chief 上下文后持久化投递时间和 executionId |
 | handle[Work UID] | Work 应用请求，再用 report_task / report_routine 确认办理 |
 
-route_input 在同一事务写入 route 结果和一条空 assess；assess_input 保存 Chief 的研判回执。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 只有一个当前材料 Topic 和一个研判负责人，保存一份研判；多个 Work 仍按各自 UID 独立确认。
+### 投递与办理
 
-未完成可能是尚未接纳、运行或等待重试。Chief Reconciler 成功写入 Input／Batch 的终态结果即完成该项处理，Agent 调用结束不代替结果。执行失败、中断或结果写入失败时，释放执行占用并记录 lastError/errorAt、retryable；按角色 trigger.intervalSeconds 等待后重新处理原条目。已持久化的终态结果不被后续执行错误覆盖。周期性维护在上一条完成后新建 Input。Route 与 Work 的恢复仍遵循各自契约。
+首次 prompt 可以携带多条独立 Input。steer 和 followUp 先进入 Pi 队列。运行时按本次 execution 的消息标识确认材料已进入 Chief 上下文，在同一事务中更新投递回执和 Topic 工作量。一个 Batch 按一项计数，成员从 Batch 投影回执。回执写入后即可出队，来源材料与工具权限在当前 execution 内继续有效。
 
-### 研判与办理
+Input 生成时记录原文和来源。是否需要答复、行动或继续跟进，由 Chief 收到材料后结合内容与上下文判断。同一个 Batch 里，有的材料读过即可，有的可能需要稍后回应。因此，调度以材料进入 Chief 上下文为处理完成的依据。需要 Chief 持续跟进的事项由 Ongoing 承载，实际答复由 Output 记录。
 
-Chief 可以直接处理、创建或删除工作。将现有 Input 交给已有 Task 或 Routine 时，通过 append_input 的 input.id 指定原始材料 并建立 handle，原始事实只保存一份。一个 Input 只有一条研判完成记录，可以交给多个 Task / Routine 办理；每个受托 Work 按 UID 拥有自己的记录。Chief 留给自己跟进的 Ongoing 由它直接更新，来源 Input 单独完成研判。并发 assess_input 只有一个完成事务成功，后续调用返回已有完成事实，保留首次提交的摘要。
+Chief 按需维护 Note、创建或更新 Work、回复或询问。通过 append_input 的 input.id 将原材料交给 Task 或 Routine 时，handle 按每个受托 Work 的 UID 独立记录办理进展。Ongoing 由 Chief 跟进。Output 保存沟通意图和送达情况。
 
 request 支持 context、update、pause、resume、answer；交接说明 note 与原文分开保存，update 的 changes 包含 title、instruction、trigger。Source 观察只能提供 context，不能作为控制授权。已有 handle 的请求不可替换；后来的独立请求必须有新 Input 身份。
 
@@ -97,11 +97,9 @@ Input 由 Route 确定初始 Topic，Chief 可在树内调整当前归属。明�
 
 root Chief 直接通过 `assessReadyAttention` 按 status.assess.topic、来源优先级与 attention 分页查询未接纳待办，不遍历责任树。`status.topic` 仍供材料检索、归集和容量判断；`assessPending` 保留直属材料待办索引，`assignedPending` 查询分派给某个 Chief 的待办；两者均排除完成和失败终态。
 
-独立 Input 的初始 prompt、steer 和 followUp 在发送前，用同一资源事务检查当前 Topic 的版本与 execution，并写入 `Input.status.assess.executionId`、`startedAt`。executionId 指向实际 Chief 执行，不是接收 Reconcile 的执行。竞争失败者重读后忽略已接纳的 Input；初始批次有冲突时整批回滚，下一轮重新选择剩余 Input 并生成 prompt。接纳之后仍可被其它 Topic 的 Chief 主动读取为材料，但不会再次自动提交。Deferred 归组前不占接纳标记，主动读取也不占标记；独立研判完成会阻止随后归组。归组后只由 Batch 接纳和完成，成员不能独立研判。
+独立 Input 的初始 prompt、steer 和 followUp 在发送前，用同一资源事务检查当前 Topic 的版本与 execution，并写入 `Input.status.assess.executionId`、`startedAt`。executionId 指向实际 Chief 执行，不是接收 Reconcile 的执行。竞争失败者重读后忽略已接纳的 Input；初始批次有冲突时整批回滚，下一轮重新选择剩余 Input 并生成 prompt。接纳之后仍可被其它 Topic 的 Chief 主动读取为材料，但不会再次自动提交。Deferred 归组前不占接纳标记，主动读取也不占标记。归组后只由 Batch 接纳和完成，成员通过 Batch 获得投递回执。
 
-明确未接收的 steer / followUp 可以撤回本次接纳。超时或断连仍保留当前执行占用和可重试错误，避免在同一执行内重复投递；执行结束或重启恢复时，按 `assessExecution` 找到未完成 Input 并释放占用。Batch 使用自己的 execution 索引执行同样恢复，固定成员不变。接纳与外部调用不是同一事务，允许未完成条目重试；完成依据是持久化终态结果。
-
-原生会话引用 `agent` 用于观测，运行中去重依赖 executionId，跨执行完成去重依赖终态结果。`completedBy` 记录成功确认完成的工具调用；失败终态不接受后续执行补写完成回执。Web / Lark 展示优先关联完成工具的 executionId，未记录完成工具时才回退到接纳 executionId。接纳、研判完成、Work 完成和 Output 送达是独立事实。版本边界见 [Resource](../plugin/resource.md#api-版本与演进)。
+投递明确失败时，原条目按 Topic 的 trigger 间隔重试。Batch 冷却期间其他就绪 Batch 可以先行。已投递的条目保留首次时间，后续 provider 异常只影响 execution。重启恢复先核对资源回执和原生会话中的投递标识。已派发且缺少确认依据的条目保留结果未知的错误记录，供核查。
 
 `tests/input-admission.test.ts` 覆盖跨 root 竞争、初始 prompt 与 followUp 竞争、批次重选、明确拒绝、未知结果保留、重启恢复和归组后按树查询材料。
 
@@ -113,15 +111,15 @@ root Chief 直接通过 `assessReadyAttention` 按 status.assess.topic、来源�
 
 ### 查询、保留与展示
 
-待办事实保存在 Input.status。Definition.indexes 为 routePending、topic / assessPending / assignedPending / assessReadyAttention / assessExecution、handle / handlePending 提供按阶段和资源 UID 的查询，消费方按索引读取。索引与资源更新在同一事务提交，机制见 [Resource](../plugin/resource.md#索引)。
+待办事实保存在 Input.status。Definition.indexes 为 routePending、topic / assessPending / assignedPending / deliveryExecution、handle / handlePending 提供按阶段和资源 UID 的查询，消费方按索引读取。索引与资源更新在同一事务提交，机制见 [Resource](../plugin/resource.md#索引)。
 
-全部阶段完成后 Input 才可进入容量回收候选；Source 的未提交引用仍可保护它。目标删除明确取消剩余阶段。处理痕迹随 Input 保留，入站去重回执有独立的有界窗口；窗口内重投不会让已回收输入重新执行。用户核对后重新交办是新的 Input。
+全部阶段完成且当前 Chief 执行释放后，Input 才可进入容量回收候选；Source 的未提交引用仍可保护它。目标删除明确取消剩余阶段。处理痕迹随 Input 保留，入站去重回执有独立的有界窗口；窗口内重投不会让已回收输入重新执行。用户核对后重新交办是新的 Input。
 
 InputPrinter 同步处理资源快照，describe 保留正文、来源、人物关系与 observation，summarize 生成有界单行预览。Web 和 Agent 读取同一事实表达，打印不会查询外部上下文或调用模型。全文按需分页读取，预览预算不等于模型上下文窗口。
 
 ### Web 检索与处理 Timeline
 
-Web 的 Inputs 页查询 Personal 全局 v1 目录中的保留输入，包括尚未路由和静默处理的输入。Connector 从已持久化的来源地址或观察事实识别，来源类型使用 origin / originId，具体观察源使用 originRef 的 UID；删除或停用 Source 不会抹去已有输入的来源选项。正文检索、状态条件与来源条件均在分页前应用。Chief 研判失败展示为独立的 failed 状态，不属于 pending 或 completed；详情保留原始错误，不再提示等待研判完成。
+Web 的 Inputs 页查询 Personal 全局 v1 目录中的保留输入，包括尚未路由和静默处理的输入。Connector 从已持久化的来源地址或观察事实识别，来源类型使用 origin / originId，具体观察源使用 originRef 的 UID；删除或停用 Source 不会抹去已有输入的来源选项。正文检索、状态条件与来源条件均在分页前应用。Chief 投递失败展示为独立的 failed 状态，不属于 pending 或 completed；详情保留原始错误，保留投递失败的原因。
 
 处理 Timeline 读取同一 Input 的 route / assess / handle。分派、最近记录的执行开始、请求应用、完成回执分别展示；目标实例不存在时保留记录但不链接同名新实例。处理完成要求 route 和所有已分派消费者都完成，不以 Output、原生执行结束或 Work 的当前状态代替。
 
@@ -131,7 +129,7 @@ Output 只在其 inputIds 显式包含当前 Input 时关联，不按相邻顺�
 
 ## 验证
 
-`tests/route.test.ts` 覆盖原子分派与重试；`tests/input-assessment.test.ts` 覆盖研判、办理交接和释放；`tests/work-context.test.ts` 覆盖精确确认与事务回滚；`tests/topic-intake.test.ts` 覆盖接收与重投。
+`tests/route.test.ts` 覆盖原子分派与重试；`tests/input-assessment.test.ts` 覆盖投递、办理交接和释放；`tests/work-context.test.ts` 覆盖精确确认与事务回滚；`tests/topic-intake.test.ts` 覆盖接收与重投。
 
 `tests/input-browse.test.ts` 覆盖筛选后分页、来源选项、稳定排序、消费回执终态、独立 Work 消费者、已删除目标、明确 Output 关联及 HTTP 页面与查询。
 
