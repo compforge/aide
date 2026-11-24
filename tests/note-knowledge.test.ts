@@ -561,7 +561,8 @@ test("a time-only Ongoing check can complete silently and does not repeat the co
 test("curating or retiring evidence leaves its Ongoing open; updated plans fence stale writes", async t => {
   const f = await setup(t);
   const checkAt = new Date(Date.now() + 72 * 3_600_000).toISOString();
-  const matter = await upsertOngoing(f.resources, f.read(), { title: "Release approval", checkAt }, "release");
+  const question = "Has the release been approved?";
+  const matter = await upsertOngoing(f.resources, f.read(), { title: "Release approval", question, checkAt }, "release");
   const evidence = await f.note({ nature: "semantic", text: "Initial release evidence" }, "evidence");
   const { retireNote } = await import("../plugins/personal/note/service.ts");
   await retireNote(f.resources, f.read(), { ...evidence, reason: "Duplicate evidence" }, "aide:curate");
@@ -569,6 +570,7 @@ test("curating or retiring evidence leaves its Ongoing open; updated plans fence
   assert.equal((await read()).metadata.resourceVersion, matter.version);
   const paused = await upsertOngoing(f.resources, f.read(), { ongoingId: matter.id, version: matter.version, checkAt: null }, "wait");
   assert.equal(paused.checkAt, undefined);
+  assert.equal(paused.question, question);
   assert.equal(await prepareOngoingCheck(f.context, await read(), topicPolicy()), undefined);
   await assert.rejects(upsertOngoing(f.resources, f.read(), { ongoingId: matter.id, version: matter.version, outcome: "stale" }, "late"), /version/);
   const other = await f.aide.topics.ensure("other-domain");

@@ -48,7 +48,7 @@ export async function upsertOngoing(resources: ResourceClient, actor: TopicResou
   if (args.outcome && (args.checkAt || args.question)) throw new Error("Close or schedule Ongoing separately");
   const checkAt = args.outcome || args.checkAt === null ? undefined : args.checkAt ?? matter.spec.checkAt;
   if (args.question && !checkAt) throw new Error("Set checkAt to schedule this question");
-  const question = !checkAt || args.question === null ? undefined : args.question ?? matter.spec.question;
+  const question = args.outcome || args.question === null ? undefined : args.question ?? matter.spec.question;
   const revised = checkAt !== matter.spec.checkAt || question !== matter.spec.question;
   const spec = { topic: matter.spec.topic, title: args.title ?? matter.spec.title, ...(checkAt ? { checkAt } : {}), ...(question ? { question } : {}) };
   const status = { ...matter.status, writer, updatedAt, ...(args.progress ? { progress: args.progress } : {}),
