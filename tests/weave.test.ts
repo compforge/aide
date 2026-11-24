@@ -90,7 +90,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
     await reconcileChief(f.context, rootExecution, f.refresh(b));
     await assessInput(f.resources, f.refresh(a), "old-chief", { inputId: "first", summary: "Old Chief finished naturally" });
     const current = f.refresh(a);
-    await upsertTopicNote(f.resources, current, "old-chief", { summaryOf: resourceRef(current), version: contentVersion(current), text: "Late finding" }, "summary", 4000, "aide:curate");
+    await upsertTopicNote(f.resources, current, "old-chief", { summaryOf: resourceRef(current), version: contentVersion(current), text: "Late finding" }, "summary", 4000, "aide:summary");
     const afterSummary = f.refresh(a);
     await upsertTopicNote(f.resources, afterSummary, "old-chief", { version: afterSummary.metadata.resourceVersion, text: "Late progress from the draining Chief" }, "late-note");
     return { state: "success", value: { result: { stopReason: "end_turn" } } };

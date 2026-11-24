@@ -20,7 +20,7 @@ export const NoteUpdateSchema = z.object({ version: z.string().min(1).optional()
   .refine(a => [a.name, a.text, a.people, a.addresses, a.sensitivity, a.visibility, a.nature, a.closedAt, a.followup, a.maxChars].some(v => v !== undefined), "Supply Note content or classification");
 export type NoteUpdate = z.infer<typeof NoteUpdateSchema>;
 export function requireSummaryOrigin(origin: InputOrigin, kind: string) {
-  if (origin === "aide:curate" && ["Topic", "Person", "Address"].includes(kind) || origin === "aide:organize" && kind === "Topic") return;
+  if (origin === "aide:summary" && ["Topic", "Person", "Address"].includes(kind)) return;
   throw new Error("Summary Note is read-only for this Input");
 }
 

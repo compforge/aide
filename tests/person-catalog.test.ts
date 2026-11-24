@@ -68,7 +68,7 @@ test("Chief Note edits guard shared summary versions while Input retention remai
   const resources = f.aide.runtime.plugins.resourceClient("personal");
   const actor = await resources.patchStatus(await f.aide.topics.ensure("curation"), { execution: { id: "curate", startedAt: new Date().toISOString() } });
   const update = (version: string, text: string) => upsertTopicNote(resources, actor, "curate", {
-    noteId: edited.summaryNote!.id, version, text }, "edit", 4000, "aide:curate");
+    noteId: edited.summaryNote!.id, version, text }, "edit", 4000, "aide:summary");
   await assert.rejects(update("stale", "stale"), /version conflict/);
   await update(edited.summaryNote!.version, edited.summaryText + "明确表达：关注机器人的可靠性。");
   const current = (await f.aide.persons.findIdentity(LOCAL_ME))!;

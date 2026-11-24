@@ -14,7 +14,7 @@ export enum InputAttention {
   Deferred = "deferred",
 }
 
-export const INPUT_ORIGINS = ["channel", "source", "chief", "aide:curate", "aide:followup", "aide:organize"] as const;
+export const INPUT_ORIGINS = ["channel", "source", "chief", "aide:curate", "aide:followup", "aide:organize", "aide:summary"] as const;
 export type InputOrigin = typeof INPUT_ORIGINS[number];
 export const isInternalInput = (input: Pick<InputSpec, "origin">): boolean =>
   input.origin.startsWith("aide:");

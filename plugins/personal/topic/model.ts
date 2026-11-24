@@ -26,6 +26,7 @@ export interface TopicStatus extends ResourceContext {
   /** Secretary retains request identity and no-progress backoff independently of Input retention. */
   maintenanceRequests?: Partial<Record<"aide:curate" | "aide:followup" | "aide:organize", { checkedAt: string; inputId: string; fingerprint: string; attempts: number }>>;
   yieldToInput?: boolean;
+  summaryCheckAt?: string;
   reviewCheckedAt?: string | null;
   idleReviewCount?: number;
   idleReviewReset?: { at: string; previousCount: number } | null;

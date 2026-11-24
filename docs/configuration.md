@@ -411,7 +411,7 @@ plugins:
 
 Topic 阈值按直接归属判断，由空闲 Chief 决定如何整理；Weave 的 maxRoots 统计普通 root，Default 单独兜底，允许无合理归并方案时超标。超过目标时，未变化但已检查的 root 在 reviewIntervalMs 后重查；独立子树有 15 分钟观察期。来源 topicKey 仍保留确定性定位语义。长期设计见 [Topic](personal/topic.md)。
 
-Topic 容量阈值：maxUnfiledInput 默认 40，统计直属无 topicKey 的业务 Input（包含已研判），maxChildren 默认 8，maxWork 保持默认 8。maxInput 保留配置但暂不参与策略。每个 Topic 超限时通过 aide:organize Input 请求 root；每种请求去重，完成后按 capacityCooldownSeconds 冷却。静默回顾使用 aide:curate，独立遵循 review.backoff。详见 [Topic 内置请求](personal/secretary.md#容量与维护请求)。
+Topic 容量阈值：maxUnfiledInput 默认 40，统计直属无 topicKey 的业务 Input（包含已研判），maxChildren 默认 8，maxWork 保持默认 8。maxInput 保留配置但暂不参与策略。每个 Topic 超限时通过 aide:organize Input 请求 root；每种请求去重，完成后按 capacityCooldownSeconds 冷却。静默回顾使用 aide:curate，独立遵循 review.backoff。aide:summary 每 15 分钟检查一次，忙时跳过，独立于 review.backoff。详见 [Topic 内置请求](personal/secretary.md#容量与维护请求)。
 
 ### Gate
 

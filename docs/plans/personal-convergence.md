@@ -50,7 +50,7 @@ Controller 决定本轮实际展示的有界候选，记录 UID 与认识版本�
 
 ## 3. root Chief 按需维护子树认识
 
-Chief 在 curate 或 organize 处理期间读取相关 Note，只有内容或职责范围有变化时才修订 Summary。Secretary 依据 Note、工作量和结构通知安排维护。
+Chief 在 curate 中整理普通 Note，在 organize 中调整材料归属，在 summary 中复核所选对象的长期认识。Secretary 每 15 分钟检查该 Chief 的执行和队列，空闲时递交摘要复核。
 
 回收知识仍处于当前版本的叶子，需要显式释放许可。摘要修订和维护回执不刷新业务活动时间。
 

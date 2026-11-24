@@ -8,7 +8,7 @@ Aide 是小型、自托管的 personal agent，将持续到来的信息转化为
 
 Aide 是多角色并行系统：Input 经多个角色转换、加工和处理，贡献到 Output 或 Note 中。角色的本质是 Reconciler；Agent 为角色提供智能化执行能力，对外属于 Reconciler 的内部细节。角色通过资源事实协作，完成以持久化结果为准。
 
-典型流转是：Channel／Source 形成 Input → Route 确定 Topic 归属 → Chief 接纳并处理。Deferred 分支先由 [Secretary](docs/personal/secretary.md) 整理成 Batch，再交给 Chief；Secretary 生成的内部维护 Input 直接绑定目标 Topic。aide:curate 按批梳理新增或改动的普通 Note，归类、去重，按需修订长期 Summary；aide:organize 整理 Topic 树及材料归属，可拆分或移动 Note，并按新位置修订 Topic Summary；aide:followup 跟进需要回应的事项，当前根据已有证据核实开放 episodic Note 上约定的问题，仍无法判断时私下询问 Me。Chief 可以直接更新 Note、产生 Output，也可以通过 Input 的 Work 请求交给 Task／Routine 持续办理；这些角色产生的 Output 再进入披露与投递流程。一条 Input 可以贡献到多个产物，多条 Input 也可以共同形成一个 Note 或 Output。
+典型流转是：Channel／Source 形成 Input → Route 确定 Topic 归属 → Chief 接纳并处理。Deferred 分支先由 [Secretary](docs/personal/secretary.md) 整理成 Batch，再交给 Chief；Secretary 生成的内部维护 Input 直接绑定目标 Topic。aide:curate 按批梳理新增或改动的普通 Note，归类、去重；aide:organize 整理 Topic 树及材料归属，可拆分或移动普通 Note；aide:summary 在 Chief 空闲时复核一个 Topic、Person 或 Address 的默认认识；aide:followup 跟进需要回应的事项，当前根据已有证据核实开放 episodic Note 上约定的问题，仍无法判断时私下询问 Me。Chief 可以直接更新 Note、产生 Output，也可以通过 Input 的 Work 请求交给 Task／Routine 持续办理；这些角色产生的 Output 再进入披露与投递流程。一条 Input 可以贡献到多个产物，多条 Input 也可以共同形成一个 Note 或 Output。
 
 Gate 承接 Me 的全局输入并按需交办领域 Chief；Weave 调整 Topic 之间的组织关系，影响后续处理归属。各角色并行协调自身资源，按分支参与处理；Input 的 route／assess／handle 分别保留路由、研判和办理事实，处理完成、工作目标达成与 Output 送达各有自己的回执。
 

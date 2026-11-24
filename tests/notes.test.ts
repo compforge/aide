@@ -86,16 +86,16 @@ test("summary edits survive scheduling and Note changes, but reject concurrent c
   const f = await setup(t), original = f.read(), version = contentVersion(original);
   await f.resources.patchStatus(original, { reviewCheckedAt: new Date().toISOString(), idleReviewCount: 2 });
   await f.upsert({ text: "Recent evidence" }, "evidence");
-  const result = await upsertTopicNote(f.resources, original, "live", { summaryOf: resourceRef(original), version, text: "Durable correction" }, "summary", 4000, "aide:curate");
+  const result = await upsertTopicNote(f.resources, original, "live", { summaryOf: resourceRef(original), version, text: "Durable correction" }, "summary", 4000, "aide:summary");
   assert.equal(result.version, f.read().status.summaryRevision); assert.equal(f.read().status.idleReviewCount, 2);
   assert.equal(f.recent().length, 1);
-  await assert.rejects(upsertTopicNote(f.resources, original, "live", { summaryOf: resourceRef(original), version, text: "old interpretation" }, "summary", 4000, "aide:curate"), /version conflict/);
+  await assert.rejects(upsertTopicNote(f.resources, original, "live", { summaryOf: resourceRef(original), version, text: "old interpretation" }, "summary", 4000, "aide:summary"), /version conflict/);
   const current = f.read();
   const race: ResourceClient = { ...f.resources, async commit(writes) {
     await patchSummary(f.resources, current, { summary: "Concurrent user correction" });
     return f.resources.commit(writes);
   } };
-  await assert.rejects(upsertTopicNote(race, current, "live", { summaryOf: resourceRef(current), version: contentVersion(current), text: "overwrite" }, "summary", 4000, "aide:curate"), /Test operation failed/);
+  await assert.rejects(upsertTopicNote(race, current, "live", { summaryOf: resourceRef(current), version: contentVersion(current), text: "overwrite" }, "summary", 4000, "aide:summary"), /Test operation failed/);
   assert.equal(summaryText(f.aide.topics.resources, f.read()), "Concurrent user correction");
 });
 test("content writes validate execution and intermediate Topic ownership inside the transaction", async t => {
@@ -107,7 +107,7 @@ test("content writes validate execution and intermediate Topic ownership inside 
     await f.resources.replace(middle, { ...middle.spec, parentRef: resourceRef(other) }, middle.status);
     return f.resources.commit(writes);
   } };
-  await assert.rejects(upsertTopicNote(race, f.root, "live", { summaryOf: resourceRef(leaf), version: contentVersion(leaf), text: "outside" }, "summary", 4000, "aide:curate"), /outside/);
+  await assert.rejects(upsertTopicNote(race, f.root, "live", { summaryOf: resourceRef(leaf), version: contentVersion(leaf), text: "outside" }, "summary", 4000, "aide:summary"), /outside/);
   const switchExecution: ResourceClient = { ...f.resources, async create(type, init) {
     await f.resources.patchStatus(f.root, { execution: { id: "new", startedAt: new Date().toISOString() } });
     return f.resources.create(type, init);
@@ -212,9 +212,9 @@ test("summary response version identifies its committed content, not a later con
     await patchSummary(f.resources, f.read(), { summary: "Later correction" });
     return written;
   } };
-  const result = await upsertTopicNote(race, initial, "live", { summaryOf: resourceRef(initial), version: contentVersion(initial), text: "My synthesis" }, "summary", 4000, "aide:curate");
+  const result = await upsertTopicNote(race, initial, "live", { summaryOf: resourceRef(initial), version: contentVersion(initial), text: "My synthesis" }, "summary", 4000, "aide:summary");
   assert.equal(result.version, committedVersion);
-  await assert.rejects(upsertTopicNote(f.resources, initial, "live", { summaryOf: resourceRef(initial), version: result.version, text: "Would overwrite unseen correction" }, "summary", 4000, "aide:curate"), /version conflict/);
+  await assert.rejects(upsertTopicNote(f.resources, initial, "live", { summaryOf: resourceRef(initial), version: result.version, text: "Would overwrite unseen correction" }, "summary", 4000, "aide:summary"), /version conflict/);
 });
 
 

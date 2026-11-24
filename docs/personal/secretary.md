@@ -20,7 +20,13 @@ Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为
 
 ## Note 维护
 
-Secretary 合并领域内的梳理需求，并为 episodic Note 的具体问题按约定时间生成 followup。curate 负责从普通 Note 到 Summary 的整理；followup 只核实未决问题，必要时私下询问 Me。[Note 生命周期](note.md#梳理与跟进)
+Secretary 合并领域内的梳理需求，并为 episodic Note 的具体问题按约定时间生成 followup。curate 整理普通 Note；followup 只核实未决问题，必要时私下询问 Me。[Note 生命周期](note.md#梳理与跟进)
+
+### 摘要复核
+
+Secretary 每到整刻钟检查一次，从已有 Summary 或相关普通 Note 的 Topic、Person 和 Address 中选择最久未复核的对象，未复核对象优先。Topic 的责任 root 承接检查；Person 与 Address 由 default Chief 承接。只有该 Chief 当前没有执行、没有排队的 Input 或 Batch，才递交一条 `aide:summary`。忙就跳过当轮，下一个整刻钟照常检查。时钟保存在 Gate，重启只检查当前一轮。
+
+Chief 完成 Input 时同时记录对象的 `summaryReviewedAt`，即使正文保持原样也算完成。Summary 的内容版本只随内容变化。判断标准见 [Note](note.md#事项归位与提炼回顾)。
 
 ## Reconciler
 
@@ -44,7 +50,7 @@ Secretary 合并领域内的梳理需求，并为 episodic Note 的具体问题�
 | --- | --- |
 | aide:organize | 任一直属容量超限时，汇总 Input、Work、child 的计数与样本。所有超限都消失后可取消尚未接纳的议程 |
 | aide:followup | 跟进需要回应的事项；当前按开放 episodic Note 的问题与核实时间调度 |
-| aide:curate | 普通 Note 的改动达到批量或等待上限，或工作量、子摘要、结构与预算变化需要梳理；核对证据并维护近期事项与长期认识 |
+| aide:curate | 普通 Note 的改动达到批量或等待上限，或工作量、子摘要、结构与预算变化需要梳理；核对证据并整理普通 Note |
 
 内置请求复用 Input，status.topic 指向目标节点，未领取时 status.assess.topic 收敛到当前 root，领取后保留实际负责人。origin 决定 Chief 的工具与处理路径，text 描述任务。Secretary 统一准备 Curate／Followup／Organize，每个节点、每种 origin 最多一条未完成请求；可重试失败仍处理原 Input。创建与请求记账原子提交，结果与完成水位原子提交，无需二次结算。`maintenanceRequests` 保留请求身份、时间、需求指纹与尝试次数；同一需求从 `capacityCooldownSeconds`（默认 60 秒）指数退避到 2 小时（基础冷却更长时保留基础冷却），新需求重新安排。已完成 Input 回收后仍可从 Topic 保留的事实继续调度。
 

@@ -69,19 +69,19 @@ test("Chief Note writes honor the selected Input for new and existing summaries"
   const write = (origin: import("../plugins/personal/input/model.ts").InputOrigin, args: unknown) =>
     upsertTopicNote(f.resources, f.read(), "live", args, "call", 4000, origin);
   const create = { summaryOf: resourceRef(f.read()), text: "Verified scope" };
-  for (const origin of ["channel", "chief", "source", "aide:followup"] as const)
+  for (const origin of ["channel", "chief", "source", "aide:followup", "aide:curate", "aide:organize"] as const)
     await assert.rejects(write(origin, create), /read-only/);
-  const summary = await write("aide:organize", create);
-  for (const origin of ["channel", "chief", "source", "aide:followup"] as const)
+  const summary = await write("aide:summary", create);
+  for (const origin of ["channel", "chief", "source", "aide:followup", "aide:curate", "aide:organize"] as const)
     await assert.rejects(write(origin, { noteId: summary.noteId, version: summary.version, text: "temporary claim" }), /read-only/);
   assert.equal((await readNote(f.resources, summary.noteId)).text, create.text);
-  const edited = await write("aide:curate", { noteId: summary.noteId, version: summary.version, text: "" });
+  const edited = await write("aide:summary", { noteId: summary.noteId, version: summary.version, text: "" });
   assert.equal(edited.uid, summary.uid);
   assert.equal((await readNote(f.resources, summary.noteId)).text, "");
   const person = await f.aide.persons.observe({ provider: "test", scope: "knowledge", id: "operator" });
   const personal = { summaryOf: resourceRef(person), text: "Verified role" };
   await assert.rejects(write("aide:organize", personal), /read-only/);
-  const profile = await write("aide:curate", personal);
+  const profile = await write("aide:summary", personal);
   await assert.rejects(write("aide:organize", { noteId: profile.noteId, version: profile.version, text: "New role" }), /read-only/);
 });
 
@@ -124,9 +124,9 @@ test("organize splits a mixed Note across Topics through its admitted tools", as
 
 test("splitting and retiring a Summary preserve role, historical citations and the replacement identity", async t => {
   const f = await setup(t);
-  const create = (text: string) => upsertTopicNote(f.resources, f.read(), "live", { summaryOf: resourceRef(f.read()), text }, "summary", 4000, "aide:curate");
+  const create = (text: string) => upsertTopicNote(f.resources, f.read(), "live", { summaryOf: resourceRef(f.read()), text }, "summary", 4000, "aide:summary");
   const run = (name: string, args: Record<string, unknown>) =>
-    topicTools(f.aide.personal.store, f.read, log, () => "aide:curate").find(t => t.name === name)!.execute("call", args, undefined, undefined, {} as never);
+    topicTools(f.aide.personal.store, f.read, log, () => "aide:summary").find(t => t.name === name)!.execute("call", args, undefined, undefined, {} as never);
   const original = await create("Long-lived scope. A temporary responsibility.");
   await run("split_note", { noteId: original.noteId, version: original.version, text: "Long-lived scope.", reason: "Track the temporary assignment separately",
     parts: [{ text: "A temporary responsibility.", nature: "episodic" }] });
@@ -322,7 +322,7 @@ test("Note nature and maxChars are optional metadata; budgets are soft for ordin
   assert.equal(updated.overBudget, true); assert.equal(updated.chars, 600);
   const latest = await readNote(f.resources, created.noteId);
   assert.equal(latest.text, note.text); assert.equal(latest.maxChars, 256);
-  await upsertTopicNote(f.resources, f.read(), "live", { summaryOf: resourceRef(f.read()), text: "长".repeat(600), nature: "semantic", maxChars: 256, version: contentVersion(f.read()) }, "summary", 256, "aide:curate");
+  await upsertTopicNote(f.resources, f.read(), "live", { summaryOf: resourceRef(f.read()), text: "长".repeat(600), nature: "semantic", maxChars: 256, version: contentVersion(f.read()) }, "summary", 256, "aide:summary");
   const summary = (await listNotes(f.resources, { subject: f.root.metadata.uid })).items.find(n => n.summaryOf)!;
   assert.equal(summary.maxChars, 256); assert.equal(summary.nature, "semantic");
   assert.equal((await readNote(f.resources, summary.id)).text.length, 600);

@@ -15,7 +15,7 @@ type MaintenanceOrigin = "aide:curate" | "aide:followup" | "aide:organize";
 
 const maintenanceTask: Record<MaintenanceOrigin, string> = {
   "aide:organize": "Organize the Topic tree and file Inputs, Work and Notes within its scope. Recheck all direct capacity limits. Preserve processing receipts when filing material.",
-  "aide:curate": "Curate ordinary Notes and durable understanding. Classify and consolidate related material, verify closure, and correct summaries only where warranted.",
+  "aide:curate": "Curate ordinary Notes and durable understanding. Classify and consolidate related material, and verify closure.",
   "aide:followup": "Verify the scheduled question against current evidence and related Work.",
 };
 

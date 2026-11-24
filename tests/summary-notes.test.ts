@@ -119,7 +119,7 @@ test("an existing Note can be selected as summary and edited through the shared 
   ]);
   const selected = f.aide.topics.resource("summary")!;
   assert.equal((await readSummary(f.client, selected))!.metadata.name, entry.noteId);
-  await upsertTopicNote(f.client, selected, "chief", { summaryOf: resourceRef(selected), version: contentVersion(selected), text: note.text, people }, "summary", 16000, "aide:curate");
+  await upsertTopicNote(f.client, selected, "chief", { summaryOf: resourceRef(selected), version: contentVersion(selected), text: note.text, people }, "summary", 16000, "aide:summary");
   const linked = f.aide.topics.resource("summary")!;
   assert.notEqual(summaryVersion(linked), summaryVersion(selected), "people changes invalidate dependent understanding");
   const read = await readNote(f.client, (await readSummary(f.client, linked))!.metadata.uid);
