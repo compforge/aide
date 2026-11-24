@@ -120,7 +120,7 @@ test("Topic deletion reads indexed dependents, not retained history", async t =>
   await f.resources.delete(TOPIC_TYPE, leaf.metadata.name);
   assert.ok((await f.resources.get(resourceRef(leaf)))!.metadata.deletionTimestamp);
   const listed = f.queries.filter(q => q.index);
-  assert.deepEqual(listed.map(q => [q.kind, q.index]), [["Handoff", "activeTopic"], ["Batch", "open"], ["Topic", "parent"], ["Input", "assessPending"], ["Task", "topic"], ["Routine", "topic"], ["Note", "summaryOf"], ["Note", "recentSubject"]]);
+  assert.deepEqual(listed.map(q => [q.kind, q.index]), [["Handoff", "activeTopic"], ["Ongoing", "openTopic"], ["Batch", "open"], ["Topic", "parent"], ["Input", "assessPending"], ["Task", "topic"], ["Routine", "topic"], ["Note", "summaryOf"], ["Note", "recentSubject"]]);
   assert.ok(listed.every(q => q.count === 0));
   assert.ok(!f.queries.some(q => q.uid === parent.metadata.uid));
 });

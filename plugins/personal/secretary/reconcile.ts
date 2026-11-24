@@ -1,5 +1,5 @@
 import { checkSummary } from "./summary.ts";
-import { NOTE_TYPE, followupInputId, type NoteResource } from "../note/model.ts";
+import { ONGOING_TYPE, followupInputId, type OngoingResource } from "../ongoing/model.ts";
 import { topicWatch, materialWatch } from "../topic/watch.ts";
 import { assignmentWatch } from "../input/state.ts";
 import { batchWatch } from "../batch/reconcile.ts";
@@ -48,9 +48,9 @@ async function cancelObsolete(context: PluginContext, topic: TopicResource, poli
       obsolete ||= targets.every(page => !page.items[0]?.status.notePressure);
     }
     if (origin === "aide:followup") {
-      const note = await context.resources.get<NoteResource["spec"], NoteResource["status"]>({
-        ...NOTE_TYPE, namespace: "v1", name: String(input.spec.observation?.noteId) });
-      obsolete = !note || followupInputId(note) !== input.metadata.name;
+      const matter = await context.resources.get<OngoingResource["spec"], OngoingResource["status"]>({
+        ...ONGOING_TYPE, namespace: "v1", name: String(input.spec.observation?.ongoingId) });
+      obsolete = !matter || followupInputId(matter) !== input.metadata.name;
     } else if (origin === "aide:organize") {
       const facts = (await maintenanceAgenda(context.resources, [topic], policy)).topics[0];
       obsolete = !facts;

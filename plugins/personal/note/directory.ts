@@ -10,7 +10,7 @@ const DIRECTORY_COUNT = 40, DIRECTORY_CHARS = 8000;
  * @link docs/personal/note.md
  */
 export function projectNoteDirectory(notes: readonly Note[], options: { total?: number; more?: boolean; query?: Partial<Record<NoteRelation, string>> } = {}) {
-  const candidates = notes.filter(n => !n.summaryOf && !n.retired).map(n => ({ id: n.id, name: noteName(n), ...(n.nameMissing || !n.name ? { nameMissing: true } : {}), nature: n.nature, ...(n.closedAt ? { closedAt: n.closedAt } : {}), updatedAt: n.updatedAt, version: n.version }))
+  const candidates = notes.filter(n => !n.summaryOf && !n.retired).map(n => ({ id: n.id, name: noteName(n), ...(n.nameMissing || !n.name ? { nameMissing: true } : {}), nature: n.nature, updatedAt: n.updatedAt, version: n.version }))
     .sort((a, b) => a.id.localeCompare(b.id));
   const items: typeof candidates = [];
   let chars = 0;

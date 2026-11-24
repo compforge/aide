@@ -16,7 +16,6 @@ import { reportWork } from "../plugins/personal/work/report.ts";
 import { reconcileRoutine } from "../plugins/personal/routine/reconcile.ts";
 import { finalizeExecution } from "../plugins/personal/execution/loop.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
-import { handoff } from "./input-state-fixture.ts";
 const definition = { kind: "routine" as const, title: "Watch", instruction: "Inspect changes", trigger: { cron: null, timezone: "UTC", event: "sample" } };
 const completed = { action: "done" as const, report: "Verified", notification: null, question: null, nextAt: null };
 function setup(t: TestContext) {
@@ -88,15 +87,15 @@ test("Routine silence releases only the agent; events clear idle state and delet
   await aide.event({ id: "wake", topicId: "me",  name: "sample", text: "changed" });
   assert.equal(get(work.id).status.idleSince, null);
   assert.equal(get(work.id).status.agentStoppedAt, null);
-  await aide.work("me").requestInput(work.id, { text: "user context" });
+  await aide.work("me").appendInput(work.id, { text: "user context" });
   await assert.rejects(resources.delete(ROUTINE_TYPE, work.id, "v1", { uid: stale.metadata.uid, resourceVersion: stale.metadata.resourceVersion }), /version conflict/);
   await resources.delete(ROUTINE_TYPE, work.id, "v1");
-  await assert.rejects(aide.work("me").requestInput(work.id, { text: "too late" }), /Unknown work|being deleted/);
+  await assert.rejects(aide.work("me").appendInput(work.id, { text: "too late" }), /Unknown work|being deleted/);
   assert.equal(await aide.event({ id: "late-event", topicId: "me",  name: "sample", text: "late" }), 0);
   const input = await aide.topics.submit("late", { origin: "channel", originId: "web", text: "late request" });
   const c = aide.topics.resource("me")!;
   await deliver(context, input, [c.metadata], "same topic");
-  await assert.rejects(handoff(aide.topics, resources, "late", [{ workUid: work.uid!, request: {} }]), /Work unavailable/);
+  await assert.rejects(aide.work("me").appendInput(work.id, { id: "late" }), /Unknown work|being deleted/);
   await reconcileRoutine(context, execution, get(work.id));
   assert.equal(aide.topics.inputStore.query("handlePending", work.uid!).length, 0);
 });

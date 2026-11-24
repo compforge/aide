@@ -38,7 +38,7 @@ export async function upsertTopicNote(resources: ResourceClient, owner: Readonly
   const { topicId, summaryOf, ...args } = TopicNoteSchema.parse(raw);
   if (summaryOf) {
     requireSummaryOrigin(origin, summaryOf.kind);
-    if (topicId || args.noteId || args.subject || args.closedAt || args.followup !== undefined)
+    if (topicId || args.noteId || args.subject)
       throw new Error("Supply summaryOf to initialize a summary, or noteId to edit an existing Note");
     const target = await resources.get<unknown, SummaryResource["status"]>(summaryOf);
     if (!target || target.metadata.uid !== summaryOf.uid || target.metadata.deletionTimestamp) throw new Error("Summary owner changed; read it again");

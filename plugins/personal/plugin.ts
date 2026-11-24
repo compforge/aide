@@ -1,3 +1,4 @@
+import { registerOngoingMaintenance } from "./secretary/ongoing.ts";
 import { STREAM_TYPE } from "@compforge/aide-plugin";
 import { registerOutputs } from "./output/reconcile.ts";
 import { registerInputs } from "./input/assignment.ts";
@@ -33,6 +34,7 @@ const plugin: PluginPackage = {
     registerChief(context);
     registerSecretary(context);
     registerNoteMaintenance(context);
+    registerOngoingMaintenance(context);
     registerSources(context);
     registerRepositorySources(context);
     registerPullRequestSources(context);

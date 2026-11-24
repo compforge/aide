@@ -1,44 +1,97 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
-<title id="title">Personal：输入、路由、研判、办理与输出</title>
-<desc id="desc">Channel 与 Source 提交 Input。Route 规则或持续 Route Agent 写入路由与研判分派，Conversation 的 Chief 研判并按需交给 Task 或 Routine。Chief 和 Work Agent 经 say 创建独立 Output，由 Channel 或 Connector 投递。Person 提供人物身份与认识；Input 保存 route、assess、handle 处理痕迹，Harness 自持原生会话。</desc>
-<defs>
- <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="none" stroke="#586779" stroke-width="1.5"/></marker>
- <style>
- text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#293746;text-anchor:middle;font-size:24px}
- .title{font-size:32px;font-weight:600}.small{font-size:19px;fill:#526579}.box{stroke:#8b9bae;stroke-width:2;rx:16}
- .line{fill:none;stroke:#586779;stroke-width:2.5;marker-end:url(#arrow)}.hint{fill:none;stroke:#ae7e8c;stroke-width:2;stroke-dasharray:8 7}
- </style>
-</defs>
-<rect width="1600" height="900" fill="#fafbf9"/>
-<text class="title" x="800" y="52">把大量输入转为判断、行动与值得关注的输出</text>
-<rect class="box" x="620" y="90" width="420" height="95" fill="#f5e9ed"/>
-<text x="830" y="127">Person · 人物身份与认识</text><text class="small" x="830" y="162">Me 是可选标记 · summary + recent</text>
-<path class="hint" d="M620 137 H150 V280 M830 185 V280 M1040 137 H1510 V575 H1000"/>
-<text class="small" x="336" y="126">Input.sender</text><text class="small" x="1300" y="126">Output.receivers</text>
-<text x="155" y="226">Channel / Source</text><path class="line" d="M155 238 V275"/>
-<rect class="box" x="40" y="285" width="230" height="150" fill="#e6eef8"/>
-<text x="155" y="328">Input</text><text class="small" x="155" y="368">内容 · 人物 · 地址</text><text class="small" x="155" y="402">话题线索 · 紧迫性</text>
-<path class="line" d="M270 355 H330"/>
-<rect class="box" x="340" y="285" width="270" height="150" fill="#eef1e2"/>
-<text x="475" y="328">Route</text><text class="small" x="475" y="368">确定性规则 / Route Agent</text><text class="small" x="475" y="402">无合适归属 → Default</text>
-<path class="line" d="M610 355 H670"/>
-<rect class="box" x="680" y="285" width="320" height="150" fill="#e5f0e7"/>
-<text x="840" y="328">Conversation / Chief</text><text class="small" x="840" y="368">话题 · 研判 · 直接处理</text><text class="small" x="840" y="402">summary + recent</text>
-<path class="line" d="M1000 355 H1090"/>
-<rect class="box" x="1100" y="285" width="360" height="150" fill="#e5f0e7"/>
-<text x="1280" y="328">Task / Routine</text><text class="small" x="1280" y="368">有限目标 / 持续职责</text><text class="small" x="1280" y="402">专属 Agent · 独立生命周期</text>
-<text class="small" x="475" y="476">route → assess 分派</text><text class="small" x="840" y="476">assess_input → handle 交接</text><text class="small" x="1280" y="476">report_task / report_routine</text>
-<rect class="box" x="40" y="520" width="570" height="145" fill="#e6eef8"/>
-<text x="325" y="560">Input.status：协作与追踪依据</text><text class="small" x="325" y="600">route → assess → handle[Work UID]</text><text class="small" x="325" y="636">各自确认 · 全部完成后才可回收</text>
-<path class="line" d="M840 485 V530"/><text class="small" x="880" y="519">say</text>
-<path class="line" d="M1280 490 V515 H1040 V600 H1008"/><text class="small" x="1170" y="507">say</text>
-<rect class="box" x="680" y="540" width="320" height="125" fill="#f5eddf"/>
-<text x="840" y="582">Output</text><text class="small" x="840" y="619">给谁 · 在哪里 · 说什么</text><text class="small" x="840" y="649">独立持久化与投递状态</text>
-<path class="line" d="M1000 640 H1090"/>
-<rect class="box" x="1100" y="555" width="360" height="110" fill="#f5eddf"/>
-<text x="1280" y="596">Channel / Connector</text><text class="small" x="1280" y="636">按 Address 投递 · 保存回执</text>
-<rect class="box" x="40" y="740" width="1420" height="105" fill="#eff0f4"/>
-<text x="750" y="780">Reconcile：确定性协调　·　Agent：持续判断与执行</text>
-<text class="small" x="750" y="817">Harness verb → 原生 create / resume / prompt / followUp / steer　｜　Harness 自持历史与恢复</text>
-<text class="small" x="800" y="881">report 确认业务进展，say 创建表达；输入处理完成、目标达成和消息送达分别记录</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="664" viewBox="0 0 1080 664" role="img" aria-labelledby="title desc" xml:lang="zh-CN">
+  <title id="title">一条 Input 如何推进事情，也留下认识</title>
+  <desc id="desc">从左到右是本轮领域 Chief、两轮之间和下轮领域 Chief。办理线上，当轮办妥的事情可直接回应。后续的 Task 和 Routine 委托专门 Agent，Ongoing 留给 Chief 跟进。各方在需要沟通时创建 Output。认识线上，Chief 可为具体事项留下普通 Note。aide:curate 整理近期依据，aide:summary 在空闲时复核对象的长期背景。下一轮既可接续已有工作，又能按需查普通 Note、默认读 Summary Note。</desc>
+  <defs>
+    <style>
+      text { font-family: "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #203647; }
+      .stage { font-size: 23px; font-weight: 650; }
+      .lane { font-size: 19px; font-weight: 650; }
+      .node { font-size: 19px; font-weight: 600; }
+      .detail { font-size: 16px; fill: #31495a; }
+      .caption { font-size: 15px; fill: #526474; }
+      .work { fill: white; stroke: #afc7dc; }
+      .note { fill: white; stroke: #a6c8b7; }
+      .wline, .nline, .out { fill: none; stroke-width: 1.6; stroke-linejoin: round; }
+      .wline, .out { stroke: #54728e; marker-end: url(#blue); }
+      .nline { stroke: #4d7b65; marker-end: url(#green); }
+      .out { stroke-dasharray: 4 3; }
+    </style>
+    <marker id="blue" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#54728e"/></marker>
+    <marker id="green" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 8 4 0 8Z" fill="#4d7b65"/></marker>
+  </defs>
+  <rect width="1080" height="664" fill="#fff"/>
+
+  <!-- The columns share one time axis across both lanes. -->
+  <text class="detail" x="28" y="30">消息、观察或交办 → Input → Route 确定 Topic 归属</text>
+  <path d="M28 47 H1052" stroke="#d0d9de"/>
+  <text class="stage" x="28" y="81">本轮 · 领域 Chief</text>
+  <text class="caption" x="28" y="108">结合当前材料与已有上下文研判</text>
+  <text class="stage" x="310" y="81">两轮之间</text>
+  <text class="caption" x="310" y="108">推进已有工作，整理留下的认识</text>
+  <text class="stage" x="784" y="81">下轮 · 领域 Chief</text>
+  <text class="caption" x="784" y="108">新 Input 或到期核实触发研判</text>
+
+  <!-- Work ownership determines how each responsibility continues. -->
+  <rect x="16" y="127" width="1048" height="229" rx="14" fill="#edf4fb"/>
+  <text class="lane" x="30" y="156">办理与沟通</text>
+
+  <rect class="work" x="30" y="175" width="232" height="78" rx="8"/>
+  <text class="node" x="45" y="204">后续办理 · System 2</text>
+  <text class="detail" x="45" y="232">创建或接续 Work</text>
+
+  <rect class="work" x="30" y="275" width="232" height="65" rx="8"/>
+  <text class="node" x="45" y="302">当轮办理 · System 1</text>
+  <text class="detail" x="45" y="327">直接办妥或答复</text>
+
+  <path class="wline" d="M262 214 H304"/>
+  <path class="wline" d="M283 214 V307 H304"/>
+  <rect class="work" x="310" y="168" width="418" height="91" rx="8"/>
+  <text class="node" x="327" y="194">委托专门 Agent</text>
+  <text class="detail" x="327" y="220">Task　推进一次性目标，达成后结束</text>
+  <text class="detail" x="327" y="244">Routine　按时间或事件，反复履行职责</text>
+  <rect class="work" x="310" y="275" width="418" height="65" rx="8"/>
+  <text class="node" x="327" y="302">Chief 自己跟进</text>
+  <text class="detail" x="327" y="327">Ongoing　等待进展，到期由 Secretary 提醒</text>
+
+  <path class="wline" d="M728 214 H778"/>
+  <path class="wline" d="M728 307 H778"/>
+  <rect class="work" x="784" y="168" width="265" height="91" rx="8"/>
+  <text class="node" x="800" y="204">接续已有委托</text>
+  <text class="detail" x="800" y="233">按需追加 Input 给相关 Agent</text>
+  <rect class="work" x="784" y="275" width="265" height="65" rx="8"/>
+  <text class="node" x="800" y="302">核实同一事项</text>
+  <text class="detail" x="800" y="327">更新进展、再约核实或收尾</text>
+
+  <!-- Communication may happen before a matter is finished. -->
+  <path class="out" d="M145 340 V371"/>
+  <path d="M728 241 H750 V301" fill="none" stroke="#54728e" stroke-width="1.6" stroke-dasharray="4 3"/>
+  <path class="out" d="M750 313 V371"/>
+  <path class="out" d="M520 340 V371"/>
+  <rect x="30" y="375" width="1019" height="44" rx="8" fill="#fafcff" stroke="#afc7dc"/>
+  <text class="node" x="45" y="404">Output</text>
+  <text class="detail" x="135" y="403">需要沟通时，由 Chief 或受托 Agent 发出答复、结果、提醒或询问。</text>
+
+  <!-- Curation and summary review are independent maintenance actions. -->
+  <rect x="16" y="439" width="1048" height="211" rx="14" fill="#edf6f1"/>
+  <text class="lane" x="30" y="469">认识与沉淀</text>
+  <rect class="note" x="30" y="484" width="232" height="74" rx="8"/>
+  <text class="node" x="45" y="513">按需留下普通 Note</text>
+  <text class="detail" x="45" y="539">记录具体事项、依据与疑问</text>
+
+  <path class="nline" d="M262 521 H304"/>
+  <rect class="note" x="310" y="484" width="418" height="74" rx="8"/>
+  <text class="node" x="327" y="513">aide:curate · 整理普通 Note</text>
+  <text class="detail" x="327" y="539">对照新材料核实事实，归类、拆分或合并</text>
+  <rect class="note" x="310" y="569" width="418" height="67" rx="8"/>
+  <text class="node" x="327" y="596">aide:summary · 空闲时复核</text>
+  <text class="detail" x="327" y="622">按需更新 Topic、Person 或 Address 的摘要</text>
+
+  <path class="nline" d="M728 521 H778"/>
+  <path class="nline" d="M728 603 H778"/>
+  <rect class="note" x="784" y="484" width="265" height="74" rx="8"/>
+  <text class="node" x="800" y="513">普通 Note · 按需查证</text>
+  <text class="detail" x="800" y="539">这件事当时有什么依据？</text>
+  <rect class="note" x="784" y="569" width="265" height="67" rx="8"/>
+  <text class="node" x="800" y="596">Summary Note · 默认背景</text>
+  <text class="detail" x="800" y="622">再次接触这个对象，先了解什么？</text>
 </svg>

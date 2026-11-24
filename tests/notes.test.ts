@@ -277,7 +277,7 @@ test("mutable Note names preserve identity and body citations; current directori
   const labeled = await f.upsert({ noteId: old.noteId, version: old.version, name: "Legacy matter" }, "label-legacy");
   assert.equal(labeled.noteId, old.noteId);
   assert.equal(directory().items.find(n => n.id === old.noteId)!.nameMissing, undefined);
-  const first = await f.upsert({ name: "Deployment investigation", nature: "episodic", text: "Evidence ".repeat(1700) }, "named");
+  const first = await f.upsert({ name: "Deployment investigation", nature: "semantic", text: "Evidence ".repeat(1700) }, "named");
   const before = await f.resources.get<import("../plugins/personal/note/model.ts").NoteSpec, import("../plugins/personal/note/model.ts").NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: first.noteId });
   const renamed = await f.upsert({ noteId: first.noteId, version: first.version, name: "Deployment recovery" }, "rename");
   const after = await f.resources.get<import("../plugins/personal/note/model.ts").NoteSpec, import("../plugins/personal/note/model.ts").NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: first.noteId });

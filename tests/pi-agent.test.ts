@@ -424,9 +424,9 @@ test("Chief executes Work and independent Input tools through the SDK and keeps 
   let id = "", routineId = "", inputId = "";
   const fixture = await setup(t, (request, index) => {
     if (index === 0) return { tool: "create_input", args: { text: "检查 aide" } };
+    const lastInputId = () => JSON.parse(messageText((request.messages as Array<{ content: unknown }>).at(-1)!.content)).inputId;
     if (index === 1) {
-      const messages = request.messages as Array<{ role: string; content: unknown }>;
-      inputId = JSON.parse(messageText(messages.at(-1)!.content)).inputId;
+      inputId = lastInputId();
       assert.ok(inputId);
     }
     const works = fixture.work.list();
@@ -438,14 +438,15 @@ test("Chief executes Work and independent Input tools through the SDK and keeps 
       case 0: return { tool: "create_work", args: { kind: "task", title: "检查仓库", instruction: "检查 aide", trigger: null, inputId } };
       case 1: return { tool: "list_work", args: {} };
       case 2: return { tool: "read_work", args: { id } };
-      case 3: return { tool: "request_work", args: { workId: id, text: "暂停", action: "pause" } };
+      case 3: return { tool: "append_input", args: { workId: id, input: { id: "pause-aide", text: "暂停" }, action: "pause" } };
       case 4: assert.equal(work?.status, "ready"); return { tool: "create_work", args: {
         kind: "routine", title: "定期检查仓库", instruction: "检查 aide", trigger: { cron: "0 9 * * *", timezone: "UTC", event: null },
       } };
-      case 5: assert.notEqual(id, routineId); return { tool: "request_work", args: { workId: routineId, text: "修改名称",
+      case 5: assert.notEqual(id, routineId); return { tool: "create_input", args: { text: "修改名称" } };
+      case 6: return { tool: "append_input", args: { workId: routineId, input: { id: lastInputId() },
         action: "update", changes: { title: "每天检查仓库" } } };
-      case 6: assert.equal(routine?.title, "定期检查仓库"); return { tool: "delete_work", args: { id, revision: 1 } };
-      case 7: return { tool: "delete_work", args: { id: routineId, revision: 1 } };
+      case 7: assert.equal(routine?.title, "定期检查仓库"); return { tool: "delete_work", args: { id, revision: 1 } };
+      case 8: return { tool: "delete_work", args: { id: routineId, revision: 1 } };
       default: return { text: "已完成创建、查询、更新和删除。" };
     }
   }, "chief");
@@ -453,7 +454,7 @@ test("Chief executes Work and independent Input tools through the SDK and keeps 
   assert.equal(summary.stopReason, "end_turn");
   assert.equal(summary.finalText, "已完成创建、查询、更新和删除。");
   assert.match(summary.agentText!, /我来处理/);
-  assert.deepEqual(summary.toolCalls.map((tool) => tool.status), Array(9).fill("completed"));
+  assert.deepEqual(summary.toolCalls.map((tool) => tool.status), Array(10).fill("completed"));
   assert.deepEqual(fixture.work.list(), []);
   assert.equal(fixture.events.filter((event) => event.kind === "state_update").length, 1);
   assert.equal((await fixture.reopen()).resumed, true);
@@ -1065,7 +1066,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
     await aide.close(); aide = open(); await aide.start();
     const before = fixture.requests.length;
     phase = 1;
-    await aide.work("me").requestInput(work.id, { text: "followup-task-evidence" }, "followup");
+    await aide.work("me").appendInput(work.id, { text: "followup-task-evidence" }, {}, "followup");
     inputId = aide.topics.inputStore.query("handlePending", work.uid!)[0]!.metadata.name;
     await aide.settled();
     assert.equal(workPhase(get()), kind === "task" ? "done" : "scheduled", JSON.stringify(get()));

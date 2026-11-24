@@ -18,7 +18,6 @@ import { assessInput } from "../plugins/personal/chief/assess.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { admit } from "./input-state-fixture.ts";
 import { cancelAssignments, resourceRef } from "../plugins/personal/input/state.ts";
-import { InputDefinition } from "../plugins/personal/input/definition.ts";
 import { INPUT_TYPE, InputAttention } from "../plugins/personal/input/model.ts";
 import { ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
 function setup(t: { after(fn: () => Promise<void>): void }) {
@@ -30,32 +29,24 @@ function setup(t: { after(fn: () => Promise<void>): void }) {
 }
 const task = { kind: "task" as const, title: "Check", instruction: "Verify evidence", trigger: null };
 
-test("Concurrent Chief assessments complete once and atomically establish only the winning Work handoff", async t => {
+test("Concurrent Chief assessments record a single receipt without assigning Work", async t => {
   const { aide, resources, context } = setup(t);
-  const a = await aide.topics.ensure("a"), b = await aide.topics.ensure("b");
-  const wa = await aide.work("a").create(task), wb = await aide.work("a").create(task);
+  const a = await aide.topics.ensure("a");
   const input = await aide.topics.submit("fact", { origin: "source", originId: "fixture", text: "shared evidence" });
   await deliver(context, input, [a.metadata], "One current Topic");
-  for (const c of [a, b]) {
-    await resources.patchStatus(aide.topics.resource(c.spec.id)!, { execution: { id: c.spec.id, startedAt: new Date().toISOString() } });
-  }
-  await Promise.all([[a, wa], [a, wb]].map(async ([owner, work]) => {
-    const c = owner as typeof a, w = work as typeof wa;
-    await assessInput(resources, c, c.spec.id, { inputId: "fact", summary: `Assigned to ${w.id}`, workRequests: [{ workUid: w.uid!, request: { action: "context" } }] });
-  }));
+  await resources.patchStatus(a, { execution: { id: "a", startedAt: new Date().toISOString() } });
+  await Promise.all(["first", "second"].map(summary => assessInput(resources, a, "a", { inputId: "fact", summary })));
   const result = aide.topics.inputStore.get("fact")!;
   assert.ok(result.status.assess!.completedAt);
-  assert.equal(Object.keys(result.status.handle!).length, 1);
-  const winner = result.status.assess!.result!.summary.endsWith(wa.id) ? wa : wb;
-  assert.deepEqual(Object.keys(result.status.handle!), [winner.uid]);
-  assert.equal(InputDefinition.retention!.releasedAt(result), undefined);
+  assert.ok(["first", "second"].includes(result.status.assess!.result!.summary));
+  assert.deepEqual(Object.keys(result.status.handle ?? {}), []);
   assert.deepEqual(aide.topics.pending(a.metadata.uid), []);
   assert.equal("pendingInputIds" in aide.topics.resource("a")!.status, false);
   await assessInput(resources, a, "a", { inputId: "fact", summary: "repeat" });
   assert.deepEqual(aide.topics.inputStore.get("fact"), result);
 });
 
-test("Failed handoff rolls back assessment, Work assignments and summary; foreign Work cannot be assigned", async t => {
+test("Failed assessment preserves the separate Work receipt and Topic state", async t => {
   const { aide, resources, context } = setup(t);
   const c = await aide.topics.ensure("me");
   const w = await aide.work("me").create(task), foreign = await aide.work("other").create(task);
@@ -63,13 +54,14 @@ test("Failed handoff rolls back assessment, Work assignments and summary; foreig
   await deliver(context, input, [c.metadata], "topic");
   await resources.patchStatus(aide.topics.resource("me")!, { execution: { id: "live", startedAt: new Date().toISOString() } });
   await admit(resources, "fact", "live");
+  await assert.rejects(aide.work("me").appendInput(foreign.id, { id: "fact" }), /Unknown work/);
+  await aide.work("me").appendInput(w.id, { id: "fact" });
   const before = aide.topics.inputStore.get("fact")!;
   const handlesBefore = aide.topics.inputStore.query("handlePending", w.uid!);
   const topicBefore = aide.topics.resource("me")!.status;
-  await assert.rejects(assessInput(resources, c, "live", { inputId: "fact", summary: "bad", workRequests: [{ workUid: foreign.uid!, request: {} }] }), /Work unavailable/);
   const failing = { ...resources, commit: (writes: Parameters<typeof resources.commit>[0]) => resources.commit([...writes,
     { operation: "create", type: { ...INPUT_TYPE, kind: "Unregistered" }, name: "failure", spec: {}, status: {} }]) };
-  await assert.rejects(assessInput(failing, c, "live", { inputId: "fact", summary: "handoff", workRequests: [{ workUid: w.uid!, request: {} }] }), /Unknown resource/);
+  await assert.rejects(assessInput(failing, c, "live", { inputId: "fact", summary: "handoff" }), /Unknown resource/);
   assert.deepEqual(aide.topics.inputStore.get("fact"), before);
   assert.deepEqual(aide.topics.resource("me")!.status, topicBefore);
   assert.deepEqual(aide.topics.inputStore.query("handlePending", w.uid!), handlesBefore);
@@ -90,7 +82,8 @@ test("Input protects every unfinished stage; deleting its Work ends handling and
   await assert.rejects(second(), /capacity/);
   await resources.patchStatus(aide.topics.resource("me")!, { execution: { id: "live", startedAt: new Date().toISOString() } });
   await admit(resources, "one", "live");
-  await assessInput(resources, c, "live", { inputId: "one", summary: "Delegated", workRequests: [{ workUid: w.uid!, request: {} }] });
+  await aide.work("me").appendInput(w.id, { id: "one" });
+  await assessInput(resources, c, "live", { inputId: "one", summary: "Delegated" });
   await assert.rejects(second(), /capacity/);
   const target = (await resources.list(TASK_TYPE))[0]!;
   await resources.delete(target, target.metadata.name);

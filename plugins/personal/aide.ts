@@ -43,7 +43,7 @@ import { type OutputView } from "./output/view.ts";
 import { IncomingSchema, type Incoming } from "../../src/channel/message.ts";
 import { WorkService } from "./work/service.ts";
 import { Store } from "./work/store.ts";
-import { workType, WORK_TYPES, type WorkSpec } from "./work/resources.ts";
+import { workType, DELEGATED_WORK_TYPES, type WorkSpec } from "./work/resources.ts";
 import { TOPIC_TYPE } from "./topic/model.ts";
 import { INPUT_TYPE } from "./input/model.ts";
 import { digest } from "./identity.ts";
@@ -269,7 +269,7 @@ export class Personal {
     const unfinished = this.topics.pending(topic.metadata.uid).length > 0 || !!topic.status.execution;
     const executing = this.invocations().some((invocation) => invocation.topicId === topicId && ["queued", "running", "uncertain"].includes(invocation.phase));
     if (unfinished || executing) return { deleted: false, reason: "busy" };
-    const hasWork = WORK_TYPES.some((type) => this.store.resources.list<WorkSpec, unknown>(type)
+    const hasWork = DELEGATED_WORK_TYPES.some((type) => this.store.resources.list<WorkSpec, unknown>(type)
       .some((work) => (work.status as import("./work/model.ts").WorkStatus).topic.uid === topic.metadata.uid));
     if (hasWork) return { deleted: false, reason: "work" };
     try {
@@ -301,7 +301,7 @@ export class Personal {
       await finalizeExecution({ resources, logger: { debug: () => {}, info: (message, detail) => this.log.info({ detail }, message), warn: (message: string, detail?: unknown) => this.log.warn({ detail }, message), error: () => {} } }, c, id);
       this.log.warn({ resourceUid: c.metadata.uid, executionId: id }, "Recovered interrupted agent without replaying actions");
     }
-    for (const type of WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work/agent-status.ts").WorkAgentStatus>(type)) {
+    for (const type of DELEGATED_WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work/agent-status.ts").WorkAgentStatus>(type)) {
       if (work.metadata.deletionTimestamp || workPhase(work) !== "running") continue;
       const text = `「${work.spec.title}」执行被中断，结果未知。请核对外部结果后告诉我是否继续。`;
       await patchStatus(resources, work, { recovery: { reason: "ExecutionUncertain", message: "Inspect effects before resuming" }, waiting: null,
@@ -321,7 +321,7 @@ export class Personal {
   private async flushRecoveryNotices(): Promise<void> {
     const resources = this.plugins.resourceClient("personal");
     let retry = false;
-    for (const type of WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work/agent-status.ts").WorkAgentStatus>(type)) {
+    for (const type of DELEGATED_WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work/agent-status.ts").WorkAgentStatus>(type)) {
       const notice = work.status.recoveryNotice;
       if (!notice || work.metadata.deletionTimestamp) continue;
       try {

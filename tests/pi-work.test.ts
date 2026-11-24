@@ -1,4 +1,3 @@
-import { handoff } from "./input-state-fixture.ts";
 import { WorkInputRequestSchema } from "../plugins/personal/work/model.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
@@ -55,13 +54,12 @@ test(`${definition.kind} CRUD preserves identity, enforces revisions and topic s
   const beforeRead = writes();
   assert.equal(service.read(work.id).kind, definition.kind);
   assert.equal(writes(), beforeRead);
-  const appended = await service.requestInput(work.id, { action: "update", text: "修改目标",
-    changes: { instruction: "检查更新后的 aide 仓库" } }, "request-1");
+  const appended = await service.appendInput(work.id, { text: "修改目标" }, { action: "update", changes: { instruction: "检查更新后的 aide 仓库" } }, "request-1");
   assert.equal(appended.instruction, definition.instruction);
   assert.equal(appended.status, work.status);
-  await service.requestInput(work.id, { action: "update", text: "修改目标", changes: { instruction: "检查更新后的 aide 仓库" } }, "request-1");
+  await service.appendInput(work.id, { text: "修改目标" }, { action: "update", changes: { instruction: "检查更新后的 aide 仓库" } }, "request-1");
   assert.equal(store.topics.inputStore.list().filter(i => i.status.handle?.[uid]).length, definition.kind === "task" ? 2 : 1);
-  await assert.rejects(service.requestInput(work.id, { action: "pause", text: "修改目标" }, "request-1"), /different Work request/);
+  await assert.rejects(service.appendInput(work.id, { text: "修改目标" }, { action: "pause" }, "request-1"), /different Work request/);
   await consume(work.id);
   const updated = service.read(work.id);
   assert.equal(updated.kind, definition.kind);
@@ -79,30 +77,48 @@ test(`${definition.kind} CRUD preserves identity, enforces revisions and topic s
   assert.equal(store.read().outputs.filter((item) => item.id === response.id).length, 1);
 });
 
+test("Inline Input keeps its identity across recipients and rejects conflicting content or provenance", async t => {
+  const { store, service } = setup(t);
+  const first = await service.create(task), second = await service.create(task);
+  await assert.rejects(service.appendInput(first.id, {}), /Supply input.id or input.text/);
+  const decision = { id: "check-change", text: "Verify the change" };
+  const [left, right] = await Promise.all([service.appendInput(first.id, decision), service.appendInput(second.id, decision)]);
+  assert.equal(left.inputId, decision.id);
+  assert.equal(right.inputId, decision.id);
+  const input = store.topics.inputStore.get(decision.id)!;
+  assert.equal(input.spec.origin, "chief");
+  assert.deepEqual(Object.keys(input.status.handle!).sort(), [first.uid!, second.uid!].sort());
+  await assert.rejects(service.appendInput(first.id, { ...decision, text: "Different decision" }), /different content/);
+  await seedInput(store.topics, "external", { topicId: "me", origin: "source", originId: "fixture", text: decision.text });
+  await assert.rejects(service.appendInput(first.id, { ...decision, id: "external" }), /different content or owner/);
+  await assert.rejects(service.appendInput("missing", { id: "unattached", text: "verify" }), /Unknown work/);
+  assert.equal(store.topics.inputStore.get("unattached"), undefined);
+});
+
 test("Work Reconcile validates requests and only explicit control can resume paused work", async (t) => {
   const { store, service, consume } = setup(t);
   await assert.rejects(service.create({ ...task, kind: "routine" }), /Routine needs/);
   const work = await service.create(task);
   assert.throws(() => WorkInputRequestSchema.parse({ action: "update", changes: { kind: "routine" } }), /Unrecognized key/);
-  await service.requestInput(work.id, { action: "update", text: "change", changes: { trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } } });
+  await service.appendInput(work.id, { text: "change" }, { action: "update", changes: { trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } } });
   await consume(work.id);
   assert.equal(service.read(work.id).trigger, null);
   const fact = store.topics.inputStore.list().find(input => Object.values(input.status.handle ?? {}).some(receipt => receipt.result?.disposition === "rejected"))!;
   assert.match(fact.status.handle![work.uid!]!.result!.summary, /Task cannot/);
   assert.deepEqual(service.read(work.id).recent, []);
-  await service.requestInput(work.id, { action: "pause", text: "暂停" }); await consume(work.id);
+  await service.appendInput(work.id, { text: "暂停" }, { action: "pause" }); await consume(work.id);
   assert.equal(service.read(work.id).status, "paused");
   await seedInput(store.topics, "pod", { topicId: "me", origin: "source", originId: "personal.environments", text: "Pod replaced" });
-  await assert.rejects(handoff(store.topics, store.client, "pod", [{ workUid: work.uid!, request: { action: "resume" } }]), /Source facts/);
-  await assert.rejects(handoff(store.topics, store.client, "missing", [{ workUid: work.uid!, request: { action: "context" } }]), /Input missing/);
-  await handoff(store.topics, store.client, "pod", [{ workUid: work.uid!, request: { action: "context", note: "相关服务变化" } }]);
-  await handoff(store.topics, store.client, "pod", [{ workUid: work.uid!, request: { action: "context", note: "相关服务变化" } }]);
+  await assert.rejects(service.appendInput(work.id, { id: "pod" }, { action: "resume" }), /Source facts/);
+  await assert.rejects(service.appendInput(work.id, { id: "missing" }, { action: "context" }), /Input missing/);
+  await service.appendInput(work.id, { id: "pod" }, { action: "context", note: "相关服务变化" });
+  await service.appendInput(work.id, { id: "pod" }, { action: "context", note: "相关服务变化" });
   await consume(work.id);
   const paused = service.read(work.id);
   assert.equal(paused.status, "paused");
   assert.equal(store.topics.inputStore.get("pod")!.status.handle?.[work.uid!]?.completedAt, undefined);
   assert.equal(store.topics.inputStore.get("pod")!.spec.text, "Pod replaced");
-  await service.requestInput(work.id, { action: "resume", text: "继续" }); await consume(work.id);
+  await service.appendInput(work.id, { text: "继续" }, { action: "resume" }); await consume(work.id);
   assert.equal(service.read(work.id).status, "ready");
   assert.ok(store.topics.inputStore.list().some(i => i.status.handle?.[work.uid!] && !i.status.handle[work.uid!]!.completedAt));
 });
@@ -164,7 +180,7 @@ test("Chief appends the same original Input to two works without losing observat
     assert.doesNotMatch(input.description, /Observation:/);
     assert.match(input.description, /observation evidence.*read_input/);
     assert.deepEqual(aide.topics.inputStore.get(input.inputId)!.spec.observation, observation);
-    await handoff(aide.topics, aide.runtime.plugins.resourceClient("personal"), input.inputId, [taskId, routineId].map(id => ({ workUid: aide.work("me").read(id).uid!, request: { action: "context", note: "核对 executor 变化" } })));
+    for (const id of [taskId, routineId]) await aide.work("me").appendInput(id, { id: input.inputId }, { note: "核对 executor 变化" });
     return "已交给相关工作核对。";
   }, execute: async (work) => {
     executions++;

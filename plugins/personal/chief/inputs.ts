@@ -1,12 +1,12 @@
 import type { ResourceClient } from "@compforge/aide-plugin";
 import { assessBatch } from "../batch/assess.ts";
-import { batchById, batchMembers } from "../batch/members.ts";
+import { batchById } from "../batch/members.ts";
 import { inputPreview } from "../input/prompt.ts";
 import type { Input } from "../input/state.ts";
 import type { TopicResource } from "../topic/model.ts";
 import { assessInput, type AssessInput } from "./assess.ts";
 
-/** @spec Chief addresses each sealed group once. Original material IDs identify evidence and Work requests.
+/** @spec Chief addresses each sealed group once. Original material IDs identify evidence.
  * @link docs/personal/batch.md
  */
 export function chiefInputs(inputs: readonly Input[]) {
@@ -27,28 +27,10 @@ export function chiefPreviews(inputs: readonly Input[], budget: number) {
   }));
 }
 
-type WorkRequest = NonNullable<AssessInput["workRequests"]>[number];
-export type ChiefAssessment = Omit<AssessInput, "workRequests"> & {
-  workRequests?: (WorkRequest & { sourceInputId?: string })[];
-};
-
-export async function assessChiefInput(resources: ResourceClient, topic: TopicResource, executionId: string, args: ChiefAssessment, callId: string) {
-  const { inputId, summary, workRequests = [] } = args;
-  const batch = await batchById(resources, inputId);
-  if (batch) {
-    if (args.curatedNotes?.length) throw new Error("Only aide:curate may acknowledge Notes");
-    const members = workRequests.length ? await batchMembers(resources, batch) : [];
-    const requests = workRequests.map(({ sourceInputId, ...request }) => {
-      const member = sourceInputId ?? (members.length === 1 ? members[0]!.metadata.name : undefined);
-      if (!member) throw new Error("Supply sourceInputId for a Work request with multiple source materials");
-      return { ...request, inputId: member };
-    });
-    await assessBatch(resources, topic, executionId, { batchId: inputId, summary, workRequests: requests }, callId);
-    return { assessed: inputId };
-  }
-  const requests = workRequests.map(({ sourceInputId, ...request }) => {
-    if (sourceInputId !== undefined && sourceInputId !== inputId) throw new Error("Work request source does not belong to this input");
-    return request;
-  });
-  return assessInput(resources, topic, executionId, { inputId, summary, curatedNotes: args.curatedNotes, workRequests: requests }, callId);
+export async function assessChiefInput(resources: ResourceClient, topic: TopicResource, executionId: string, args: AssessInput, callId: string) {
+  const batch = await batchById(resources, args.inputId);
+  if (!batch) return assessInput(resources, topic, executionId, args, callId);
+  if (args.curatedNotes?.length) throw new Error("Only aide:curate may acknowledge Notes");
+  await assessBatch(resources, topic, executionId, { batchId: args.inputId, summary: args.summary }, callId);
+  return { assessed: args.inputId };
 }

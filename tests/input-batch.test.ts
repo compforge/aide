@@ -214,18 +214,17 @@ test("Batch quota exhaustion leaves originals Deferred and retries when capacity
   assert.ok(f.aide.topics.inputStore.get("c")!.status.batchId); assert.equal(f.aide.topics.inputStore.list().length, 4);
 });
 
-// @case A shared Work may receive multiple original facts atomically; Batch completion is not Work completion.
-test("Batch handoff preserves each source authority and guards shared Work once", async t => {
+test("Chief can pass original Batch materials to existing Work independently of Batch assessment", async t => {
   const f = await secretaryFixture(t); await f.input("a"); await f.input("b");
   const work = await f.aide.work("root").create({ kind: "task", title: "Inspect", instruction: "Read evidence", trigger: null });
   await prepareInputs(f.context, f.root(), f.policy);
   const batch = (await preparedIntake(f.resources, f.root())).batch!;
   await reconcileChief(f.context, f.execution("handoff", async () => {
-    await assert.rejects(assessBatch(f.resources, f.root(), "handoff", { batchId: batch.metadata.uid, summary: "bad authority",
-      workRequests: [{ inputId: "a", workUid: work.uid!, request: { action: "pause" } }] }), /Source facts/);
+    const service = f.aide.work("root");
+    await assert.rejects(service.appendInput(work.id, { id: "a" }, { action: "pause" }), /Source facts/);
+    for (const inputId of ["a", "b"]) await service.appendInput(work.id, { id: inputId });
     assert.equal((await batchById(f.resources, batch.metadata.uid))!.status.phase, "running");
-    const requests = ["a", "b"].map(sourceInputId => ({ sourceInputId, workUid: work.uid!, request: { action: "context" as const } }));
-    await assessChiefInput(f.resources, f.root(), "handoff", { inputId: batch.metadata.uid, summary: "Delegated evidence", workRequests: requests }, "call");
+    await assessChiefInput(f.resources, f.root(), "handoff", { inputId: batch.metadata.uid, summary: "Delegated evidence" }, "call");
     for (const id of ["a", "b"]) {
       const input = f.aide.topics.inputStore.get(id)!;
       assert.ok(input.status.handle?.[work.uid!]); assert.equal(input.status.assess?.completedAt, undefined);

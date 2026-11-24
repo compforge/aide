@@ -1,14 +1,13 @@
 import { batchAssessment } from "../batch/membership.ts";
 import { batchById, batchMembers } from "../batch/members.ts";
 import { BATCH_TYPE, batchFinished, type Batch } from "../batch/model.ts";
-import { isProcessingRoot } from "../topic/boundary.ts";
 import { reconcileInputRetention } from "./retention.ts";
 import { retryOnConflict, type PluginContext, type ResourceValidationContext, type Watch } from "@compforge/aide-plugin";
 import { INPUT_TYPE, assessmentFinished } from "./model.ts";
 import { resourceRef, type Input } from "./state.ts";
 import { patchStatus } from "../status.ts";
 import { readTopicRoot } from "../topic/tree.ts";
-import { requireTopic } from "../topic/ownership.ts";
+import { requireProcessingRoot, requireTopic } from "../topic/ownership.ts";
 
 /** @spec Assignment is separate from material ownership and never resets admission or completion.
  * @link docs/personal/input.md#挂载分派与执行
@@ -39,13 +38,7 @@ export function guardAssessment(previous: Input, current: Input, context: Resour
     if (previous.status.assess?.executionId || previous.status.assess?.completedAt || admitted) throw new Error("Cannot invalidate an admitted assessment");
     return;
   }
-  let root = requireTopic(current.status.topic, context);
-  const seen = new Set<string>();
-  while (root.spec.parentRef && !isProcessingRoot(root)) {
-    if (seen.has(root.metadata.uid)) throw new Error("Topic parent cycle");
-    seen.add(root.metadata.uid);
-    root = requireTopic(root.spec.parentRef, context);
-  }
+  const root = requireProcessingRoot(current.status.topic, context);
   if (root.metadata.uid !== requireTopic(current.status.assess.topic, context).metadata.uid)
     throw new Error("Input processing assignment changed; reconcile again");
   if (admitted && root.status.execution?.id !== current.status.assess.executionId)

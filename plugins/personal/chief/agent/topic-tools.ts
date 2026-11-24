@@ -1,3 +1,4 @@
+import { ongoingTools } from "../../ongoing/tools.ts";
 import { chiefInputs } from "../inputs.ts";
 import { batchForInput } from "../../batch/view.ts";
 import { noteDirectory } from "../../note/directory.ts";
@@ -27,7 +28,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
     log?.info({ kind: resource.kind, uid: resource.metadata.uid, organization: (resource.status as { organization?: unknown }).organization }, "Chief organization applied");
     return result(resource);
   };
-  return [...noteTools(store.client, active, log, origin),
+  return [...ongoingTools(store.client, active, log), ...noteTools(store.client, active, log, origin),
     tool({ name: "release_topic", inputOrigins: ["aide:curate"], label: "Allow Topic reclamation", description: "Explicitly allow capacity reclamation of a Topic whose current knowledge is dispensable or safely retained elsewhere. Read this Topic first and supply its reclamationVersion and reason. Does not delete now. New knowledge invalidates the decision. Default, busy Topics and live dependencies remain protected.",
       parameters: Type.Object({ uid: Type.Optional(Type.String()), version: Type.String(), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
       async execute(_id, args) {

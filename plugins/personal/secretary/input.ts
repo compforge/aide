@@ -9,14 +9,14 @@ import type { maintenanceAgenda } from "./maintenance.ts";
 import type { ReviewPreparation } from "./review.ts";
 import { chiefWorkload } from "../topic/workload.ts";
 import { digest } from "../identity.ts";
-import { followupInputId, type NoteResource } from "../note/model.ts";
-class ObsoleteNoteRequest extends Error {}
+import { followupInputId, type OngoingResource } from "../ongoing/model.ts";
+class ObsoleteOngoingCheck extends Error {}
 type MaintenanceOrigin = "aide:curate" | "aide:followup" | "aide:organize";
 
 const maintenanceTask: Record<MaintenanceOrigin, string> = {
   "aide:organize": "Organize the Topic tree and file Inputs, Work and Notes within its scope. Recheck all direct capacity limits. Preserve processing receipts when filing material.",
-  "aide:curate": "Curate ordinary Notes and durable understanding. Classify and consolidate related material, and verify closure.",
-  "aide:followup": "Verify the scheduled question against current evidence and related Work.",
+  "aide:curate": "Curate ordinary Notes and durable understanding. Classify and consolidate related material.",
+  "aide:followup": "Check the Ongoing against current evidence and related Work.",
 };
 
 /** @spec Internal requests use ordinary Input assignment/admission; origin determines scheduling, text carries the task.
@@ -25,26 +25,27 @@ const maintenanceTask: Record<MaintenanceOrigin, string> = {
  * @link docs/personal/secretary.md#容量与维护请求
  */
 export async function createMaintenanceInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" = "idle", preparation?: { notes?: { noteId: string; version: string }[]; note?: NoteResource; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" | "ongoing_check_due" = "idle", preparation?: { notes?: { noteId: string; version: string }[]; ongoing?: OngoingResource; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
+  if (origin === "aide:followup" && (!preparation?.ongoing || !followupInputId(preparation.ongoing))) throw new ObsoleteOngoingCheck();
   const target = resourceRef(topic);
   const maintenance = preparation?.plan, instructions = preparation?.instructions ?? "";
   const input = await retryOnConflict(async () => {
     const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(target);
-    if (preparation?.note && origin === "aide:followup") {
-      const fresh = await context.resources.get<NoteResource["spec"], NoteResource["status"]>(resourceRef(preparation.note));
-      if (!fresh || fresh.metadata.resourceVersion !== preparation.note.metadata.resourceVersion) throw new ObsoleteNoteRequest();
+    if (preparation?.ongoing && origin === "aide:followup") {
+      const fresh = await context.resources.get<OngoingResource["spec"], OngoingResource["status"]>(resourceRef(preparation.ongoing));
+      if (!fresh || fresh.metadata.resourceVersion !== preparation.ongoing.metadata.resourceVersion) throw new ObsoleteOngoingCheck();
     }
     if (!current || current.metadata.deletionTimestamp) throw new Error("Maintenance Topic no longer exists");
     const pending = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
       matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
     if (pending.items[0]) return pending.items[0];
-    const scheduledNote = origin === "aide:followup" ? preparation?.note : undefined;
-    const inputId = scheduledNote ? followupInputId(scheduledNote)! : `${origin.slice(5)}-${digest([topic.metadata.uid, dueAt])}`;
+    const scheduledMatter = origin === "aide:followup" ? preparation?.ongoing : undefined;
+    const inputId = scheduledMatter ? followupInputId(scheduledMatter)! : `${origin.slice(5)}-${digest([topic.metadata.uid, dueAt])}`;
     const at = new Date().toISOString();
     const spec: InputSpec = {
       origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
-      text: `${maintenanceTask[origin]} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; ${origin === "aide:followup" ? "If the current evidence leaves the scheduled question unanswered, ask Me privately." : "Do not communicate or hand off business Work."} Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
-      observation: { ...(preparation?.notes ? { notes: preparation.notes } : {}), ...(scheduledNote ? { noteId: scheduledNote.metadata.name, noteUid: scheduledNote.metadata.uid } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
+      text: `${maintenanceTask[origin]} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; ${origin === "aide:followup" ? "Ask Me privately if a consequential fact is still missing." : "Do not communicate or hand off business Work."} Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
+      observation: { ...(preparation?.notes ? { notes: preparation.notes } : {}), ...(scheduledMatter ? { ongoingId: scheduledMatter.metadata.name, ongoingUid: scheduledMatter.metadata.uid } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
         completed: chiefWorkload(current).completed, weaveRevision: maintenance?.weaveRevision ?? 0,
         pressure: (maintenance?.notePressure ?? []).map(({ uid, pressure }) => ({ uid, version: pressure.version })),
       } } : {}) },
@@ -68,8 +69,8 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
     }
     try { await context.resources.commit([
       { operation: "create", type: INPUT_TYPE, name: inputId, spec, status: inputStatus(status) },
-      ...(scheduledNote ? [{ operation: "patchStatus" as const, resource: scheduledNote, patch: { followupInputId: inputId },
-        options: { resourceVersion: scheduledNote.metadata.resourceVersion } }] : []),
+      ...(scheduledMatter ? [{ operation: "patchStatus" as const, resource: scheduledMatter, patch: { followupInputId: inputId },
+        options: { resourceVersion: scheduledMatter.metadata.resourceVersion } }] : []),
       ...pressureWrites,
       { operation: "patchStatus", resource: current, options: { resourceVersion: current.metadata.resourceVersion }, patch: {
         ...(ownerPressure ? { notePressure: ownerPressure } : {}),
@@ -114,7 +115,7 @@ export async function tryCreateMaintenanceInput(context: Pick<PluginContext, "re
   }
   try { return await createMaintenanceInput(context, current, dueAt, agenda, origin, trigger, preparation, fingerprint); }
   catch (error) {
-    if (error instanceof ObsoleteNoteRequest) return;
+    if (error instanceof ObsoleteOngoingCheck) return;
     if (!String(error).includes("Resource capacity exhausted")) throw error;
     context.logger.warn("Topic maintenance deferred at resource capacity", { attributes: { topicUid: topic.metadata.uid, origin, error: String(error) } });
   }

@@ -1,10 +1,11 @@
+import { ONGOING_TYPE } from "../ongoing/model.ts";
 import { HANDOFF_TYPE } from "../handoff/model.ts";
 import { isGateTopic } from "./boundary.ts";
 import { summaryText } from "../note/summary.ts";
 import type { ResourceValidationContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource } from "./model.ts";
 import { INPUT_TYPE } from "../input/model.ts";
-import { WORK_TYPES } from "../work/resources.ts";
+import { DELEGATED_WORK_TYPES } from "../work/resources.ts";
 import { NOTE_TYPE, noteView } from "../note/model.ts";
 import type { NoteReader } from "../note/query.ts";
 import { understandingVersion } from "./tree.ts";
@@ -24,9 +25,10 @@ export function canReclaimTopic(topic: TopicResource, context: ResourceValidatio
   if (isGateTopic(topic) || topic.spec.default || topic.metadata.deletionTimestamp || topic.status.execution || topic.status.agent?.sessionId || topic.status.lastError) return false;
   const uid = topic.metadata.uid;
   if (context.page(HANDOFF_TYPE, { limit: 1, matchIndex: { name: "activeTopic", value: uid } }).items.length
+    || context.page(ONGOING_TYPE, { limit: 1, matchIndex: { name: "openTopic", value: uid } }).items.length
     || context.page(TOPIC_TYPE, { limit: 1, matchIndex: { name: "parent", value: uid } }).items.length
     || context.page(INPUT_TYPE, { limit: 1, matchIndex: { name: "assessPending", value: uid } }).items.length
-    || WORK_TYPES.some(t => context.page(t, { limit: 1, matchIndex: { name: "topic", value: uid } }).items.length)) return false;
+    || DELEGATED_WORK_TYPES.some(t => context.page(t, { limit: 1, matchIndex: { name: "topic", value: uid } }).items.length)) return false;
   return knowledgeReleased(topic, context);
 }
 

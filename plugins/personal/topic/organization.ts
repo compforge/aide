@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { ResourceValidationContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
-import { WORK_TYPES, type WorkResource } from "../work/resources.ts";
+import { DELEGATED_WORK_TYPES, type WorkResource } from "../work/resources.ts";
 import { requireOrganization, requireTopic } from "./ownership.ts";
 
 /** @spec Reparenting a descendant requires a quiescent subtree at commit time, including newly arrived work.
@@ -28,7 +28,7 @@ export function guardTopicOrganization(current: TopicResource, context: Resource
     if (topic.status.execution) throw new Error("Subtree still has active processing; retry after completion");
     const inputs = context.page<InputSpec, InputStatus>(INPUT_TYPE, { limit: 1, matchIndex: { name: "assessActive", value: topic.metadata.uid } }).items;
     if (inputs.length) throw new Error("Subtree still has active processing; retry after completion");
-    for (const type of WORK_TYPES) {
+    for (const type of DELEGATED_WORK_TYPES) {
       if (context.page(type, { limit: 1, matchIndex: { name: "active", value: topic.metadata.uid } }).items.length) throw new Error("Subtree still has active processing; retry after completion");
     }
     for (const child of context.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { matchIndex: { name: "parent", value: topic.metadata.uid } })) {
