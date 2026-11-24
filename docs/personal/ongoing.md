@@ -4,7 +4,7 @@ Ongoing 保存领域 Chief 承接的一件尚有下文的事。例如供应商�
 
 ## Spec 与 Status
 
-资源类型为 `aide.dev/v1alpha1 Ongoing`。Chief 通过 `list_ongoings` 查找 Topic 已有事项，`read_ongoing` 读取当前版本，`upsert_ongoing` 创建事项或更新进展、计划和结论。创建使用当前领域 Topic，同一执行内重放创建调用复用同一 ID。更新按资源版本校验，写入事务核对 Chief 执行与 Topic 归属。
+资源类型为 `aide.dev/v1alpha1 Ongoing`。Chief 先用 `list_work(kind="ongoing")` 查找已有事项，需要新增时调用 `create_work(kind="ongoing", title=…)`。更新前用 `read_work(id)` 读取当前版本，再用 `update_ongoing(id, version, …)` 记录进展、计划或结论。Ongoing 的 Topic 引用标明跟进归属。Secretary 到期提醒该领域的 Chief，Chief 直接研判新证据。创建使用当前领域 Topic，同一执行内重放创建调用复用同一 ID。更新按资源版本校验，写入事务核对 Chief 执行与 Topic 归属。
 
 | 字段 | 含义 |
 | --- | --- |

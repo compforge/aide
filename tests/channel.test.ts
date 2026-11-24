@@ -201,12 +201,12 @@ test("Web deletes Tasks and Routines through WorkService and preserves other top
   await aide.personal.topics.ensure(group, fixtureAddress(group));
   const work = aide.work(group);
   const initialTask = await work.create({ kind: "task", title: "检查项目", instruction: "check", trigger: null });
-  let task = await work.requestInput(initialTask.id, { action: "pause", text: "暂停" });
+  await work.appendInput(initialTask.id, { text: "暂停" }, { action: "pause" });
   const routine = await work.create({ kind: "routine", title: "监控内存", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "memory.changed" } });
   const foreign = await aide.work("other").create({ kind: "routine", title: "其他会话", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "memory.changed" } });
   await aide.personal.store.save(routine, [{ id: "retained-reply", topicId: group, text: "已建立监控", workId: routine.id }]);
   await aide.start(); await aide.settled();
-  task = work.read(task.id);
+  const task = work.read(initialTask.id);
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const base = `http://127.0.0.1:${address.port}`;

@@ -1,4 +1,5 @@
 import { summaryText, summaryReference } from "../note/summary.ts";
+import { ONGOING_TYPE, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
 import { notes } from "../note/query.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { workObservation } from "./status.ts";
@@ -13,7 +14,7 @@ import { WorkSchema, validateTrigger, type Work, type WorkStatus } from "./model
 import { type OutputDraft, type OutputView } from "../output/view.ts";
 import { TopicStore } from "../topic/store.ts";
 
-import { WORK_TYPES, workType, toWork, type WorkResource, type WorkSpec } from "./resources.ts";
+import { DELEGATED_WORK_TYPES, workType, toWork, type WorkResource, type WorkSpec } from "./resources.ts";
 
 /**
  * @spec Task and Routine own business state; independent Outputs survive work deletion.
@@ -48,16 +49,21 @@ export class Store {
   }
 
   workResources(topicUids: readonly string[]): WorkResource[] {
-    return topicUids.flatMap(topicUid => WORK_TYPES.flatMap(type => this.resources.list<WorkSpec, WorkStatus>(type,
+    return topicUids.flatMap(topicUid => DELEGATED_WORK_TYPES.flatMap(type => this.resources.list<WorkSpec, WorkStatus>(type,
       { matchIndex: { name: "topic", value: topicUid } }))).filter(work => !work.metadata.deletionTimestamp);
   }
 
+  ongoingResources(topicUids: readonly string[], includeClosed = false) {
+    return topicUids.flatMap(uid => this.resources.list<OngoingSpec, OngoingStatus>(ONGOING_TYPE,
+      { matchIndex: { name: includeClosed ? "topic" : "openTopic", value: uid } })).filter(r => !r.metadata.deletionTimestamp);
+  }
+
   private listResources(): WorkResource[] {
-    return WORK_TYPES.flatMap((type) => this.resources.list<WorkSpec, WorkStatus>(type));
+    return DELEGATED_WORK_TYPES.flatMap((type) => this.resources.list<WorkSpec, WorkStatus>(type));
   }
 
   private findResource(id: string): WorkResource | undefined {
-    for (const type of WORK_TYPES) {
+    for (const type of DELEGATED_WORK_TYPES) {
       const resource = this.resources.find<WorkSpec, WorkStatus>(type, id);
       if (resource) return resource;
     }

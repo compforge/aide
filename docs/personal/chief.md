@@ -4,11 +4,13 @@
 
 Chief 是 Aide 在领域 root 上处理 Input／Batch 的角色：结合上下文快速判断，当轮能处理的问题直接回答或调用工具完成；需要独立推进、等待和跟踪的事情，优先关联已有 Work，再按需要创建 Task 或 Routine。分流依据是是否需要独立的工作生命周期，复杂度只是参考，调用工具不必先创建工作。
 
-Route 将用户消息或外部观察归入话题后，Chief 结合话题中的 Work 判断下一步；Secretary 根据处理事实与压力准备回顾等维护 Input。输入分配到 Topic、Task 或 Routine，本质是让一件事进入能解释它、承接它的上下文，具体模型见 [Personal 的主动性与上下文](README.md#主动性与上下文)。Chief 可直接处理、创建或删除工作，或通过 `assess_input` 向已有 Work 交接输入；Work Reconcile 决定如何改变状态与推进。需要用户决定时询问，没有值得打扰的新情况时保持安静。Chief 的判断质量，尤其是提示词、上下文组织与记忆机制，是 Personal Agent 的持续优化重点。
+Route 将用户消息或外部观察归入话题后，Chief 结合话题中的 Work 判断下一步；Secretary 根据处理事实与压力准备回顾等维护 Input。输入分配到 Topic、Task 或 Routine，本质是让一件事进入能解释它、承接它的上下文，具体模型见 [Personal 的主动性与上下文](README.md#主动性与上下文)。Chief 可直接处理、创建或删除工作，或通过 `append_input` 向已有 Work 交接输入；Work Reconcile 决定如何改变状态与推进。需要用户决定时询问，没有值得打扰的新情况时保持安静。Chief 的判断质量，尤其是提示词、上下文组织与记忆机制，是 Personal Agent 的持续优化重点。
 
 Chief 使用独立的 `chief` Harness 身份，Agent 位于 `plugins/personal/chief/agent/`；它组合 [通用 Pi](../harness/pi.md)，复用 PiAdapter 的执行与事件机制。通用边界见 [Harness](../harness/README.md)，工作生命周期与问答编排见 [Personal](README.md)。
 
 Chief 没有独立 CRD；持久状态由 [Topic.spec/status](topic.md#crd) 承载，接纳和执行由 Chief Reconciler 负责，后续维护的安排由 [Secretary](secretary.md) 负责。
+
+领域 Chief 用 `create_work` 声明当轮之后的责任。资源的 Topic 归属确定负责的 Chief。Task 和 Routine 的 Reconcile 分别调度对应 Agent。Ongoing 留在当前 Chief，`aide:followup` 只为它安排一次新的研判。创建、发现与三种责任的结束条件见[办理与沟通](README.md#后续处理的三种责任)。
 
 ## Reconciler
 
@@ -18,7 +20,7 @@ Chief 从当前 root 的已准备待办中选择独立 Input 或 Batch；一个 
 
 Chief 的接收 Reconcile 先按祖先指纹分批刷新直属待办的负责人缓存、补齐缺失分派，再分别查询独立 Input 的负责人索引和 Batch 的就绪索引，具名 agent Reconcile 驱动 root Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 由 Secretary 聚合提级后按 Normal 激活；内部维护不消费业务回执。
 
-Input.assess 保存全局唯一研判和 Chief 接纳 executionId。Chief Reconcile 在 prompt / steer / followUp 之前，通过资源事务竞争 Input 接纳；已有接纳或已完成则忽略。Topic 不保存逐条 Input 的通知进度，仍保存 execution、agent 与 Weave 通知版本。assess_input 原子完成唯一研判及 Work 交接，主动读取材料不会重新接纳；后续核对可以提交完成证据。未知投递结果保留当前执行占用；执行结束后，未完成条目释放占用并等待重试。完整查询、并发和恢复契约见 [Input](input.md#归属与-chief-通知)。
+Input.assess 保存全局唯一研判和 Chief 接纳 executionId。Chief Reconcile 在 prompt / steer / followUp 之前，通过资源事务竞争 Input 接纳；已有接纳或已完成则忽略。Topic 不保存逐条 Input 的通知进度，仍保存 execution、agent 与 Weave 通知版本。assess_input 提交唯一研判回执，主动读取材料不会重新接纳；后续核对可以提交完成证据。未知投递结果保留当前执行占用；执行结束后，未完成条目释放占用并等待重试。完整查询、并发和恢复契约见 [Input](input.md#归属与-chief-通知)。
 
 明确拒绝 steer / followUp 时恢复待通知状态。status.agent 保存 harness 和原生 sessionId，恢复由 SDK 承担。旧 Chief 自然结束后再释放成为子节点的原生句柄，不修改历史。
 
@@ -56,7 +58,7 @@ Chief Agent 负责判断，Personal Route 负责话题归位。Chief 的接收 C
 
 | Input.origin | 任务专属能力（此外共享读取、检索和 upsert_note） |
 | --- | --- |
-| channel / source / chief | say、cite_output、Work 创建和请求、文件与 CLI 操作；assess_input 可原子交接业务 Input |
+| channel / source / chief | say、cite_output、Work 创建和请求、文件与 CLI 操作 |
 | aide:followup | 跟进需要回应的事项。按 Ongoing 保存的时间核实指定问题，或复核事项是否仍需回应。有证据就记录结论，缺少决定性信息就通过 ask_me 私下询问 Me |
 | aide:curate | 普通 Note 回顾与归位、Topic 回收许可、Hermes memory/skill 写入 |
 | aide:organize | 创建或移动 Topic，归位 Input、Work 和 Note。跨 Topic 的 Note 先写目标再削减或退役来源。|
@@ -88,12 +90,12 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 
 Chief 注册以下业务工具，并按上述 Input 范围向每次模型请求暴露：
 
-- Work 工具读取、创建、更新与删除绑定会话的 Task / Routine，具体契约见 [输入交接](input.md#研判与办理)、[Task](task.md) 与 [Routine](routine.md)。
+- Work 共用创建、发现与读取入口。交办、请求和删除受托工作见 [输入交接](input.md#研判与办理)、[Task](task.md) 与 [Routine](routine.md)。Chief 自己核实进展和收尾的契约见 [Ongoing](ongoing.md)。
 - read_input 按页读取会话关联的 Input 原文与证据，补足大输入的预览。
 - say 产生独立 Output；答复是新的 Input，不挂起 Harness 等待。
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
 - 对固定成员组成的输入只调用一次 assess_input，成员研判回执由 Input Reconcile 投影；可按原成员身份交办 Work，不能把整批完成等同于 Work 完成。
-- assess_input 原子保存独立 Input 的简短研判回执，并建立 Work handle；不改写 Topic.summary / recent，不值得通知的观察可以静默完成。
+- assess_input 原子保存独立 Input 的简短研判回执；不改写 Topic.summary / recent，不值得通知的观察可以静默完成。
 - list_notes 查询 recent 之外仍保留的具体事项；move_note 在责任树内调整事项归属，保留内容与年龄；超出数量或篇幅软预算时使用 upsert_note 整合信息，用 split_note 原子拆出新篇，合并到已有目标时确认保存后用 prune_note 削减来源，或用 retire_note 退役无独立价值的整篇 Note。
 - Chief 通过 upsert_note 记录近期事项。维护 Input 可以用同一工具修订摘要，只有认识或职责范围变化时才需要写入。
 
@@ -208,7 +210,7 @@ Route、Chief、Weave 的列表在确定范围、排序和 offset 后，逐条�
 
 ### 研判与上下文
 
-assess_input 保存单次研判回执并原子交接 Work。维护 Input 用 upsert_note 的 Note 版本修订长期认识，提交时校验版本、当前执行与真实归属。upsert_note 默认当前 Topic，可指定子树中的 subject，通过 people 关联人物；不同 Note 不互相锁住。完整规则见 [Note](note.md)。
+assess_input 保存单次研判回执。维护 Input 用 upsert_note 的 Note 版本修订长期认识，提交时校验版本、当前执行与真实归属。upsert_note 默认当前 Topic，可指定子树中的 subject，通过 people 关联人物；不同 Note 不互相锁住。完整规则见 [Note](note.md)。
 
 list_topics 提供摘要预览和普通 Note 名称目录，`notes.total` 表示活跃普通 Note 总数。read_topic 返回对象认识与目录，`nextOffset` 非空时继续读取；Note 正文通过 read_note 按 ID 获取，目录以外的发现使用 list_notes。变更摘要前读取相关的完整证据。
 

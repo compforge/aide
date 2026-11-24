@@ -8,7 +8,7 @@ import type { ResourceClient } from "@compforge/aide-plugin";
 import { digest } from "../identity.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { resourceRef } from "../input/state.ts";
-import { WORK_TYPES, type WorkResource } from "../work/resources.ts";
+import { DELEGATED_WORK_TYPES, type WorkResource } from "../work/resources.ts";
 import { TOPIC_TYPE, type TopicResource } from "./model.ts";
 import { readTopicSubtree } from "./tree.ts";
 
@@ -45,7 +45,7 @@ export async function moveMaterial(resources: ResourceClient, actor: TopicResour
   const { root, topics } = await scope(resources, actor);
   const target = topics.find(t => t.metadata.uid === args.topicUid);
   if (!target) throw new Error("Target Topic is outside this root");
-  const type = args.kind === "Input" ? INPUT_TYPE : WORK_TYPES.find(t => t.kind === args.kind)!;
+  const type = args.kind === "Input" ? INPUT_TYPE : DELEGATED_WORK_TYPES.find(t => t.kind === args.kind)!;
   const material = await resources.get<InputSpec | WorkResource["spec"], InputStatus | WorkResource["status"]>({ ...type, namespace: "v1", name: args.id });
   if (!material || material.metadata.deletionTimestamp || !topics.some(t => t.metadata.uid === material.status.topic?.uid))
     throw new Error("Material is outside this root");

@@ -23,6 +23,6 @@ export function followupInputId(matter: OngoingResource) {
     return `followup-${digest([matter.metadata.uid, matter.status.planRevision])}`;
 }
 export function ongoingView(matter: OngoingResource) {
-  return { ongoingId: matter.metadata.name, uid: matter.metadata.uid, version: matter.metadata.resourceVersion,
+  return { id: matter.metadata.name, kind: "ongoing" as const, status: matter.status.closure ? "closed" as const : "open" as const, uid: matter.metadata.uid, version: matter.metadata.resourceVersion,
     ...matter.spec, progress: matter.status.progress, closure: matter.status.closure };
 }

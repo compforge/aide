@@ -183,9 +183,9 @@ test("startup followup closes a verified ongoing matter without asking Me", asyn
   const { aide } = setup(t, { async chief() {
     const current = aide.topics.resource("me")!;
     const signoff = await readNote(resources, evidence.noteId);
-    const matter = await readOngoing(resources, current, receipt.ongoingId);
+    const matter = await readOngoing(resources, current, receipt.id);
     await upsertOngoing(resources, current, {
-      ongoingId: receipt.ongoingId, version: matter.metadata.resourceVersion, outcome: signoff.text,
+      ongoingId: receipt.id, version: matter.metadata.resourceVersion, outcome: signoff.text,
     }, "close-from-signoff");
     return "Confirmed sign-off from the recorded decision";
   } });
@@ -203,6 +203,6 @@ test("startup followup closes a verified ongoing matter without asking Me", asyn
   assert.equal(requests().length, 1);
   assert.equal(requests()[0]!.spec.observation?.ongoingUid, receipt.uid);
   assert.ok(requests()[0]!.status.assess?.result);
-  assert.ok((await readOngoing(resources, root, receipt.ongoingId)).status.closure?.at);
+  assert.ok((await readOngoing(resources, root, receipt.id)).status.closure?.at);
   assert.equal(aide.outputs().length, 0);
 });

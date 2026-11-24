@@ -16,7 +16,6 @@ import { resourceRef, changeAttempt } from "../plugins/personal/input/state.ts";
 import { reportWork } from "../plugins/personal/work/report.ts";
 import { reconcileTask } from "../plugins/personal/task/reconcile.ts";
 import { finalizeExecution } from "../plugins/personal/execution/loop.ts";
-import { handoff } from "./input-state-fixture.ts";
 const definition = { kind: "task" as const, title: "Check", instruction: "Inspect evidence", trigger: null };
 const completed = { action: "done" as const, report: "Verified", notification: null, question: null, nextAt: null };
 function setup(t: TestContext) {
@@ -67,7 +66,7 @@ test("Task report commits progress with exact receipts; end of inference without
   const { aide, resources, context, get, active } = setup(t);
   const work = await aide.work("me").create(definition);
   const task = await active(work.id);
-  await aide.work("me").requestInput(work.id, { text: "later evidence" }, "later");
+  await aide.work("me").appendInput(work.id, { text: "later evidence" }, {}, "later");
   const later = aide.topics.inputStore.query("handlePending", work.uid!).find(i => i.metadata.name !== task.spec.initialInputId)!;
   const before = get(work.id);
   await assert.rejects(reportWork(resources, task, "run", { action: "done", report: "Verified", inputIds: [task.spec.initialInputId, later.metadata.name] }), /not admitted/);
@@ -92,7 +91,7 @@ test("Input assignment defeats stale idle deletion; deletion fences Chief handof
   const work = await aide.work("me").create(definition);
   await resources.patchStatus(get(work.id), { idleSince: "2000-01-01T00:00:00Z", agentStoppedAt: "2000-01-01T00:00:00Z" });
   const stale = get(work.id);
-  await aide.work("me").requestInput(work.id, { text: "new evidence" });
+  await aide.work("me").appendInput(work.id, { text: "new evidence" });
   assert.equal(get(work.id).status.idleSince, null);
   assert.equal(get(work.id).status.agentStoppedAt, null);
   await assert.rejects(resources.delete(TASK_TYPE, work.id, "v1", { uid: stale.metadata.uid, resourceVersion: stale.metadata.resourceVersion }), /version conflict/);
@@ -100,11 +99,11 @@ test("Input assignment defeats stale idle deletion; deletion fences Chief handof
   await resources.delete(TASK_TYPE, work.id, "v1", { uid: current.metadata.uid, resourceVersion: current.metadata.resourceVersion });
   assert.ok(get(work.id).metadata.deletionTimestamp);
   assert.deepEqual(aide.work("me").list(), []);
-  await assert.rejects(aide.work("me").requestInput(work.id, { text: "too late" }), /Unknown work|being deleted/);
+  await assert.rejects(aide.work("me").appendInput(work.id, { text: "too late" }), /Unknown work|being deleted/);
   const input = await aide.topics.submit("late", { origin: "channel", originId: "web", text: "late request" });
   const c = aide.topics.resource("me")!;
   await deliver(context, input, [c.metadata], "same topic");
-  await assert.rejects(handoff(aide.topics, resources, "late", [{ workUid: work.uid!, request: {} }]), /Work unavailable/);
+  await assert.rejects(aide.work("me").appendInput(work.id, "late"), /Unknown work|being deleted/);
   assert.equal(aide.topics.inputStore.get("late")!.status.handle?.[work.uid!], undefined);
 });
 
@@ -126,7 +125,7 @@ test("Task idle lifecycle releases the agent, retains its native ID, then reques
   assert.ok(get(work.id).status.agentStoppedAt);
   assert.deepEqual(get(work.id).status.agent, { harness: "task", sessionId: "native-id" });
   assert.equal(get(work.id).metadata.deletionTimestamp, undefined);
-  await aide.work("me").requestInput(work.id, { text: "Needs later inspection" }, "inspect-later");
+  await aide.work("me").appendInput(work.id, { text: "Needs later inspection" }, {}, "inspect-later");
   const unresolved = aide.topics.inputStore.query("handlePending", work.uid!)[0]!;
   await resources.patchStatus(unresolved, { handle: { ...unresolved.status.handle, [work.uid!]: {
     ...unresolved.status.handle![work.uid!]!, appliedAt: new Date().toISOString(), executionId: "previous", lastError: "Needs inspection",

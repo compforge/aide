@@ -43,7 +43,7 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit topic
       subscribe: (listener) => core.subscribe(listener), outputs: () => [], invocations: () => manager.listHarnessInvocations().map(invocation => ({ ...invocation, ...personalExecution(invocation) })), topicIds: () => ["group-a"], receive: async () => { throw new Error("Not used"); } };
     expect(topicView(projection, "group-a").blocks.some((block) => block.type === "execution")).toBe(true);
     expect(topicView(projection, "group-b").blocks).toHaveLength(0);
-    await work.requestInput(task.id, { action: "pause", text: "暂停" });
+    await work.appendInput(task.id, { text: "暂停" }, { action: "pause" });
     await manager.settled();
     expect(resources.get(observer, "observer", "v1/project/coordination").status).toMatchObject({ revision: 2 });
     await work.delete(task.id, 2);

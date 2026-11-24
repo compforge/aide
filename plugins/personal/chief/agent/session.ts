@@ -1,7 +1,8 @@
+import type { AssessInput } from "../assess.ts";
 import { followupInputId } from "../../ongoing/model.ts";
 import { readOngoing } from "../../ongoing/service.ts";
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../../batch/model.ts";
-import { assessChiefInput, chiefPreviews, type ChiefAssessment } from "../inputs.ts";
+import { assessChiefInput, chiefPreviews } from "../inputs.ts";
 import { isGateTopic } from "../../topic/boundary.ts";
 import type { MailSender } from "../../stream/sender.ts";
 import { Addresses } from "../../address/service.ts";
@@ -52,10 +53,10 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
       plugins.executionVerbs(c.status.execution.id, { topicId });
       return c;
     };
-    const assess = async (input: ChiefAssessment, toolCallId: string) => {
+    const assess = async (input: AssessInput, toolCallId: string) => {
       const c = active();
       const result = await assessChiefInput(plugins.resourceClient("personal"), c, c.status.execution!.id, input, toolCallId);
-      log.info({ topicId, inputId: input.inputId, workUids: input.workRequests?.map(r => r.workUid) ?? [] }, "Chief assessment completed");
+      log.info({ topicId, inputId: input.inputId }, "Chief assessment completed");
       return result;
     };
     const tools = chiefTools(connectors, async (id, input) => {

@@ -17,13 +17,15 @@ Personal 是 Aide 的内置个人助手插件。Me 与 Aide 单聊时，[Gate](g
 
 #### 后续处理的三种责任
 
-| Chief 承接什么 | 何时收尾 | 例子 |
-| --- | --- | --- |
-| [Task](task.md) 承接一次性目标 | 目标达成即结束，可以跨多轮执行和等待 | 把这份材料补齐并提交，以提交回执确认完成 |
-| [Routine](routine.md) 承接循环职责 | 当轮完成后等待下一次时间或事件触发 | 每周五汇总本周审批结果，下周处理新一轮材料 |
-| [Ongoing](ongoing.md) 承接需要持续关注的事项 | 同一件事有了下文就更新进展，有了结论就收尾 | 材料已提交，预计周五有答复，到时核实这次审批结果 |
+Chief 处理一条 Input 后仍要承接的责任统称 Work。先判断由谁推进，再选择种类。
 
-Task 和 Routine 由 Work 保存目标、进展、等待条件和结果依据。Chief 优先把新证据和用户决定交给已有委托。Ongoing 保存事项、进展和下次核实时间，由 `aide:followup` 核实进展。如果查明结果后还有工作要办，Chief 再决定当轮处理还是交给 Work。需要答复、交付结果、提醒或请人决定时，Chief 或工作 Agent 创建 Output。见[输出](output.md)。
+| Work | 谁推进 | 何时收尾 | 例子 |
+| --- | --- | --- | --- |
+| [Task](task.md) | Chief 将有限目标委托给 Task Agent | 目标达成即结束，可以跨多轮执行和等待 | 补齐并提交材料，以提交回执确认完成 |
+| [Routine](routine.md) | Chief 将循环职责委托给 Routine Agent | 当轮完成后等待下一次时间或事件触发 | 每周五汇总本周的审批结果 |
+| [Ongoing](ongoing.md) | 领域 Chief 留下事项，自己跟进 | 有下文就更新进展，有结论就收尾 | 材料已提交，周五核实这次审批结果 |
+
+Chief 用 `list_work` 查找已有责任。需要新增时，`create_work` 在当前 Topic 下创建对应资源并返回。Task 和 Routine 各自的 Reconcile 根据资源状态调度专门的 Agent。后来收到与已有委托相关的材料，Chief 可用 `append_input` 转交原始 Input。Ongoing 的新进展由 Chief 直接记录。约定时间到了，Secretary 递交 `aide:followup`，仍由 Chief 查证、回应并决定是否收尾。需要沟通时，Chief 或受托 Agent 创建 Output。见[输出](output.md)。
 
 ### 认识与沉淀
 

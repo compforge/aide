@@ -27,8 +27,7 @@ Gate 使用独立 `plugins/personal/gate/agent/`、`gate` Harness、提示词、
 | 角色与工具 | 职责 |
 | --- | --- |
 | Gate：list_topics / read_topic、list_notes / read_note | 全局检索领域认识，返回来源链接 |
-| Gate：list_ongoings / read_ongoing | 读取 Topic 的跟进事项、预约和结论，将 Me 的新信息交回负责领域 |
-| Gate：list_inputs / read_input、list_work / read_work | 追溯证据和工作进展；读取不改变领域执行状态 |
+| Gate：list_inputs / read_input、list_work / read_work | 追溯证据，查询 Task、Routine 或 Ongoing 的进展，按需把 Me 的新信息交回负责领域 |
 | Gate：delegate_request | 将原始 Me 请求交给一个负责领域；未确定领域时交由 Route / Default 选择 |
 | Gate：followup_request | 将 Me 的新回答、补充或变更交给原交办，保留同一责任关系 |
 | Gate：list_handoffs / read_handoff | 分页读取请求、接手、执行进展和关联 Work |

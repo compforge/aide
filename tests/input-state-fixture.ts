@@ -20,11 +20,3 @@ export async function admit(resources: ResourceClient, inputId: string, executio
   if (input.status.assess?.completedAt || input.status.assess?.executionId) return input;
   return resources.patchStatus(input, { assess: { ...input.status.assess, executionId, startedAt: new Date().toISOString() } });
 }
-
-export async function handoff(store: import("../plugins/personal/topic/store.ts").TopicStore, resources: ResourceClient, inputId: string, requests: import("../plugins/personal/chief/assess.ts").AssessInput["workRequests"], summary = "Handed to Work") {
-  const c = store.resource("me")!;
-  const executionId = c.status.execution?.id ?? "fixture";
-  if (!c.status.execution) await resources.patchStatus(c, { execution: { id: executionId, startedAt: new Date().toISOString() } });
-  await admit(resources, inputId, executionId);
-  return assessInput(resources, c, executionId, { inputId, summary, workRequests: requests });
-}

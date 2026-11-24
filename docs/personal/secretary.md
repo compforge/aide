@@ -20,7 +20,7 @@ Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为
 
 ## Note 维护
 
-Secretary 合并领域内的梳理需求，并按约定时间为开放 Ongoing 生成 followup。`upsert_ongoing` 保存核实时间，首次缺省为写入后 24 小时。curate 整理普通 Note；followup 只核实未决问题，必要时私下询问 Me。[Note 梳理](note.md#梳理与提炼)、[Ongoing 核实与收尾](ongoing.md#核实与收尾)
+Secretary 合并领域内的梳理需求，并按约定时间为开放 Ongoing 生成 followup。Chief 创建 Ongoing 时保存核实时间，缺省为 24 小时后，之后可以通过 update_ongoing 调整。curate 整理普通 Note；followup 只核实未决问题，必要时私下询问 Me。[Note 梳理](note.md#梳理与提炼)、[Ongoing 核实与收尾](ongoing.md#核实与收尾)
 
 ### 摘要复核
 

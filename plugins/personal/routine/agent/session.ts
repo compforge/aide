@@ -43,7 +43,7 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
     const tools: ToolDefinition[] = [
       ...addressReadTools(new Addresses(store.resources.storage.home), current, ref => store.topics.outputStore.deliveryCapability(ref)),
       ...workContextTools("routine", plugins.resourceClient("personal"), current, log),
-      tool({ name: "list_work", label: "List related work", description: "Page through this Topic's Task and Routine summaries; does not delegate or resume work.",
+      tool({ name: "list_work", label: "List related work", description: "Page through this Topic's Task, Routine and Ongoing summaries; does not delegate or resume work.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { offset = 0 }) { return result(contextPage(relatedWork(store, store.topicId(current().status.topic)), offset)); } }),
       tool({ name: "read_routine", label: "Read routine", description: "Read this Routine's objective, state, latest handling report, long-lived summary and Note directory. Use read_note for complete bodies.", parameters: Type.Object({}),

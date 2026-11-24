@@ -75,13 +75,18 @@ export function routeParts(store: Store) {
 
 export function relatedWork(store: Store, topicId: string) {
   const topic = store.topics.resource(topicId);
-  return store.workResources(topic ? store.topics.scope(topic.metadata.uid).map(t => t.metadata.uid) : [])
-    .sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid)).map(w => {
+  const scope = topic ? store.topics.scope(topic.metadata.uid).map(t => t.metadata.uid) : [];
+  const delegated = store.workResources(scope)
+    .map(w => {
       const work = store.toWork(w);
       return { id: work.id, uid: work.uid, topicId: work.topicId, kind: work.kind, title: preview(work.title, 200), status: work.status,
         nextAt: work.nextAt, question: preview(work.question ?? "", 500), summary: preview(work.summary, 1000), summaryUid: work.summaryUid, summaryNote: previewNoteReference(work.summaryNote), notes: noteDirectory(store.resources.storage, w.metadata.uid),
         lastReport: work.lastReport ? { at: work.lastReport.at, text: preview(work.lastReport.text, 500) } : undefined };
     });
+  const ongoing = store.ongoingResources(scope).map(w => ({ id: w.metadata.name, uid: w.metadata.uid, topicId: store.topicId(w.spec.topic),
+    kind: "ongoing" as const, title: preview(w.spec.title, 200), status: "open", nextAt: w.spec.checkAt, question: preview(w.spec.question, 500),
+    progress: preview(w.status.progress, 500) }));
+  return [...delegated, ...ongoing].sort((a, b) => (a.uid ?? "").localeCompare(b.uid ?? ""));
 }
 
 export function topicParts(store: Store, c: TopicResource | undefined, topicId: string) {

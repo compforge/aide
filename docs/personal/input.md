@@ -75,17 +75,17 @@ Normal、Immediate、内部维护和显式 handoff 保持独立 Input。Batch �
 | assess | Topic Reconcile 原子记录 Chief 接纳；Chief 用 assess_input 确认 Input 的唯一研判 |
 | handle[Work UID] | Work 应用请求，再用 report_task / report_routine 确认办理 |
 
-route_input 在同一事务写入 route 结果和一条空 assess；assess_input 在同一事务完成研判并建立必要的 handle。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 只有一个当前材料 Topic 和一个研判负责人，保存一份研判；多个 Work 仍按各自 UID 独立确认。
+route_input 在同一事务写入 route 结果和一条空 assess；assess_input 保存 Chief 的研判回执。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 只有一个当前材料 Topic 和一个研判负责人，保存一份研判；多个 Work 仍按各自 UID 独立确认。
 
 未完成可能是尚未接纳、运行或等待重试。Chief Reconciler 成功写入 Input／Batch 的终态结果即完成该项处理，Agent 调用结束不代替结果。执行失败、中断或结果写入失败时，释放执行占用并记录 lastError/errorAt、retryable；按角色 trigger.intervalSeconds 等待后重新处理原条目。已持久化的终态结果不被后续执行错误覆盖。周期性维护在上一条完成后新建 Input。Route 与 Work 的恢复仍遵循各自契约。
 
 ### 研判与办理
 
-Chief 可以直接处理、创建或删除工作。将现有 Input 交给已有 Work 时，通过 assess_input 同时完成研判和建立 handle，原始事实只保存一份。一个 Input 只有一条研判完成记录，可以交给多个 Task / Routine 办理；每个 Work 按 UID 拥有自己的记录。并发 assess_input 只有一个完成事务成功，后续调用返回已有完成事实，不覆盖摘要或追加另一组 Work 请求。
+Chief 可以直接处理、创建或删除工作。将现有 Input 交给已有 Task 或 Routine 时，通过 append_input 指定原始 inputId 并建立 handle，原始事实只保存一份。一个 Input 只有一条研判完成记录，可以交给多个 Task / Routine 办理；每个受托 Work 按 UID 拥有自己的记录。Chief 留给自己跟进的 Ongoing 由它直接更新，来源 Input 单独完成研判。并发 assess_input 只有一个完成事务成功，后续调用返回已有完成事实，保留首次提交的摘要。
 
 request 支持 context、update、pause、resume、answer；交接说明 note 与原文分开保存，update 的 changes 包含 title、instruction、trigger。Source 观察只能提供 context，不能作为控制授权。已有 handle 的请求不可替换；后来的独立请求必须有新 Input 身份。
 
-`request_work({ workId, text, action?, changes? })` 用于 Chief 独立形成的新请求，创建 origin=chief 的新 Input，按工具调用身份去重，直接建立目标 handle。针对已收到 Input 的交接使用 assess_input，避免复制原始消息。
+Chief 用 `append_input({ workId, inputId })` 向已有 Task 或 Routine 追加材料，保留原始 Input 的身份、来源与权限。同一 Input 可以追加给多个委托，每个委托独立确认一次。Chief 在已有授权内形成新决定时，可直接调用 `append_input({ workId, input: { id, text } })`。创建 Chief 来源的 Input 和建立办理关系在同一事务提交。id 可省略，由工具调用身份生成，两种形式都返回实际 inputId。
 
 Task / Routine Watch Input.handle 并按自身 UID 索引读取未完成记录。Reconcile 原子应用确定性请求并记录 appliedAt；暂停或拒绝请求可直接完成，其余材料必须由执行确认。Task / Routine 的后续输入通过原生 followUp / steer 进入当前 invocation，分别经 report_task / report_routine 独立确认。原始 Input 不复制到 spec。
 

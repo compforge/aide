@@ -1,4 +1,5 @@
-import { ongoingReadTools } from "../ongoing/tools.ts";
+import { ONGOING_TYPE, ongoingView, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
+import { workKindField } from "../work/agent/tools.ts";
 import { batchForInput } from "../batch/view.ts";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -11,7 +12,7 @@ import { listNotes } from "../note/query.ts";
 import { readNote } from "../note/service.ts";
 import { inputPrinter } from "../input/printer.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
-import { WORK_TYPES, type WorkSpec } from "../work/resources.ts";
+import { DELEGATED_WORK_TYPES, type WorkSpec } from "../work/resources.ts";
 import type { WorkAgentStatus } from "../work/agent-status.ts";
 
 const text = Type.String({ minLength: 1 });
@@ -34,7 +35,6 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
     return value;
   };
   const tools: ToolDefinition[] = [
-    ...ongoingReadTools(store.client, () => store.topics.resource("gate")!),
     tool({ name: "list_topics", label: "Find Topics", description: "Search root Topics by name/summary, or list one parent's children. Gate is excluded. Follow nextOffset for more; search before browsing all roots.",
       parameters: Type.Object({ q: Type.Optional(Type.String({ maxLength: 500 })), parentUid: Type.Optional(text), offset }),
       async execute(_id, args) {
@@ -70,10 +70,19 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
         if (!input || input.metadata.deletionTimestamp) throw new Error("Input is unavailable");
         return result({ inputId, batch: batchForInput(store.resources, input), ...pageText(inputPrinter.describe(input), offset) });
       } }),
-    tool({ name: "list_work", label: "Find Work", description: "Page Task or Routine across Topics, optionally filter topic UID and title/instruction q. Each call scans at most 20 records; follow continue even on an empty match page. Search both kinds before creating overlapping work. Reading never resumes work.",
-      parameters: Type.Object({ kind: Type.Union([Type.Literal("task"), Type.Literal("routine")]), topicUid: Type.Optional(text), q: Type.Optional(Type.String({ maxLength: 500 })), continue: Type.Optional(text) }),
+    tool({ name: "list_work", label: "Find Work", description: "Page Task, Routine or Ongoing across Topics by kind. Filter by topic UID or text; includeClosed also returns concluded Ongoing matters. Each call scans at most 20 records; follow continue even on an empty match page. Search relevant kinds before requesting work. Reading never resumes work.",
+      parameters: Type.Object({ kind: workKindField, includeClosed: Type.Optional(Type.Boolean()), topicUid: Type.Optional(text), q: Type.Optional(Type.String({ maxLength: 500 })), continue: Type.Optional(text) }),
       async execute(_id, args) {
-        const type = WORK_TYPES.find(t => t.kind.toLowerCase() === args.kind)!;
+        if (args.kind === "ongoing") {
+          const page = await store.client.page<OngoingSpec, OngoingStatus>(ONGOING_TYPE, { limit: 20, continue: args.continue,
+            ...(args.topicUid ? { matchIndex: { name: args.includeClosed ? "topic" : "openTopic", value: args.topicUid } } : {}) });
+          const items = page.items.filter(m => !m.metadata.deletionTimestamp && (args.includeClosed || !m.status.closure)
+            && (!args.q || [m.spec.title, m.spec.question, m.status.progress, m.status.closure?.outcome].join(" ").toLowerCase().includes(args.q.toLowerCase())))
+            .map(m => ({ id: m.metadata.name, uid: m.metadata.uid, kind: "ongoing", topicUid: m.spec.topic.uid, title: m.spec.title,
+              status: m.status.closure ? "closed" : "open", checkAt: m.spec.checkAt }));
+          return result({ items, scanned: page.items.length, continue: page.metadata.continue });
+        }
+        const type = DELEGATED_WORK_TYPES.find(t => t.kind.toLowerCase() === args.kind)!;
         const page = await store.client.page<WorkSpec, WorkAgentStatus>(type, { limit: 20, continue: args.continue,
           ...(args.topicUid ? { matchIndex: { name: "topic", value: args.topicUid } } : {}) });
         const items = page.items.filter(w => !w.metadata.deletionTimestamp && (!args.q || `${w.spec.title} ${w.spec.instruction}`.toLowerCase().includes(args.q.toLowerCase())))
@@ -81,10 +90,12 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
             title: value.title, status: value.status, report: value.lastReport?.text.slice(0, 500), url: topicURL(value.topicId) }; });
         return result({ items, scanned: page.items.length, continue: page.metadata.continue });
       } }),
-    tool({ name: "read_work", label: "Read Work", description: "Read Task or Routine in bounded text pages. Work is read-only; request changes through its domain Chief.",
+    tool({ name: "read_work", label: "Read Work", description: "Read Task, Routine or Ongoing in bounded text pages. Work is read-only; request changes through its domain Chief.",
       parameters: Type.Object({ id: text, offset }),
       async execute(_id, { id, offset = 0 }) {
-        const work = WORK_TYPES.map(type => store.resources.find<WorkSpec, WorkAgentStatus>(type, id)).find(Boolean);
+        const matter = store.resources.find<OngoingSpec, OngoingStatus>(ONGOING_TYPE, id);
+        if (matter && !matter.metadata.deletionTimestamp) return result({ id, ...pageText(ongoingView(matter), offset) });
+        const work = DELEGATED_WORK_TYPES.map(type => store.resources.find<WorkSpec, WorkAgentStatus>(type, id)).find(Boolean);
         if (!work || work.metadata.deletionTimestamp) throw new Error("Work is unavailable");
         const value = store.toWork(work);
         return result({ id, url: topicURL(value.topicId), ...pageText(value, offset) });

@@ -14,10 +14,8 @@ Channel / Source → Input
                 Input.status.topic + route + assess
                                          ↓
                     Topic Reconcile → Chief Agent
-                                         ↓ assess_input
-                         assess 完成 + handle[Work UID]
-                                         ↓
-                            Task / Routine Reconcile
+                         ├─ assess_input → 研判回执
+                         └─ 按需 create_work → Task / Routine / Ongoing
 ```
 
 ## CRD

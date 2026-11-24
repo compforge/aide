@@ -2,7 +2,7 @@ import { tryCreateMaintenanceInput } from "./input.ts";
 import { digest } from "../identity.ts";
 import type { ResourceReader, ResourceType } from "@compforge/aide-plugin";
 import { INPUT_TYPE } from "../input/model.ts";
-import { WORK_TYPES } from "../work/resources.ts";
+import { DELEGATED_WORK_TYPES } from "../work/resources.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 import { topicPolicy } from "../topic/config.ts";
 
@@ -33,7 +33,7 @@ export async function maintenanceAgenda(resources: ResourceReader, topics: reado
     const inputs = await thresholdCount(resources, INPUT_TYPE, "unfiled", uid, policy.maxUnfiledInput, namespace);
     let work = 0, workTruncated = false;
     const workIds: string[] = [];
-    for (const type of WORK_TYPES) {
+    for (const type of DELEGATED_WORK_TYPES) {
       if (work > policy.maxWork) { workTruncated = true; break; }
       const result = await thresholdCount(resources, type, "maintenance", uid, policy.maxWork - work, namespace);
       work += result.count; workTruncated ||= result.truncated; workIds.push(...result.ids);

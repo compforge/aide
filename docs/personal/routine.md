@@ -33,7 +33,7 @@ Operational 表达职责能否接收和处理触发，暂停、删除或需要�
 
 ### 触发与执行
 
-Routine.spec.trigger 声明 cron 或事件订阅。cron 到期可以在没有 Input 时启动一轮；事件形成 Input 并为匹配的 Routine 建立 handle。Chief 的 assess_input 或 request_work 也能向已有 Routine 提供材料和决定。事件 Input 不需要虚构 Chief assess 记录。
+Routine.spec.trigger 声明 cron 或事件订阅。cron 到期可以在没有 Input 时启动一轮；事件形成 Input 并为匹配的 Routine 建立 handle。Chief 的 append_input 也能向已有 Routine 提供材料和决定。事件 Input 不需要虚构 Chief assess 记录。
 
 接收 Controller 应用确定性请求，agent Controller 调用持续会话。先保存 status.execution 和 Input 的接纳痕迹，再提交原生执行；运行中普通 Input 通过 followUp 追加，immediate 通过 steer 追加。每条 Input 的业务回执独立于原生接收回执。
 
@@ -55,7 +55,7 @@ Routine 没有静默资源回收阶段。职责、trigger 和累计认识持续�
 | --- | --- |
 | read_routine | 读取职责、触发条件、当前状态、累计认识和近期依据 |
 | read_input | 列出待处理 Input，或分页读取分派给当前 Routine 的材料 |
-| list_work | 分页查看同会话 Task / Routine 概况，不获得其它 Work 的操作权限 |
+| list_work | 分页查看同会话 Task / Routine / Ongoing 概况，不获得其它 Work 的操作权限 |
 | read_topic | 读取所属 Topic 背景，不扩大委托授权 |
 | say | 创建用户可见 Output，关联 Routine UID、execution 和可选 Input |
 | summarize_routine | 独立修订本资源的长期认识 |
