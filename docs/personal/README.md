@@ -8,27 +8,21 @@ Personal 是 Aide 的内置个人助手插件。Input 带来内容、人物和�
 
 Aide 围绕用户目标，将大量零散、暂时性的信息整合为可持续使用的认识，并据此判断、行动和沟通。单条消息或观察的价值往往要与其它信息结合才能确定；整理需要保留重要变化、事实来源、分歧与未决问题，让用户把注意力放在需要了解和决定的事情上。
 
-从认知加工的角度看，`Input → Topic → Note → Output` 是大量输入持续收敛的过程：Topic 将相关输入放入共同上下文，Note 通过关联、核实与提炼积累有价值的认识，Output 将这些认识转化为适合具体对象的沟通。这个过程也持续整理 sensitivity/visibility：区分适用不同披露边界的内容，并随事实、公开状态与协作范围变化修订分类，让有价值的信息在合适的范围内流动。
+同一条 Input 可以同时推进两条线。Route 确定 Topic 归属，Secretary 按需把待办整理成批，Chief 结合最新 Input、已有 Note 和相关工作作判断。
 
-这是一种持续的**熵减**：零散信息逐渐形成有依据的认识，含混的披露边界逐渐变得明确。价值的汇聚与分类的整理共同构成认知质量；Note 的 review 因而既检查内容是否准确、值得保留，也检查分类是否仍然适用。具体分类与投递契约见[披露边界](disclosure.md)。
+### 办理与沟通
 
-认识与输出形成持续循环：
+Chief 判断当下要办什么、谁需要知道结果。简单事项当轮处理，需要独立推进的有限目标交给 Task，需要按时间或事件反复履行的职责交给 Routine。例如「每周日提醒我准备周报」是一项持续委托，本周提醒送达后，下周仍要履行。需要答复、交付结果、提醒或请人决定时，Chief 或工作 Agent 创建 Output。一次办理也可以静默完成。
 
-```text
-最新 Input + 已有 Note
-          ↓ 关联、核实、判断
-          ├─ 按需更新 Note
-          │    ├─ 近期：持续跟进具体事情的进展、依据与未决问题
-          │    └─ 长期：关于主题、人物、工作或沟通场合的稳定认识（summary）
-          ├─ 按需调整 Topic tree
-          └─ 产生必要的 Output：答复、结果、提醒或待决事项
+### 认识与沉淀
 
-更新后的 Note 参与下一次判断
-```
+Input 保留当时收到的局部信息。Chief 在办理时按需留下普通 Note，记录对具体事项的初步认识和待核实之处。处理 `aide:curate` 时，Chief 对照来源及相关 Note 核实、归类、合并重复内容，让事实、依据和未决问题各有归属。同时复核 sensitivity/visibility，使披露范围随事实和协作范围的变化而更新。具体分类与投递契约见[披露边界](disclosure.md)。
 
-Input 保留收到的原始内容；Agent 结合已有 Note 与最新 Input，修订对事情的认识，并判断是否需要行动或沟通。近期与长期认识统一保存为 Note：近期 Note 跟进具体事情，长期摘要 Note 通过 summaryOf 关联 Topic、Task、Routine、Person 或 Address。近期和长期表达内容的使用跨度，不代表固定 TTL，也不增加另一套正文存储。
+整理过的普通 Note 可以就是这件事的完整记录。Chief 空闲时，Secretary 安排 `aide:summary` 复核 Topic、Person 或 Address 的摘要。取舍看两个问题：下次接触这个主题、人物或场合时，哪些认识值得默认读到？已有判断是否仍然成立？有依据的长期认识才写入 Summary Note，过时的判断随之修订。episodic Note 在事项有结论后才考虑提炼，Task 和 Routine 各自维护本工作的摘要。
 
-这是持续更新的过程，不要求每条 Input 先写 Note 才能答复。简单问题可以直接回答；认知更新可以静默发生。Output 基于当前相关的 Note 与最新事实按需形成，不能只依赖可能尚未更新的摘要。Topic tree 表达哪些事情值得共同理解、哪些需要独立跟进。
+`aide:followup` 把两条线接起来。Chief 在处理 Input 时发现一件事尚无定论，可以主动在对应的 episodic Note 上安排核实。到时先查新 Input 和相关工作结果。缺少影响判断的事实时，Chief 私下问 Me，回复作为新 Input 回到同一事项。具体生命周期见[认识笔记](note.md)。
+
+**followup 跟进一件未完结的事，Routine 按轮次履行一项持续职责。** 两者都可以定时触发，区别在于本次事项有了结论之后，是否还有下一轮要办。例如「周五核实这份材料的审批结果」属于 followup，即使连续几个周五都要再查，追的仍是这一次审批，有结论就收尾。「每周五汇总本周的审批结果」属于 Routine，本周汇总发出后，这项职责继续有效，下周处理的是新一轮材料。
 
 例如，关于一次发布的讨论、评审与部署反馈形成多条 Input，相关 Note 持续记录这次发布的进展、判断依据与未决问题。得到验证的发布约束可以进入 Topic 的摘要 Note，人物明确表达并确认的职责可以进入 Person 的摘要 Note；这些事项与已有主题的联系也为 Topic tree 的调整提供依据。
 
@@ -43,10 +37,6 @@ Aide 是一个多角色并行系统。Input 经多个角色转换、加工和处
 角色的本质是 Reconciler，通过资源事实协作。Agent 为角色提供智能化执行能力，对外属于 Reconciler 的内部细节。[Secretary](secretary.md) 确定性地准备输入，Chief Reconciler 借助 Agent 完成判断并提交结果。Chief 写入 Input／Batch 的终态结果后，该项处理完成；没有写成终态的条目由后续 Chief 重新处理。后续周期任务新建 Input，Batch 成员同步属于结果投影。
 
 ## 对象与主流程
-
-Personal 的业务主线是：
-
-**Channel / Source → Input → Topic → root Chief → Task / Routine 或 Output**
 
 Channel / Source 将交流和观察形成 Input，保留事实与来源；Route 确定 Input 的 Topic 归属；当前 root Topic 的 Chief 综合子树输入，在已有授权范围内直接处理，或交给 Task / Routine 持续办理。Chief 与工作 Agent 在需要沟通时产生 Output，也可以静默完成研判或推进工作。
 
