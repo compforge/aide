@@ -14,7 +14,9 @@ Chief 的首要任务是处理 Input。有值得留存的事实或未决事项�
 
 Secretary 把同一 root Topic 下有实质变化的普通 Note 放进同一份梳理议程。默认攒到 8 篇或最早一篇等满 15 分钟就申请一次 `aide:curate`。正文、归属、关联对象、披露范围、nature 变化都值得再看。改名或调整篇幅预算沿用上次梳理结果。工作量、子摘要变化与预算压力也可以触发梳理。
 
-Chief 处理 `aide:curate` 时，对照相关 Input、Work 和其他 Note 核对事实，为保留的内容选定 `nature`，按需纠正早先的判断、拆开混杂的事项或合并重复记录。若现有内容和分类已经恰当，核对后即可确认当前版本。Chief 在 `assess_input.curatedNotes` 中提交实际梳理过的普通 Note 及其最终版本，包括拆分、合并的目标。梳理回执与 Input 完成状态在同一事务保存。未处理的材料和并发产生的新版本留待后续梳理。
+Chief 处理 `aide:curate` 时，对照相关 Input、Work 和其他 Note 核对事实，为保留的内容选定 `nature`，按需纠正早先的判断、拆开混杂的事项或合并重复记录。若现有内容和分类已经恰当，核对后即可确认当前版本。Chief 在 `assess_input.curatedNotes` 中提交实际梳理过的普通 Note 及其最终版本，包括拆分、合并的目标。如果草稿里还有要办的事，先查已有 Work。在授权范围内追加材料、更新 Ongoing，或引用这篇 Note 创建合适的责任。确认 Work 已承接后，保留 Note 中仍有独立价值的事实与方法；整篇仅重复工作安排时可以退役。
+
+梳理回执逐篇记录结果，与已确认版本在同一事务保存。部分版本过期时，有效回执仍然生效。整批提交都无法确认且有版本冲突或缺少 nature 时，Chief 有一次在本轮重读并更正的机会。仍未解决的材料保留在待梳理队列，以本轮暂缓时间参与下一轮排序，让其他等待中的 Note 先得到处理。
 
 ### 从事项结论到长期认识
 
@@ -37,6 +39,7 @@ Chief 处理 `aide:curate` 时，对照相关 Input、Work 和其他 Note 核对
 | metadata.creationTimestamp | 创建时间 |
 | status.updatedAt | 最近一次内容修改时间 |
 | status.writer | Agent 写入者资源和 executionId；用户编辑、配置合并与 Weave 创建摘要不伪造 Agent 执行身份 |
+| status.curationRetry | 最近一次暂缓的材料指纹、时间和梳理 Input UID |
 | status.curated | 最近一次确认的材料指纹和梳理 Input UID，可回查该次完成回执 |
 | status.pruned / retired | 最近删减或整篇退役的时间、原因、执行身份；退役保留正文和原内容版本 |
 | status.splitFrom | 新篇记录拆分来源 Note 的 UID 和当时的内容版本 |

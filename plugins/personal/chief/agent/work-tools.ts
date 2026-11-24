@@ -4,5 +4,7 @@ import type { WorkService } from "../../work/service.ts";
 
 export function workTools(work: WorkService): ChiefToolDefinition[] {
   return sharedWorkTools(work).map(tool => ({ ...tool,
-    inputOrigins: ["list_work", "read_work"].includes(tool.name) ? INPUT_ORIGINS : BUSINESS_INPUT_ORIGINS }));
+    inputOrigins: ["list_work", "read_work"].includes(tool.name) ? INPUT_ORIGINS
+      : tool.name === "upsert_work" ? [...BUSINESS_INPUT_ORIGINS, "aide:curate", "aide:followup"]
+      : tool.name === "append_input" ? [...BUSINESS_INPUT_ORIGINS, "aide:curate"] : BUSINESS_INPUT_ORIGINS }));
 }

@@ -116,7 +116,7 @@ test("Gate read tools discover multiple roots and enforce the active owner on ev
   const matter = await upsertOngoing(resources, writer, { title: "Awaiting the approval" }, "approval");
   assert.equal((await call("list_work", { kind: "ongoing", topicUid: second.metadata.uid })).items[0].id, matter.id);
   assert.equal(JSON.parse((await call("read_work", { id: matter.id })).text).title, matter.title);
-  assert.ok(!tools.some(tool => tool.name === "update_ongoing" || tool.name === "create_work"));
+  assert.ok(!tools.some(tool => tool.name === "upsert_work"));
   assert.equal((await call("list_work", { kind: "routine", q: "domain" })).items[0].id, work.id);
   await assert.rejects(aide.work("gate").create({ kind: "routine", title: "Forbidden Gate work", instruction: "Must delegate", trigger: { cron: null, timezone: "UTC", event: "check" } }), /cannot own new Work/);
   await assert.rejects(aide.work("gate").appendInput(work.id, { text: "change domain" }), /Unknown work/);

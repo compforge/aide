@@ -81,7 +81,8 @@ export interface Attempt {
   retryable?: boolean;
 }
 export interface Assessment extends Attempt {
-  result?: { summary: string; curatedNotes?: { noteId: string; version: string }[]; disposition?: "completed" | "cancelled" | "rejected" };
+  curationRetried?: boolean;
+  result?: { summary: string; noteResults?: import("./assessment.ts").NoteAssessment[]; curatedNotes?: { noteId: string; version: string }[]; disposition?: "completed" | "cancelled" | "rejected" };
 }
 /** @spec Persisted terminal results end assessment; retryable execution errors leave it pending. */
 export const assessmentFinished = (assessment?: Assessment): boolean => !!(assessment?.completedAt || (assessment?.lastError && !assessment.retryable));

@@ -71,11 +71,11 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
         default: return { text: "Analysis reported" };
       }
     }
-    if (names.includes("create_work")) {
+    if (names.includes("upsert_work")) {
       const input = aide.topics.inputStore.list().find(i => i.spec.handoff)!;
       switch (chiefStep++) {
         case 0: return { tool: "report_handoff", args: { id: input.spec.handoff!.id, inputId: input.metadata.name, phase: "working", report: "Domain accepted analysis" } };
-        case 1: return { tool: "create_work", args: { kind: "task", title: "Domain analysis", instruction: "Analyze domain evidence and reply to the handoff", trigger: null, inputId: input.metadata.name } };
+        case 1: return { tool: "upsert_work", args: { kind: "task", title: "Domain analysis", instruction: "Analyze domain evidence and reply to the handoff", trigger: null, inputId: input.metadata.name } };
         case 2: return { tool: "assess_input", args: { inputId: input.metadata.name, summary: "Assigned analysis to domain Task" } };
         default: return { text: "Domain task assigned" };
       }
@@ -435,11 +435,11 @@ test("Chief executes Work and independent Input tools through the SDK and keeps 
     if (work) id = work.id;
     if (routine) routineId = routine.id;
     switch (index - 1) {
-      case 0: return { tool: "create_work", args: { kind: "task", title: "检查仓库", instruction: "检查 aide", trigger: null, inputId } };
+      case 0: return { tool: "upsert_work", args: { kind: "task", title: "检查仓库", instruction: "检查 aide", trigger: null, inputId } };
       case 1: return { tool: "list_work", args: {} };
       case 2: return { tool: "read_work", args: { id } };
       case 3: return { tool: "append_input", args: { workId: id, input: { id: "pause-aide", text: "暂停" }, action: "pause" } };
-      case 4: assert.equal(work?.status, "ready"); return { tool: "create_work", args: {
+      case 4: assert.equal(work?.status, "ready"); return { tool: "upsert_work", args: {
         kind: "routine", title: "定期检查仓库", instruction: "检查 aide", trigger: { cron: "0 9 * * *", timezone: "UTC", event: null },
       } };
       case 5: assert.notEqual(id, routineId); return { tool: "create_input", args: { text: "修改名称" } };
@@ -667,7 +667,7 @@ test("Chief uses bundled Hermes memory across fresh native sessions while generi
   assert.match(readFileSync(join(memoryAgentDir, "pi-hermes-memory", "USER.md"), "utf8"), new RegExp(marker));
   assert.match(JSON.stringify(writer.requests[0]!.messages), /memory-policy/);
   const names = (writer.requests[0]!.tools as { function: { name: string } }[]).map((tool) => tool.function.name);
-  for (const name of ["memory_add", "memory_replace", "memory_remove", "memory_search", "session_search", "create_work"]) assert.ok(names.includes(name), name);
+  for (const name of ["memory_add", "memory_replace", "memory_remove", "memory_search", "session_search", "upsert_work"]) assert.ok(names.includes(name), name);
   await writer.adapter.close(writer.ref());
 
   const reader = await setup(t, (_request, index) => index === 0
@@ -741,7 +741,7 @@ test("Routine uses its dedicated Pi agent and independently configured package s
   for (const request of requests) {
     assert.match(JSON.stringify(request.messages), /fixture-as-ops/);
     assert.match(JSON.stringify(request.tools), /report_routine/);
-    assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|create_work|report_task/);
+    assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|upsert_work|report_task/);
   }
 });
 
@@ -800,7 +800,7 @@ test("Route exposes only routing, catalog and shared-memory retrieval tools", as
     assert.match(JSON.stringify(request.messages), /You are Route/);
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
     for (const name of ["route_input", "list_topics", "read_input", "memory_search"]) assert.ok(names.includes(name), name);
-    for (const name of ["say", "assess_input", "create_work", "bash", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
+    for (const name of ["say", "assess_input", "upsert_work", "bash", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
     return { text: answer };
   }, "route");
   const result = await fixture.run(JSON.stringify({ inputs: [{ id: "one", text: "event" }], topics: [] }), "route-one");
@@ -1015,7 +1015,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
   const fixture = await setup(t, (request, index) => {
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
     for (const tool of [`read_${kind}`, "read_input", "read_topic", "list_addresses", "read_address", "say", `report_${kind}`, "upsert_note", `summarize_${kind}`]) assert.ok(names.includes(tool));
-    assert.equal(names.includes("create_work"), false);
+    assert.equal(names.includes("upsert_work"), false);
     assert.equal(names.includes("release_topic"), false);
     switch (index % 8) {
       case 0: return { tool: `read_${kind}`, args: {} };
@@ -1406,9 +1406,28 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
     assert.equal(fixture.requests.length, 5);
     assert.equal(reviewed, 1); assert.equal(assessed, 0); assert.equal(said, 1);
     assert.deepEqual(switched, ["aide:curate", "channel"]);
-    assert.match(JSON.stringify(fixture.requests[1]!.messages), /Assess only Inputs supported/);
+    assert.match(JSON.stringify(fixture.requests[1]!.messages), /Assess only business material/);
     assert.match(JSON.stringify(fixture.requests[3]!.messages), /not found|unavailable|not available/i);
     assert.ok(task.inputs.some(i => i.id === "maintenance"), "interruption does not acknowledge maintenance");
+  } finally { session.dispose(); }
+});
+
+test("followup cannot create Work or revise another Ongoing", async t => {
+  const fixture = await setup(t, (_request, index) => {
+    if (index === 0) return { tool: "upsert_work", args: { kind: "ongoing", title: "Another responsibility" } };
+    if (index === 1) return { tool: "upsert_work", args: { kind: "ongoing", workId: "other", version: "1", progress: "Updated" } };
+    return { text: "Continue the assigned check only" };
+  }, "chief");
+  const session = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding: {
+    read: () => ({ executionId: "check", origin: "aide:followup", inputs: [{ id: "assigned", origin: "aide:followup", immediate: false, text: "Verify receipt" }] }),
+    inputOrigin: () => "aide:followup", ongoingCheck: async () => "unrelated-check", changed() {},
+  } });
+  try {
+    await session.prompt("Verify receipt");
+    assert.equal(fixture.requests.length, 3);
+    const transcript = JSON.stringify(fixture.requests[2]!.messages);
+    assert.equal(transcript.match(/Update only the Ongoing and check plan admitted/g)?.length, 2);
+    assert.deepEqual(fixture.work.listItems(), []);
   } finally { session.dispose(); }
 });
 
@@ -1430,8 +1449,8 @@ test("Chief restores the same session with the new execution's Input tools", { t
     await resumed.prompt("Business input");
     assert.equal(resumed.sessionId, sessionId);
     const names = (index: number) => (fixture.requests[index]!.tools as { function: { name: string } }[]).map(tool => tool.function.name);
-    assert.ok(names(0).includes("memory_add")); assert.ok(!names(0).includes("create_work"));
-    assert.ok(names(1).includes("create_work")); assert.ok(!names(1).includes("memory_add"));
+    assert.ok(names(0).includes("memory_add")); assert.ok(names(0).includes("upsert_work"));
+    assert.ok(names(1).includes("upsert_work")); assert.ok(!names(1).includes("memory_add"));
     const transcript = JSON.stringify(fixture.requests[1]!.messages);
     assert.match(transcript, /Review input/); assert.match(transcript, /Business input/);
     assert.match(transcript, /Current Input origin: channel/);

@@ -5,7 +5,7 @@ import { ResourceRefSchema } from "../topic/ref.ts";
 
 export const ONGOING_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Ongoing" } as const;
 export const OngoingSpecSchema = z.object({
-  topic: ResourceRefSchema, title: z.string().trim().min(1).max(200),
+  topic: ResourceRefSchema, sourceUid: z.string().optional(), title: z.string().trim().min(1).max(200),
   question: z.string().trim().min(1).max(1000).optional(), checkAt: z.iso.datetime().optional(),
 }).strict();
 export const OngoingStatusSchema = z.object({

@@ -1,4 +1,7 @@
 import { ongoingView, ONGOING_TYPE, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
+import { ResourceAlreadyExists } from "@compforge/aide-plugin";
+import { NOTE_TYPE, type NoteSpec, type NoteStatus } from "../note/model.ts";
+import { noteRoot } from "../note/reconcile.ts";
 import { upsertOngoing } from "../ongoing/service.ts";
 import { readTopicInScope } from "../topic/tree.ts";
 import { isGateTopic } from "../topic/boundary.ts";
@@ -8,6 +11,7 @@ import type { TopicResource } from "../topic/model.ts";
 import { INPUT_TYPE, isInternalInput, type InputStatus } from "../input/model.ts";
 import { resourceRef } from "../input/state.ts";
 import { WorkInputRequestSchema } from "./model.ts";
+import { workObservation } from "./status.ts";
 import { workType } from "./resources.ts";
 import { digest } from "../identity.ts";
 import { randomUUID } from "node:crypto";
@@ -95,34 +99,62 @@ export class WorkService {
     return { inputId };
   }
 
-  async create(definition: WorkDefinition, inputId?: string, key?: string): Promise<Work>;
-  async create(definition: OngoingDefinition, inputId?: undefined, key?: string): Promise<ReturnType<typeof ongoingView>>;
-  async create(definition: WorkDefinition | OngoingDefinition, inputId?: string, key: string = randomUUID()) {
+  async sourceUid(id: string): Promise<string> {
+    const input = this.store.topics.inputStore.get(id);
+    if (input) {
+      if (isInternalInput(input.spec) || input.metadata.deletionTimestamp || !input.status.topic || !this.scope().includes(input.status.topic.uid))
+        throw new Error("Work requires a business Input in this Topic");
+      return input.metadata.uid;
+    }
+    const note = this.store.resources.find<NoteSpec, NoteStatus>(NOTE_TYPE, id);
+    if (note) {
+      const root = await noteRoot({ resources: this.store.client }, note);
+      if (note.metadata.deletionTimestamp || !root || !this.scope().includes(root.metadata.uid)) throw new Error("Source Note unavailable in this Topic");
+      return note.metadata.uid;
+    }
+    const work = await this.readItem(id);
+    if (!work.uid) throw new Error("Source Work unavailable");
+    return work.uid;
+  }
+
+  async updateOngoing(id: string, version: string, changes: { title?: string; progress?: string; outcome?: string; question?: string | null; checkAt?: string | null }, key: string) {
+    const actor = this.store.topics.resource(this.topicId);
+    if (!actor) throw new Error("Ongoing requires an active domain Chief");
+    const matter = await upsertOngoing(this.store.client, actor, { ...changes, ongoingId: id, version }, key);
+    this.log.info({ workId: id, topicId: this.topicId, checkAt: matter.checkAt, closed: !!matter.closure }, "Ongoing updated");
+    return matter;
+  }
+
+  async create(definition: WorkDefinition, inputId?: string, key?: string, sourceUid?: string): Promise<Work>;
+  async create(definition: OngoingDefinition, inputId?: undefined, key?: string, sourceUid?: string): Promise<ReturnType<typeof ongoingView>>;
+  async create(definition: WorkDefinition | OngoingDefinition, inputId?: string, key: string = randomUUID(), sourceUid?: string) {
+    const topic = await this.store.topics.ensure(this.topicId);
     if (definition.kind === "ongoing") {
       if (inputId) throw new Error("Ongoing stays with Chief and cannot take an Input handle");
-      const actor = this.store.topics.resource(this.topicId);
-      if (!actor) throw new Error("Ongoing requires an active domain Chief");
       const { kind, ...plan } = definition;
-      const matter = await upsertOngoing(this.store.client, actor, plan, key);
+      const matter = await upsertOngoing(this.store.client, topic, plan, key, sourceUid);
       this.log.info({ workId: matter.id, topicId: this.topicId, kind }, "Work tool created work");
       return matter;
     }
     const work = newWork(this.topicId, definition);
-    await this.store.topics.ensure(this.topicId);
-    if (work.kind === "task") {
-      const topic = this.store.topics.resource(this.topicId)!;
-      const initialInputId = inputId ?? digest([topic.metadata.uid, "chief-task", key]);
-      work.id = digest([topic.metadata.uid, initialInputId, key]);
-      const at = new Date().toISOString();
-      await commitStatus(this.store.client, [
+    if (inputId) sourceUid ??= this.store.topics.inputStore.get(inputId)?.metadata.uid;
+    const origin = sourceUid ? digest([sourceUid, work.title]) : key;
+    const initialInputId = inputId ?? digest([topic.metadata.uid, "chief-task", origin]);
+    work.id = digest([topic.metadata.uid, work.kind, origin, inputId ?? null]);
+    const type = workType(work.kind);
+    if (this.store.resources.find(type, work.id)) return this.read(work.id);
+    const spec = { title: work.title, instruction: work.instruction, paused: false, ...(sourceUid ? { sourceUid } : {}) };
+    const status = { topic: resourceRef(topic), waiting: null };
+    try {
+      await commitStatus(this.store.client, work.kind === "task" ? [
         ...(!inputId ? [{ operation: "create" as const, type: INPUT_TYPE, name: initialInputId,
-          ...chiefDecision(topic, work.instruction, at) }] : []),
-        { operation: "create", type: workType("task"), name: work.id,
-          spec: { title: work.title, instruction: work.instruction, paused: false, initialInputId },
-          status: { topic: resourceRef(topic), waiting: null } },
-      ]);
-    } else await this.store.save(work);
-    this.log.info({ workId: work.id, topicId: this.topicId, kind: work.kind }, "Work tool created work");
+          ...chiefDecision(topic, work.instruction, new Date().toISOString()) }] : []),
+        { operation: "create", type, name: work.id, spec: { ...spec, initialInputId }, status },
+      ] : [{ operation: "create", type, name: work.id, spec: { ...spec, trigger: work.trigger }, status: { ...status, ...workObservation(work, 1), summaryRevision: "" } }]);
+    } catch (error) {
+      if (!(error instanceof ResourceAlreadyExists || error instanceof Error && error.name === "ResourceAlreadyExists") || !this.store.resources.find(type, work.id)) throw error;
+    }
+    this.log.info({ workId: work.id, topicId: this.topicId, kind: work.kind, sourceUid }, "Work tool created work");
     return this.read(work.id);
   }
 
