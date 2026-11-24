@@ -95,7 +95,7 @@ test("Routine silence releases only the agent; events clear idle state and delet
   const input = await aide.topics.submit("late", { origin: "channel", originId: "web", text: "late request" });
   const c = aide.topics.resource("me")!;
   await deliver(context, input, [c.metadata], "same topic");
-  await assert.rejects(aide.work("me").appendInput(work.id, "late"), /Unknown work|being deleted/);
+  await assert.rejects(aide.work("me").appendInput(work.id, { id: "late" }), /Unknown work|being deleted/);
   await reconcileRoutine(context, execution, get(work.id));
   assert.equal(aide.topics.inputStore.query("handlePending", work.uid!).length, 0);
 });

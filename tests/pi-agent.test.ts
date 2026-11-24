@@ -443,7 +443,7 @@ test("Chief executes Work and independent Input tools through the SDK and keeps 
         kind: "routine", title: "定期检查仓库", instruction: "检查 aide", trigger: { cron: "0 9 * * *", timezone: "UTC", event: null },
       } };
       case 5: assert.notEqual(id, routineId); return { tool: "create_input", args: { text: "修改名称" } };
-      case 6: return { tool: "append_input", args: { workId: routineId, inputId: lastInputId(),
+      case 6: return { tool: "append_input", args: { workId: routineId, input: { id: lastInputId() },
         action: "update", changes: { title: "每天检查仓库" } } };
       case 7: assert.equal(routine?.title, "定期检查仓库"); return { tool: "delete_work", args: { id, revision: 1 } };
       case 8: return { tool: "delete_work", args: { id: routineId, revision: 1 } };

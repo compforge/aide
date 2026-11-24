@@ -43,7 +43,7 @@ Chief 创建 Task 时通过 `create_work` 传入 `inputId`。Task.spec.initialIn
 
 没有外部 Input 的主动决定先经 `create_input` 记录为独立的 origin=chief Input，再创建 Task；它不会扩大已有委托授权。程序调用 WorkService.create 省略 inputId 时，将等价的独立 Input 与 Task 一起创建。
 
-后续材料通过 append_input 交给已有 Task，inputId 指向原始 Input。接收 Controller 应用确定性请求；agent Controller 负责持续执行。空闲时调用 prompt，运行中普通输入 followUp、immediate 输入 steer。Input.handle.executionId 先于提交持久化；一个 invocation 可以处理多条 Input，但每条办理结果独立确认。
+后续材料通过 append_input 交给已有 Task，input.id 指向原始 Input。接收 Controller 应用确定性请求；agent Controller 负责持续执行。空闲时调用 prompt，运行中普通输入 followUp、immediate 输入 steer。Input.handle.executionId 先于提交持久化；一个 invocation 可以处理多条 Input，但每条办理结果独立确认。
 
 ### 静默与回收
 

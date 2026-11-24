@@ -103,7 +103,7 @@ test("Input assignment defeats stale idle deletion; deletion fences Chief handof
   const input = await aide.topics.submit("late", { origin: "channel", originId: "web", text: "late request" });
   const c = aide.topics.resource("me")!;
   await deliver(context, input, [c.metadata], "same topic");
-  await assert.rejects(aide.work("me").appendInput(work.id, "late"), /Unknown work|being deleted/);
+  await assert.rejects(aide.work("me").appendInput(work.id, { id: "late" }), /Unknown work|being deleted/);
   assert.equal(aide.topics.inputStore.get("late")!.status.handle?.[work.uid!], undefined);
 });
 

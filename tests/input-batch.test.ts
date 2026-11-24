@@ -221,8 +221,8 @@ test("Chief can pass original Batch materials to existing Work independently of 
   const batch = (await preparedIntake(f.resources, f.root())).batch!;
   await reconcileChief(f.context, f.execution("handoff", async () => {
     const service = f.aide.work("root");
-    await assert.rejects(service.appendInput(work.id, "a", { action: "pause" }), /Source facts/);
-    for (const inputId of ["a", "b"]) await service.appendInput(work.id, inputId);
+    await assert.rejects(service.appendInput(work.id, { id: "a" }, { action: "pause" }), /Source facts/);
+    for (const inputId of ["a", "b"]) await service.appendInput(work.id, { id: inputId });
     assert.equal((await batchById(f.resources, batch.metadata.uid))!.status.phase, "running");
     await assessChiefInput(f.resources, f.root(), "handoff", { inputId: batch.metadata.uid, summary: "Delegated evidence" }, "call");
     for (const id of ["a", "b"]) {

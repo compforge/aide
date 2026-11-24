@@ -54,8 +54,8 @@ test("Failed assessment preserves the separate Work receipt and Topic state", as
   await deliver(context, input, [c.metadata], "topic");
   await resources.patchStatus(aide.topics.resource("me")!, { execution: { id: "live", startedAt: new Date().toISOString() } });
   await admit(resources, "fact", "live");
-  await assert.rejects(aide.work("me").appendInput(foreign.id, "fact"), /Unknown work/);
-  await aide.work("me").appendInput(w.id, "fact");
+  await assert.rejects(aide.work("me").appendInput(foreign.id, { id: "fact" }), /Unknown work/);
+  await aide.work("me").appendInput(w.id, { id: "fact" });
   const before = aide.topics.inputStore.get("fact")!;
   const handlesBefore = aide.topics.inputStore.query("handlePending", w.uid!);
   const topicBefore = aide.topics.resource("me")!.status;
@@ -82,7 +82,7 @@ test("Input protects every unfinished stage; deleting its Work ends handling and
   await assert.rejects(second(), /capacity/);
   await resources.patchStatus(aide.topics.resource("me")!, { execution: { id: "live", startedAt: new Date().toISOString() } });
   await admit(resources, "one", "live");
-  await aide.work("me").appendInput(w.id, "one");
+  await aide.work("me").appendInput(w.id, { id: "one" });
   await assessInput(resources, c, "live", { inputId: "one", summary: "Delegated" });
   await assert.rejects(second(), /capacity/);
   const target = (await resources.list(TASK_TYPE))[0]!;

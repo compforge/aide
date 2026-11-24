@@ -80,6 +80,7 @@ test(`${definition.kind} CRUD preserves identity, enforces revisions and topic s
 test("Inline Input keeps its identity across recipients and rejects conflicting content or provenance", async t => {
   const { store, service } = setup(t);
   const first = await service.create(task), second = await service.create(task);
+  await assert.rejects(service.appendInput(first.id, {}), /Supply input.id or input.text/);
   const decision = { id: "check-change", text: "Verify the change" };
   const [left, right] = await Promise.all([service.appendInput(first.id, decision), service.appendInput(second.id, decision)]);
   assert.equal(left.inputId, decision.id);
@@ -108,10 +109,10 @@ test("Work Reconcile validates requests and only explicit control can resume pau
   await service.appendInput(work.id, { text: "暂停" }, { action: "pause" }); await consume(work.id);
   assert.equal(service.read(work.id).status, "paused");
   await seedInput(store.topics, "pod", { topicId: "me", origin: "source", originId: "personal.environments", text: "Pod replaced" });
-  await assert.rejects(service.appendInput(work.id, "pod", { action: "resume" }), /Source facts/);
-  await assert.rejects(service.appendInput(work.id, "missing", { action: "context" }), /Input missing/);
-  await service.appendInput(work.id, "pod", { action: "context", note: "相关服务变化" });
-  await service.appendInput(work.id, "pod", { action: "context", note: "相关服务变化" });
+  await assert.rejects(service.appendInput(work.id, { id: "pod" }, { action: "resume" }), /Source facts/);
+  await assert.rejects(service.appendInput(work.id, { id: "missing" }, { action: "context" }), /Input missing/);
+  await service.appendInput(work.id, { id: "pod" }, { action: "context", note: "相关服务变化" });
+  await service.appendInput(work.id, { id: "pod" }, { action: "context", note: "相关服务变化" });
   await consume(work.id);
   const paused = service.read(work.id);
   assert.equal(paused.status, "paused");
@@ -179,7 +180,7 @@ test("Chief appends the same original Input to two works without losing observat
     assert.doesNotMatch(input.description, /Observation:/);
     assert.match(input.description, /observation evidence.*read_input/);
     assert.deepEqual(aide.topics.inputStore.get(input.inputId)!.spec.observation, observation);
-    for (const id of [taskId, routineId]) await aide.work("me").appendInput(id, input.inputId, { note: "核对 executor 变化" });
+    for (const id of [taskId, routineId]) await aide.work("me").appendInput(id, { id: input.inputId }, { note: "核对 executor 变化" });
     return "已交给相关工作核对。";
   }, execute: async (work) => {
     executions++;

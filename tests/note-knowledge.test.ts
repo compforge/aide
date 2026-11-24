@@ -493,7 +493,7 @@ test("Chief declares all responsibilities through Work tools and keeps Ongoing o
   assert.equal(matter.kind, "ongoing");
   assert.equal((await call("list_work", {})).some((w: { id: string }) => w.id === matter.id), true);
   assert.equal((await call("read_work", { id: matter.id })).version, matter.version);
-  await assert.rejects(call("append_input", { workId: matter.id, inputId: input.metadata.name }), /Unknown work/);
+  await assert.rejects(call("append_input", { workId: matter.id, input: { id: input.metadata.name } }), /Unknown work/);
   assert.equal(f.aide.topics.inputStore.get(input.metadata.name)?.status.handle?.[matter.uid], undefined);
   const followupTools = toolsForInput(tools, "aide:followup");
   assert.ok(followupTools.includes("update_ongoing"));

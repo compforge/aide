@@ -23,7 +23,8 @@ export const WorkDefinitionSchema = z.object({
 export type WorkDefinition = z.infer<typeof WorkDefinitionSchema>;
 type OngoingDefinition = { kind: "ongoing"; title: string; progress?: string; question?: string; checkAt?: string };
 const decisionText = z.string().trim().min(1).max(32000);
-const inlineDecision = z.object({ id: z.string().trim().min(1).optional(), text: decisionText }).strict();
+const appendMaterial = z.object({ id: z.string().min(1).optional(), text: decisionText.optional() }).strict()
+  .refine(input => input.id !== undefined || input.text !== undefined, "Supply input.id or input.text");
 
 function chiefDecision(topic: TopicResource, text: string, at: string) {
   const ref = resourceRef(topic);
@@ -124,14 +125,14 @@ export class WorkService {
   /** @spec A Task or Routine receives an original Input once. Concurrent appends retain each recipient's receipt.
    * @link docs/personal/input.md#研判与办理
    */
-  async appendInput(id: string, material: string | z.input<typeof inlineDecision>, raw: z.input<typeof WorkInputRequestSchema> = {}, key: string = randomUUID()) {
+  async appendInput(id: string, material: z.input<typeof appendMaterial>, raw: z.input<typeof WorkInputRequestSchema> = {}, key: string = randomUUID()) {
     const request = WorkInputRequestSchema.parse(raw);
     const actor = this.store.topics.resource(this.topicId);
     if (!actor) throw new Error("Work Topic is unavailable");
-    const decision = typeof material === "string" ? undefined : inlineDecision.parse(material);
-    const inputId = typeof material === "string" ? material : decision?.id ?? digest([actor.metadata.uid, "chief-input", key]);
+    const { id: suppliedId, text } = appendMaterial.parse(material);
+    const inputId = suppliedId ?? digest([actor.metadata.uid, "chief-input", key]);
     const at = new Date().toISOString();
-    const draft = decision && chiefDecision(actor, decision.text, at);
+    const draft = text === undefined ? undefined : chiefDecision(actor, text, at);
     for (let attempt = 0; ; attempt++) {
       const work = this.read(id);
       const target = this.store.resources.get(workType(work.kind), id);

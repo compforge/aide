@@ -50,15 +50,14 @@ export function workTools(work: WorkService): ToolDefinition[] {
         return result(await work.create({ kind, title, instruction, trigger }, inputId, callId));
       },
     }),
-    tool({ name: "append_input", label: "Append input", description: "Send material or a decision to an existing Task or Routine. Pass inputId for original material (a member ID for a batch), or input with text and an optional stable id for a new Chief decision within existing authority. Inline creation and attachment commit together. Returns inputId.",
-      parameters: Type.Object({ workId: id, inputId: Type.Optional(id), input: Type.Optional(Type.Object({ id: Type.Optional(id), text: Type.String({ minLength: 1, maxLength: 32000 }) }, { additionalProperties: false })), note: Type.Optional(id),
+    tool({ name: "append_input", label: "Append input", description: "Send material or a decision to an existing Task or Routine. Set input.id to reference original material (a member ID for a batch). For a new Chief decision within existing authority, supply input.text and optionally input.id. Inline creation and attachment commit together. Returns inputId.",
+      parameters: Type.Object({ workId: id, input: Type.Object({ id: Type.Optional(id), text: Type.Optional(Type.String({ minLength: 1, maxLength: 32000 })) }, { minProperties: 1, additionalProperties: false }), note: Type.Optional(id),
         action: Type.Optional(Type.Union([Type.Literal("context"), Type.Literal("update"), Type.Literal("answer"), Type.Literal("resume"), Type.Literal("pause")])),
         changes: Type.Optional(Type.Partial(Type.Object({ title: definition.title, instruction: definition.instruction, trigger: definition.trigger }, { additionalProperties: false }))),
       }, { additionalProperties: false }),
-      async execute(callId, { workId, inputId, input, ...args }, signal) {
+      async execute(callId, { workId, input, ...args }, signal) {
         signal?.throwIfAborted();
-        if ((input === undefined) === (inputId === undefined)) throw new Error("Supply exactly one of inputId and input");
-        return result(await work.appendInput(workId, input ?? inputId!, args, callId));
+        return result(await work.appendInput(workId, input, args, callId));
       },
     }),
     tool({ name: "delete_work", label: "Delete work",
