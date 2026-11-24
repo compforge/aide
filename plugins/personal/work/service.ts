@@ -60,10 +60,14 @@ export class WorkService {
     return this.store.workResources(this.scope()).map(r => this.store.toWork(r));
   }
 
-  listItems(kind?: Work["kind"] | "ongoing", includeClosed = false) {
-    const scope = this.scope();
-    const delegated = kind === "ongoing" ? [] : this.store.workResources(scope).map(r => this.store.toWork(r)).filter(w => !kind || w.kind === kind);
-    const ongoing = kind && kind !== "ongoing" ? [] : this.store.ongoingResources(scope, includeClosed).map(ongoingView);
+  listItems({ kind, includeClosed = false, scope = "subtree" }: {
+    kind?: Work["kind"] | "ongoing"; includeClosed?: boolean; scope?: "topic" | "subtree";
+  } = {}) {
+    const topic = this.store.topics.resource(this.topicId);
+    if (!topic) return [];
+    const topicUids = scope === "topic" ? [topic.metadata.uid] : this.store.topics.scope(topic.metadata.uid).map(t => t.metadata.uid);
+    const delegated = kind === "ongoing" ? [] : this.store.workResources(topicUids).map(r => this.store.toWork(r)).filter(w => !kind || w.kind === kind);
+    const ongoing = kind && kind !== "ongoing" ? [] : this.store.ongoingResources(topicUids, includeClosed).map(ongoingView);
     return [...delegated, ...ongoing];
   }
 

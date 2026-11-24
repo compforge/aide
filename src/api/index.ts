@@ -483,7 +483,7 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         if (!topicId) { json(response, 400, { error: "topicId is required" }); return; }
         if (url.pathname === "/work") {
           const started = performance.now();
-          const works = aide.works(topicId);
+          const works = aide.work(topicId).listItems({ scope: "topic", includeClosed: true });
           const queryMs = Math.round(performance.now() - started);
           const attributes = { query: "work", topicId, queryMs, returned: works.length };
           if (queryMs >= 500) log.warn(attributes, "Slow Web Work query"); else log.debug(attributes, "Web Work queried");

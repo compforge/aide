@@ -41,6 +41,7 @@
       <button id="tab-recent" type="button" role="tab" aria-controls="panel-recent" aria-selected="false" tabindex="-1">近期记录</button>
       <button id="tab-tasks" type="button" role="tab" aria-controls="panel-tasks" aria-selected="false" tabindex="-1">事项 <span id="task-count" class="tab-count">0</span></button>
       <button id="tab-routines" type="button" role="tab" aria-controls="panel-routines" aria-selected="false" tabindex="-1">安排 <span id="routine-count" class="tab-count">0</span></button>
+      <button id="tab-ongoings" type="button" role="tab" aria-controls="panel-ongoings" aria-selected="false" tabindex="-1">跟进 <span id="ongoing-count" class="tab-count">0</span></button>
     </div>
     <div id="poll-notice" role="status"></div>
     <div id="approvals" aria-label="等待你处理的执行请求" aria-live="polite"></div>
@@ -72,6 +73,9 @@
     </section>
     <section id="panel-routines" class="topic-panel" role="tabpanel" aria-labelledby="tab-routines" tabindex="0" hidden>
       <div id="routines"></div>
+    </section>
+    <section id="panel-ongoings" class="topic-panel" role="tabpanel" aria-labelledby="tab-ongoings" tabindex="0" hidden>
+      <div id="ongoings"></div>
     </section>
   </section>
 </main>

@@ -21,7 +21,7 @@ export function workTools(work: WorkService): ToolDefinition[] {
     tool({ name: "list_work", label: "List work",
       description: "Find tasks, routines and open ongoing matters in this Topic subtree. Check existing responsibilities before creating one. includeClosed also returns concluded Ongoing matters.",
       parameters: Type.Object({ kind: Type.Optional(workKindField), includeClosed: Type.Optional(Type.Boolean()) }, { additionalProperties: false }),
-      async execute(_id, args, signal) { signal?.throwIfAborted(); return result(work.listItems(args.kind, args.includeClosed)); },
+      async execute(_id, args, signal) { signal?.throwIfAborted(); return result(work.listItems(args)); },
     }),
     tool({ name: "read_work", label: "Read work",
       description: "Read a Task, Routine or Ongoing by id, including its current state and pending question. Reading never resumes execution.",

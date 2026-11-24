@@ -1,3 +1,4 @@
+import { ONGOING_TYPE } from "../ongoing/model.ts";
 import { mailView } from "../stream/writer.ts";
 import { INPUT_TYPE } from "../input/model.ts";
 import { OUTPUT_TYPE } from "../output/model.ts";
@@ -11,7 +12,7 @@ import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
 export interface TopicBrowseQuery extends PageQuery { parentId?: string; q?: string; selectedId?: string }
 export interface TopicListItem {
   id: string; uid: string; revision: number; name: string; topicKey?: string; parentUid?: string;
-  review: TopicReview; default: boolean; preview: string; updatedAt: string; taskCount: number; routineCount: number; childCount: number; noteCount: number;
+  review: TopicReview; default: boolean; preview: string; updatedAt: string; taskCount: number; routineCount: number; ongoingCount: number; childCount: number; noteCount: number;
 }
 const field = (alias: string, path: string) => `json_extract(${alias}.data, '$.object.${path}')`;
 const activeTopic = (alias: string) => `${alias}.scope = 'personal' AND ${alias}.kind = 'aide.dev/Topic' AND ${field(alias, "apiVersion")} = '${TOPIC_TYPE.apiVersion}'
@@ -62,7 +63,7 @@ export function browseTopics(store: TopicStore, query: TopicBrowseQuery = {}) {
     const candidates = `WITH candidates AS (SELECT ${selection} FROM resource_indexes membership CROSS JOIN resources t ON t.key = membership.source
       WHERE membership.name = ? AND membership.value = ? AND ${activeTopic("t")}${query.q ? ` AND (instr(lower(coalesce(${field("t", "spec.name")}, '')), lower(?)) > 0
         OR instr(lower(${field("t", "spec.id")}), lower(?)) > 0)` : ""})`;
-    const counts = new Map<string, { taskCount: number; routineCount: number }>();
+    const counts = new Map<string, { taskCount: number; routineCount: number; ongoingCount: number }>();
     const childCounts = new Map<string, number>();
     const noteCounts = new Map<string, number>();
     const details = new Map<string, Record<string, unknown>>();
@@ -79,7 +80,7 @@ export function browseTopics(store: TopicStore, query: TopicBrowseQuery = {}) {
         childCount: childCounts.get(row.uid as string) ?? 0,
         noteCount: noteCounts.get(row.uid as string) ?? 0,
         preview: (reply?.text as string ?? "").replace(/\s+/g, " ").trim().slice(0, 100), updatedAt: row.updatedAt as string,
-        ...(counts.get(row.uid as string) ?? { taskCount: 0, routineCount: 0 }) };
+        ...(counts.get(row.uid as string) ?? { taskCount: 0, routineCount: 0, ongoingCount: 0 }) };
     };
     // Fetch exactly the selected ancestor chain; opening a deep link never enumerates the directory.
     const ancestors: Record<string, unknown>[] = [];
@@ -124,11 +125,14 @@ export function browseTopics(store: TopicStore, query: TopicBrowseQuery = {}) {
       for (const row of notes) noteCounts.set(row.topicUid as string, Number(row.n));
       const rows = db.prepare(`SELECT i.value AS topicId, r.kind, count(*) AS n FROM resource_indexes i CROSS JOIN resources r ON r.key = i.source
         WHERE i.name = 'topic' AND i.value IN (${ids.map(() => "?").join(",")}) AND r.scope = 'personal'
-          AND r.kind IN ('aide.dev/Task', 'aide.dev/Routine') AND ${field("r", "apiVersion")} = 'aide.dev/v1alpha4' AND ${field("r", "metadata.namespace")} = 'v1'
+          AND ((r.kind IN ('aide.dev/Task', 'aide.dev/Routine') AND ${field("r", "apiVersion")} = 'aide.dev/v1alpha4')
+            OR (r.kind = 'aide.dev/Ongoing' AND ${field("r", "apiVersion")} = '${ONGOING_TYPE.apiVersion}')) AND ${field("r", "metadata.namespace")} = 'v1'
           AND ${field("r", "metadata.deletionTimestamp")} IS NULL GROUP BY i.value, r.kind`).all(...ids);
       for (const row of rows) {
-        const value = counts.get(row.topicId as string) ?? { taskCount: 0, routineCount: 0 };
-        if (row.kind === "aide.dev/Task") value.taskCount = Number(row.n); else value.routineCount = Number(row.n);
+        const value = counts.get(row.topicId as string) ?? { taskCount: 0, routineCount: 0, ongoingCount: 0 };
+        if (row.kind === "aide.dev/Task") value.taskCount = Number(row.n);
+        else if (row.kind === "aide.dev/Routine") value.routineCount = Number(row.n);
+        else value.ongoingCount = Number(row.n);
         counts.set(row.topicId as string, value);
       }
     }

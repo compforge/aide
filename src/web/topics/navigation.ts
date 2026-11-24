@@ -194,7 +194,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
       link.title = item.name;
       link.append(element('strong', item.name));
       if (item.preview) link.append(element('span', item.preview, 'muted'));
-      link.append(element('span', '事项 ' + (item.taskCount ?? 0) + ' · 安排 ' + (item.routineCount ?? 0), 'muted topic-counts'));
+      link.append(element('span', '事项 ' + (item.taskCount ?? 0) + ' · 安排 ' + (item.routineCount ?? 0) + ' · 跟进 ' + (item.ongoingCount ?? 0), 'muted topic-counts'));
       const indicators = element('span', undefined, 'topic-indicators');
       if (!item.parentUid) {
         const count = item.childCount ?? 0;
