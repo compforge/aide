@@ -14,5 +14,5 @@ export interface WebService extends ChannelService {
   setTopicReview(topicId: string, enabled: boolean): Promise<import("../../plugins/personal/topic/review.ts").TopicReview>;
   works(topicId?: string): readonly { id: string; topicId: string; revision: number; kind: "task" | "routine" }[];
   event(input: Omit<Incoming, "channelId" | "source"> & { name: string }): Promise<number>;
-  work(topicId: string): { delete(id: string, revision: number): Promise<void> };
+  work(topicId: string): Pick<import("../../plugins/personal/work/service.ts").WorkService, "delete" | "listItems">;
 }

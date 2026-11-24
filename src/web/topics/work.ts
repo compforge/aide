@@ -2,27 +2,28 @@ import { renderNoteClassification } from "../shared/note-classification.ts";
 import { byId as $, element } from '../shared/dom.ts';
 import { request, errorMessage } from '../shared/http.ts';
 import { copyText } from '../shared/clipboard.ts';
-import type { Work } from '../../../plugins/personal/work/model.ts';
-const labels: Record<Work['status'], string> = { ready: '准备执行', running: '执行中', waiting: '等你回答', scheduled: '等待触发', paused: '已暂停', done: '已完成', uncertain: '需要核对结果', invalid_result: '结果解析失败' };
+import type { TopicWork } from '../../api/types.ts';
+const labels: Record<TopicWork['status'], string> = { open: '跟进中', closed: '已收尾', ready: '准备执行', running: '执行中', waiting: '等你回答', scheduled: '等待触发', paused: '已暂停', done: '已完成', uncertain: '需要核对结果', invalid_result: '结果解析失败' };
 
 export function createWorkPanel(topicId: string, onChange: () => Promise<void>, signal: AbortSignal) {
   let lastWork = '';
   const deletingWork = new Set<string>();
   const expanded = new Map<string, boolean>();
-  function renderWork(works: Work[]) {
+  function renderWork(works: TopicWork[]) {
     const signature = JSON.stringify(works);
     if (signature === lastWork) return;
     lastWork = signature;
-    renderWorkGroup(works.filter((work) => work.kind === 'task'), 'tasks', 'task-count', '还没有事项，交办一件事试试。');
-    renderWorkGroup(works.filter((work) => work.kind === 'routine'), 'routines', 'routine-count', '还没有安排，可以告诉我想定期处理或长期关注什么。');
+    renderWorkGroup(works.filter((work) => work.kind === 'task'), 'tasks', 'task-count', '事项', '还没有事项，交办一件事试试。');
+    renderWorkGroup(works.filter((work) => work.kind === 'routine'), 'routines', 'routine-count', '安排', '还没有安排，可以告诉我想定期处理或长期关注什么。');
+    renderWorkGroup(works.filter(work => work.kind === 'ongoing'), 'ongoings', 'ongoing-count', '跟进', '暂无跟进事项。');
   }
-  function renderWorkGroup(works: Work[], listId: string, countId: string, emptyText: string) {
+  function renderWorkGroup(works: TopicWork[], listId: string, countId: string, groupName: string, emptyText: string) {
     $(countId).textContent = String(works.length);
     const attention = works.filter((work) => ['waiting', 'uncertain', 'invalid_result'].includes(work.status)).length;
     const tab = $('tab-' + listId);
     tab.classList.toggle('needs-attention', attention > 0);
     tab.title = attention ? `${attention} 项需要你处理` : '';
-    tab.setAttribute('aria-label', `${listId === 'tasks' ? '事项' : '安排'} ${works.length}${attention ? `，${attention} 项需要你处理` : ''}`);
+    tab.setAttribute('aria-label', `${groupName} ${works.length}${attention ? `，${attention} 项需要你处理` : ''}`);
     const list = $(listId);
     list.replaceChildren();
     if (!works.length) list.append(element('p', emptyText, 'muted'));
@@ -32,7 +33,7 @@ export function createWorkPanel(topicId: string, onChange: () => Promise<void>, 
       const actions = element('div', undefined, 'work-actions');
       const copy = element('button', '复制 ID', 'work-copy');
       copy.type = 'button'; copy.title = work.id;
-      copy.setAttribute('aria-label', '复制' + (work.kind === 'task' ? '事项' : '安排') + ' ID：' + work.title);
+      copy.setAttribute('aria-label', '复制' + groupName + ' ID：' + work.title);
       copy.setAttribute('aria-live', 'polite');
       copy.addEventListener('click', async () => {
         copy.disabled = true;
@@ -50,30 +51,21 @@ export function createWorkPanel(topicId: string, onChange: () => Promise<void>, 
         }
         setTimeout(() => { copy.textContent = '复制 ID'; copy.disabled = false; }, 1500);
       });
-      const remove = element('button', deletingWork.has(work.id) ? '删除中…' : '删除', 'work-delete');
-      remove.type = 'button';
-      remove.setAttribute('aria-label', '删除' + (work.kind === 'task' ? '事项：' : '安排：') + work.title);
-      remove.disabled = deletingWork.has(work.id);
-      remove.addEventListener('click', async () => {
-        if (deletingWork.has(work.id) || !confirm('删除「' + work.title + '」？\n删除后停止后续跟进，已有消息会保留。已发起的操作可能仍会完成。')) return;
-        deletingWork.add(work.id); remove.disabled = true; remove.textContent = '删除中…';
-        $('work-notice').className = 'muted'; $('work-notice').textContent = '';
-        try {
-          await request('/work/delete', { method: 'POST', signal, headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ id: work.id, topicId, revision: work.revision }) });
-          if (signal.aborted) return;
-          $('work-notice').textContent = '已删除「' + work.title + '」。';
-        } catch (error) {
-          if (signal.aborted) return;
-          $('work-notice').className = 'error'; $('work-notice').textContent = errorMessage(error);
-        } finally {
-          deletingWork.delete(work.id); remove.disabled = false; remove.textContent = '删除';
-          if (!signal.aborted) await onChange();
-        }
-      });
-      actions.append(copy, remove);
+      actions.append(copy);
+      if (work.kind !== 'ongoing') actions.append(deleteButton(work, groupName));
       header.append(element('span', labels[work.status], 'badge ' + work.status), actions);
       node.append(header, element('strong', work.title));
+      if (work.kind === 'ongoing') {
+        if (work.question) node.append(element('p', '待核实：' + work.question));
+        if (work.progress) node.append(element('p', '进展：' + work.progress));
+        if (work.checkAt) node.append(element('p', '下次核实：' + new Date(work.checkAt).toLocaleString(), 'muted'));
+        if (work.closure) {
+          node.append(element('p', '结论：' + work.closure.outcome));
+          node.append(element('p', '收尾时间：' + new Date(work.closure.at).toLocaleString(), 'muted'));
+        }
+        list.append(node);
+        continue;
+      }
       if (work.question) node.append(element('p', work.question));
       if (work.status === 'uncertain') node.append(element('p', '执行中断或失败。请核对外部结果，再发消息决定是否继续。'));
       if (work.status === 'invalid_result') node.append(element('p', '执行已结束，但最终结果解析失败。请核对执行记录，再决定是否继续。'));
@@ -92,6 +84,30 @@ export function createWorkPanel(topicId: string, onChange: () => Promise<void>, 
       }
       node.append(detail); list.append(node);
     }
+  }
+  function deleteButton(work: Exclude<TopicWork, { kind: 'ongoing' }>, groupName: string) {
+    const remove = element('button', deletingWork.has(work.id) ? '删除中…' : '删除', 'work-delete');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', '删除' + groupName + '：' + work.title);
+    remove.disabled = deletingWork.has(work.id);
+    remove.addEventListener('click', async () => {
+      if (deletingWork.has(work.id) || !confirm('删除「' + work.title + '」？\n删除后停止后续跟进，已有消息会保留。已发起的操作可能仍会完成。')) return;
+      deletingWork.add(work.id); remove.disabled = true; remove.textContent = '删除中…';
+      $('work-notice').className = 'muted'; $('work-notice').textContent = '';
+      try {
+        await request('/work/delete', { method: 'POST', signal, headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: work.id, topicId, revision: work.revision }) });
+        if (signal.aborted) return;
+        $('work-notice').textContent = '已删除「' + work.title + '」。';
+      } catch (error) {
+        if (signal.aborted) return;
+        $('work-notice').className = 'error'; $('work-notice').textContent = errorMessage(error);
+      } finally {
+        deletingWork.delete(work.id); remove.disabled = false; remove.textContent = '删除';
+        if (!signal.aborted) await onChange();
+      }
+    });
+    return remove;
   }
   return { render: renderWork };
 }

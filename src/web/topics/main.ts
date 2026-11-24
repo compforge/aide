@@ -1,6 +1,5 @@
 import "./style.css";
-import type { Approval } from "../../api/types.ts";
-import type { Work } from "../../../plugins/personal/work/model.ts";
+import type { Approval, TopicWork } from "../../api/types.ts";
 import { byId } from "../shared/dom.ts";
 import { request } from "../shared/http.ts";
 import { createNavigation } from "./navigation.ts";
@@ -63,7 +62,7 @@ function mountTopic(topicId: string | null) {
     try {
       if (!topicId) { await navigation.refresh(); return; }
       const [works, pending] = await Promise.all([
-        request<Work[]>("/work" + query, { signal }), request<Approval[]>("/approvals" + query, { signal }), navigation.refresh(),
+        request<TopicWork[]>("/work" + query, { signal }), request<Approval[]>("/approvals" + query, { signal }), navigation.refresh(),
       ]);
       if (signal.aborted) return;
       work.render(works); approvals.render(pending);

@@ -9,6 +9,8 @@ import { Aide } from "../src/app.ts";
 import { httpChannel } from "../src/api/index.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { fixtureAddress } from "./address-fixture.ts";
+import { upsertOngoing } from "../plugins/personal/ongoing/service.ts";
+import type { TopicWork, TopicListView } from "../src/api/types.ts";
 import { TOPIC_TYPE } from "../plugins/personal/topic/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 
@@ -34,19 +36,29 @@ test("Work queries use Topic indexes without materializing Outputs", async t => 
   const selected = aide.topics.resource("selected")!;
   const child = aide.topics.resource("child")!;
   aide.topics.resources.replace(TOPIC_TYPE, child.metadata.name, { ...child.spec, parentRef: resourceRef(selected) }, child.status);
+  const client = aide.runtime.plugins.resourceClient("personal");
+  const actor = await client.patchStatus(selected, { execution: { id: "web-fixture", startedAt: new Date().toISOString() } });
+  const open = await upsertOngoing(client, actor, { title: "Approval", question: "Has it been approved?", progress: "Submitted" }, "open");
+  const previous = await upsertOngoing(client, actor, { title: "Release" }, "previous");
+  const closed = await upsertOngoing(client, actor, { ongoingId: previous.id, version: previous.version, outcome: "Shipped" }, "close");
+  const otherActor = await client.patchStatus(aide.topics.resource("other")!, { execution: { id: "other-chief", startedAt: new Date().toISOString() } });
+  await upsertOngoing(client, otherActor, { title: "Other domain" }, "other");
   await aide.personal.store.save(routine, [{ id: "reply", topicId: "selected", text: "Retained reply", workId: routine.id }]);
   aide.start = async () => {};
-  aide.topics.outputs = () => { throw new Error("Work query read Output history"); };
-  aide.topics.outputStore.streams.reader = () => { throw new Error("Work query opened an Output Stream"); };
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const topics: TopicListView = await (await fetch(base + "/topics")).json();
+  assert.equal(topics.items.find(t => t.id === "selected")?.ongoingCount, 2);
+  assert.equal(topics.items.find(t => t.id === "other")?.ongoingCount, 1);
+  aide.topics.outputs = () => { throw new Error("Work query read Output history"); };
+  aide.topics.outputStore.streams.reader = () => { throw new Error("Work query opened an Output Stream"); };
   assert.deepEqual(aide.works().map(w => w.id).sort(), [task.id, routine.id, childWork.id, other.id].sort(), "Global Work callers remain supported without Outputs");
 
   const resources = aide.personal.store.resources;
   const list = resources.list.bind(resources);
   const queriedTopics: string[] = [];
   resources.list = (type, options = {}) => {
-    if (type.kind === "Task" || type.kind === "Routine") {
+    if (type.kind === "Task" || type.kind === "Routine" || type.kind === "Ongoing") {
       assert.equal(options.matchIndex?.name, "topic", "Work resources must be selected before decoding");
       queriedTopics.push(options.matchIndex!.value);
     }
@@ -54,11 +66,14 @@ test("Work queries use Topic indexes without materializing Outputs", async t => 
   };
   const response = await fetch(base + "/work?topicId=selected");
   assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).map((w: { id: string }) => w.id).sort(), [task.id, routine.id].sort());
-  assert.deepEqual(queriedTopics.splice(0), [selected.metadata.uid, selected.metadata.uid], "Web excludes descendant and unrelated Topics");
+  const items: TopicWork[] = await response.json();
+  assert.deepEqual(items.map(w => w.id).sort(), [task.id, routine.id, open.id, closed.id].sort());
+  assert.deepEqual(items.find(w => w.id === open.id), JSON.parse(JSON.stringify(open)));
+  assert.deepEqual(items.find(w => w.id === closed.id), JSON.parse(JSON.stringify(closed)));
+  assert.deepEqual(queriedTopics.splice(0), Array(3).fill(selected.metadata.uid), "Web excludes descendant and unrelated Topics");
   assert.deepEqual(await (await fetch(base + "/work?topicId=empty")).json(), []);
   const empty = aide.topics.resource("empty")!;
-  assert.deepEqual(queriedTopics.splice(0), [empty.metadata.uid, empty.metadata.uid]);
+  assert.deepEqual(queriedTopics.splice(0), Array(3).fill(empty.metadata.uid));
   assert.deepEqual(await (await fetch(base + "/work?topicId=missing")).json(), []);
   assert.deepEqual(queriedTopics, []);
   assert.equal(aide.topics.resource("missing"), undefined, "Browsing does not create a Topic");
@@ -73,5 +88,5 @@ test("Work queries use Topic indexes without materializing Outputs", async t => 
   assert.equal((await remove(other.id, other.revision)).status, 404);
   assert.equal((await remove(current.id, current.revision + 1)).status, 409);
   assert.equal((await remove(current.id, current.revision)).status, 200);
-  assert.deepEqual((await (await fetch(base + "/work?topicId=selected")).json()).map((w: { id: string }) => w.id), [task.id], "Deleting work is omitted from polling");
+  assert.deepEqual((await (await fetch(base + "/work?topicId=selected")).json()).map((w: { id: string }) => w.id).sort(), [task.id, open.id, closed.id].sort(), "Deleting work is omitted from polling");
 });
