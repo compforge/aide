@@ -211,7 +211,7 @@ export class Aide {
         },
       },
     });
-    this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, channelMe,
+    this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, channelMe, readSession: options.readSession,
       topic: parsePersonalConfig(config?.plugins.personal).topic, weave: parsePersonalConfig(config?.plugins.personal).weave }, log,
       { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore, resolveContact: () => this.resolveContact() });
     this.disclosure = new OutputDisclosure(this.outputStore, { marks: this.meMarks,

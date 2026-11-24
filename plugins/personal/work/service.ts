@@ -35,7 +35,7 @@ function chiefDecision(topic: TopicResource, text: string, at: string) {
   return {
     spec: { origin: "chief" as const, originId: isGateTopic(topic) ? "personal.gate" : "personal.chief", text, topicId: topic.spec.id },
     status: { topic: ref, route: { completedAt: at, result: { topics: [ref], reason: "Independent Chief decision" } },
-      assess: { completedAt: at, result: { summary: text } } },
+      assess: { completedAt: at } },
   };
 }
 export function newWork(topicId: string, definition: WorkDefinition, now = new Date()): Work {
@@ -159,7 +159,7 @@ export class WorkService {
   }
 
   /** @spec A Task or Routine receives an original Input once. Concurrent appends retain each recipient's receipt.
-   * @link docs/personal/input.md#研判与办理
+   * @link docs/personal/input.md#投递与办理
    */
   async appendInput(id: string, material: z.input<typeof appendMaterial>, raw: z.input<typeof WorkInputRequestSchema> = {}, key: string = randomUUID()) {
     const request = WorkInputRequestSchema.parse(raw);

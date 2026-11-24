@@ -1,7 +1,7 @@
 import { isGateTopic, isRootTopic, isProcessingRoot } from "./boundary.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { Resource, ResourceReader, ResourceRef, ResourceValidationContext } from "@compforge/aide-plugin";
-import { assessmentFinished, type InputSpec, type InputStatus } from "../input/model.ts";
+import { deliveryFinished, type InputSpec, type InputStatus } from "../input/model.ts";
 import type { Organization } from "./ref.ts";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 
@@ -26,6 +26,9 @@ export function requireProcessingRoot(ref: ResourceRef | undefined, context: Res
   }
   return topic;
 }
+export function deliveryInUse(topicUid: string | undefined, executionId: string | undefined, context: ResourceValidationContext): boolean {
+  return !!topicUid && !!executionId && context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, topicUid)?.status.execution?.id === executionId;
+}
 /** @spec Reassignment changes visibility, never routing history or completed processing receipts.
  * @why An admitted Input finishes before moving, so its active Chief cannot lose authority mid-turn.
  * @link docs/personal/topic.md#归属调整与责任交接
@@ -34,9 +37,9 @@ export function guardInputTopic(previous: Resource<InputSpec, InputStatus>, curr
   if (isDeepStrictEqual(previous.status.topic, current.status.topic)) return;
   const target = requireTopic(current.status.topic, context);
   if (previous.status.topic) requireOrganization(current.status.organization, context, [requireTopic(previous.status.topic, context), target]);
-  if (previous.status.topic && ((previous.status.assess?.executionId && !assessmentFinished(previous.status.assess))
-    || (current.status.assess?.executionId && !assessmentFinished(current.status.assess))))
-    throw new Error("Finish Input assessment before moving Topic ownership");
+  if (previous.status.topic && ((previous.status.assess?.executionId && !deliveryFinished(previous.status.assess))
+    || (current.status.assess?.executionId && !deliveryFinished(current.status.assess))))
+    throw new Error("Finish Input delivery before moving Topic ownership");
 }
 
 /** @spec Chief ownership changes validate the current tree and execution inside the storage transaction.

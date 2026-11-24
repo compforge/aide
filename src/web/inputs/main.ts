@@ -147,7 +147,7 @@ async function refresh() {
       }
     } else {
       $('input-heading').textContent = '选择一个 Input'; $('input-detail-content').hidden = true;
-      $('input-detail-notice').textContent = '选择左侧记录，查看从接收到路由、研判和办理的处理痕迹。'; lastDetail = '';
+      $('input-detail-notice').textContent = '选择左侧记录，查看从接收到路由、投递和办理的处理痕迹。'; lastDetail = '';
     }
   } catch (error) { if (token === generation) $('input-list-notice').textContent = errorMessage(error); }
   finally { if (token === generation) schedule(); }

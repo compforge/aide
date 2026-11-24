@@ -18,7 +18,7 @@ import { join } from "node:path";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions, type Agent } from "./fake-harness.ts";
-import { assessAll } from "./input-state-fixture.ts";
+import { deliverInput } from "./input-state-fixture.ts";
 import { routeTo } from "./input-state-fixture.ts";
 import { admit } from "./input-state-fixture.ts";
 import type { LoopStatus } from "../plugins/personal/execution/loop.ts";
@@ -45,14 +45,14 @@ test("Chief can assess material without claiming it; redelivery and repeated com
   await client.patchStatus(aide.topics.resource("me")!, { execution: { id: "live", startedAt: new Date().toISOString() } });
   await admit(client, "one", "live");
   assert.deepEqual(aide.topics.get("me")!.pendingInputIds, ["one", "later"]);
-  await assessAll(client, c, "live", { inputIds: ["one"], summary: "Nothing needs action" });
-  await assessAll(client, c, "live", { inputIds: ["one"], summary: "Nothing needs action" });
+  await deliverInput(client, c, "live", "one");
+  await deliverInput(client, c, "live", "one");
   assert.deepEqual(aide.topics.get("me")!.pendingInputIds, ["later"]);
-  await assessAll(client, c, "live", { inputIds: ["later"], summary: "Read directly without notification" });
+  await deliverInput(client, c, "live", "later");
   assert.equal(await routeTo(client, c.metadata, aide.topics.inputStore.get("one")!), false);
   assert.equal(aide.outputs().length, 0);
   assert.equal(aide.topics.resource("me")!.status.summaryRevision ?? "", "");
-  await assert.rejects(assessAll(client, c, "old", { inputIds: ["one"], summary: "stale" }), /no longer active/);
+  await assert.rejects(deliverInput(client, c, "old", "one"), /no longer active/);
 });
 
 test("Normal arrivals follow up without repeating old prompt material or deleting concurrent arrivals", async t => {
@@ -202,7 +202,7 @@ test("startup followup closes a verified ongoing matter without asking Me", asyn
   await until(() => requests().some(input => !!input.status.assess?.completedAt));
   assert.equal(requests().length, 1);
   assert.equal(requests()[0]!.spec.observation?.ongoingUid, receipt.uid);
-  assert.ok(requests()[0]!.status.assess?.result);
+  assert.equal(requests()[0]!.status.assess?.result, undefined);
   assert.ok((await readOngoing(resources, root, receipt.id)).status.closure?.at);
   assert.equal(aide.outputs().length, 0);
 });

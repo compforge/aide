@@ -18,7 +18,7 @@ import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.
 import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
 import { ensureOrganizationInput, type maintenanceAgenda } from "../plugins/personal/secretary/maintenance.ts";
 import { topicPolicy } from "../plugins/personal/topic/config.ts";
-import { assessInput } from "../plugins/personal/chief/assess.ts";
+import { deliverInput } from "./input-state-fixture.ts";
 import { runInput } from "../plugins/personal/execution/loop.ts";
 import { preparedInputs as nextInputs } from "../plugins/personal/chief/queue.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
@@ -77,10 +77,10 @@ test("An ancestor move redistributes pending Inputs while preserving an old exec
     assert.equal(moved.status.assess!.topic!.uid, f.root.metadata.uid);
     assert.equal(moved.status.assess!.executionId, "old-chief");
     assert.deepEqual(await nextInputs(f.resources, f.read(f.other), 8), []);
-    await assessInput(f.resources, f.read(f.root), "old-chief", { inputId: fact.metadata.name, summary: "Old Chief finishes" });
+    await deliverInput(f.resources, f.read(f.root), "old-chief", fact.metadata.name);
   }), f.read(f.root), "chief", "original", fact.metadata.name);
   assert.equal(f.prompts.length, 1);
-  assert.equal(f.aide.topics.inputStore.get("in-flight")!.status.assess!.result!.summary, "Old Chief finishes");
+  assert.ok(f.aide.topics.inputStore.get("in-flight")!.status.assess!.completedAt);
   assert.deepEqual(await nextInputs(f.resources, f.read(f.other), 8), []);
 });
 

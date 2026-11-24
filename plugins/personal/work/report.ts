@@ -16,7 +16,7 @@ export const WorkReportSchema = z.object({ observedGeneration: z.number().int().
 /**
  * @spec Work progress, latest report and exact input acknowledgements commit together; an end_turn never acknowledges business work.
  * @spec Reports never rewrite long-lived summary or create recent Notes.
- * @link docs/personal/input.md#研判与办理
+ * @link docs/personal/input.md#投递与办理
  * @case tests/work-context.test.ts
  */
 export async function reportWork(resources: ResourceClient, owner: Readonly<Resource<WorkSpec, WorkAgentStatus>>, executionId: string, raw: unknown, toolCallId?: string) {

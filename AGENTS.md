@@ -10,7 +10,7 @@ Aide 是多角色并行系统：Input 经多个角色转换、加工和处理，
 
 典型流转是：Channel／Source 形成 Input → Route 确定 Topic 归属 → Chief 接纳并处理。Deferred 分支先由 [Secretary](docs/personal/secretary.md) 整理成 Batch，再交给 Chief；Secretary 生成的内部维护 Input 直接绑定目标 Topic。aide:curate 按批梳理新增或改动的普通 Note，归类、去重；aide:organize 整理 Topic 树及材料归属，可拆分或移动普通 Note；aide:summary 在 Chief 空闲时复核一个 Topic、Person 或 Address 的默认认识；aide:followup 跟进需要回应的事项，按独立 Ongoing 的预约核实事项进展，仍无法判断时私下询问 Me。Chief 可以直接更新 Note、产生 Output，也可以通过 Input 的 Work 请求交给 Task／Routine 持续办理；这些角色产生的 Output 再进入披露与投递流程。一条 Input 可以贡献到多个产物，多条 Input 也可以共同形成一个 Note 或 Output。
 
-Gate 承接 Me 的全局输入并按需交办领域 Chief；Weave 调整 Topic 之间的组织关系，影响后续处理归属。各角色并行协调自身资源，按分支参与处理；Input 的 route／assess／handle 分别保留路由、研判和办理事实，处理完成、工作目标达成与 Output 送达各有自己的回执。
+Gate 承接 Me 的全局输入并按需交办领域 Chief；Weave 调整 Topic 之间的组织关系，影响后续处理归属。各角色并行协调自身资源，按分支参与处理；Input 的 route／assess／handle 分别保留路由、投递和办理事实，处理完成、工作目标达成与 Output 送达各有自己的回执。
 
 ## 代码地图
 
@@ -72,7 +72,7 @@ plugins/personal/
     reconcile.ts           # 独立 intake / agent Controller；保持运行中投递能力
     intake.ts              # 从就绪 Input/Batch 选择待办并通知运行中的 Chief
     queue.ts               # 独立 Input 优先级与到期重试选择
-    assess.ts              # Chief 提交 Input 研判回执
+    delivery.ts            # 按 Pi 用户消息记录 Chief 投递事实
     workload.ts            # Chief 完成事实与 Review 水位写入
     agent/                 # Host 加载：session 工厂、提示词、工具与背景
   secretary/               # 确定性安排后续工作，无 Agent 和独立 CRD
@@ -108,7 +108,7 @@ plugins/personal/
     input.ts               # 接纳资格及 Route / Work 的待办投递
     loop.ts                # 持久接纳、Harness 调用与各类回执恢复
     agent/                 # Host 加载的共享身份、上下文工具与输入读取
-  input/                   # Input CRD、路由/研判/办理回执、内部请求证据与成员投影
+  input/                   # Input CRD、路由/投递/办理回执、内部请求证据与成员投影
   batch/                   # Batch CRD、原子归组与封闭成员、接纳及生命周期
   note/                    # 独立事项与 summary、subject/people 索引与容量保留
   person/                  # 人物身份、资料与认识；合并、联系人及消息事实协调
@@ -141,9 +141,9 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 按业务职责在 plugin package 内组织模块：CRD 的模型、事务约束和生命周期就近放置；Chief / Secretary 等独立角色拥有自己的目录，即使状态存储在 Topic。Task / Routine 等兼具角色与资源的模块保持合一。Agent 是角色内部能力，放在角色的 agent/ 子目录并由 Host 工厂加载，Runner 入口不得运行时导入它；跨角色共享执行机制放在 execution/。ResourceDefinition 集中声明 Schema、校验、Printer、索引与保留策略；所有写入在存储事务内校验，提交后通知 Watch。
 - 资源身份按插件实例与 namespace 组织，引用固定 UID。同一 Controller 对同一资源串行；主资源纯 status 更新不自动唤醒自身，协作方显式声明 Watch。依赖其它资源的容量资格通过 retention.canEvict 在实际淘汰事务内重查。资源所有者决定能否释放，Host 写入只检查容量并通知独立 GC；GC 对合格 owner tree 原子请求删除，再沿 Controller / finalize 生命周期释放容量。
 - Operator 通过 Harness interface / verb 操作原生 agent loop，恢复参数由 Operator 自己保存。Personal 的 status.agent 只是调用参数；Harness verb 不读写 CRD。原生持久化、历史与恢复属于 Harness，实时投影和诊断日志不承担恢复。
-- Secretary 是 Topic 上独立的确定性 Reconcile，不调用 Agent；按数量/等待时间准备批次和内部维护 Input，Chief 只关注抽到的非 Deferred Input／Batch，负责工具选择、Agent 执行与结果。Secretary 旁观处理量、等待时间与 pressure，工作产物是 Input／Batch；Immediate／Normal 直接交给 Chief。每个成功完成的 Input／Batch 计一次 Chief 工作量（包括维护 Input），Task／Routine 普通状态不计入。Batch 是独立 CRD，成员关系只保存在 Input.status.batchId；Chief 接纳独立 Input 或 Batch，成员集合在归组后固定，当前仅包含 Deferred；Chief 只写 Batch 执行回执，Input Reconcile 投影成员研判结果，Work 办理回执保持独立。职责见 [Secretary](docs/personal/secretary.md)，批次契约见 [Batch](docs/personal/batch.md)。
+- Secretary 是 Topic 上独立的确定性 Reconcile，不调用 Agent；按数量/等待时间准备批次和内部维护 Input，Chief 只关注抽到的非 Deferred Input／Batch，负责工具选择、Agent 执行与结果。Secretary 旁观处理量、等待时间与 pressure，工作产物是 Input／Batch；Immediate／Normal 直接交给 Chief。每个成功投递的 Input／Batch 计一次 Chief 工作量（包括维护 Input），Task／Routine 普通状态不计入。Batch 是独立 CRD，成员关系只保存在 Input.status.batchId；Chief 接纳独立 Input 或 Batch，成员集合在归组后固定，当前仅包含 Deferred；投递事件写 Batch 回执，Input Reconcile 投影成员投递状态，Work 办理回执保持独立。职责见 [Secretary](docs/personal/secretary.md)，批次契约见 [Batch](docs/personal/batch.md)。
 - Route、Chief、Task、Routine、Weave Agent 只由各自对应的 Reconcile 触发，包括 prompt、steer 与 followUp；协作组件和 Agent 工具通过资源变化协作，不直接触发其它角色。
-- Input、Task、Routine 通过 status.topic 保存唯一且可调整的材料 Topic UID 引用；Input.assess.topic 保存未领取待办的最终一致负责人缓存，领取后保留实际执行归属，Input.assess 保存全局唯一研判及 Chief 接纳 executionId，自动 prompt / steer / followUp 在提交前通过资源事务竞争接纳；Topic 保存 Chief 执行与原生会话。Route 保存首次路由回执，Chief 在树内整理归属，Weave 只改变父子关系。
+- Input、Task、Routine 通过 status.topic 保存唯一且可调整的材料 Topic UID 引用；Input.assess.topic 保存未领取待办的最终一致负责人缓存，领取后保留实际执行归属，Input.assess 保存 Chief 接纳 executionId 及投递时间，自动 prompt / steer / followUp 在提交前通过资源事务竞争接纳；Topic 保存 Chief 执行与原生会话。Route 保存首次路由回执，Chief 在树内整理归属，Weave 只改变父子关系。
 - 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。Chief 未提交终态结果的 Input／Batch 在执行释放后重试，已有终态结果保持不变；Work 的副作用恢复由其自身契约负责。
 - Channel / Source 通过绑定 Definition 的入口形成 Input，正文保存事实，证据留在 observation。路由统一归 Route，Default Topic 由系统按需创建并维护，只兜底，不提供手动切换；Input.status 的 route / assess / handle 是处理事实，消费者按索引查询。
 - Person 保存人物身份与认识，联系地址由 scoped identities 和 Address locators 查询推导，不保存 spec.addresses；已配置 Lark Channel 的人物单聊首次发现允许发言，后续发现保留禁言。Me 是可选标记，与访问凭证独立。Input.sender / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。

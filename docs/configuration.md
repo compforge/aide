@@ -319,7 +319,7 @@ plugins:
 - root Topic 的 `review.enabled` 默认开启；定时协调根据数据决定是否发起回顾，无事时退避且不调用模型。运行中的 Chief 不因定时检查追加执行，一次调用最多两天。
 - `contextChars` 限制 Chief 自动激活提示的总字符数，全文通过 `read_input` 分页读取；原生历史和压缩由 SDK 管理。
 - `maxNotes` 是每个 Topic 直属活跃普通 Note 的数量软预算，可由 Topic.spec.maxNotes 覆盖。`maxChars` 是新建 Topic Note 的默认篇幅软预算，普通 Note 与 summary 统一使用 Note.spec.maxChars，可按篇覆盖。超额触发整理，不拒绝保存或自动截断。旧配置键 `summaryChars` 在读取时归一为 `maxChars`，同时指定时新键优先；已有 Note 的预算不因配置变更自动重写。具体触发、退避与工具见 [Note 整理](personal/note.md#数量与篇幅驱动的整理)。
-- `assess_input` 提交业务消费回执并原子建立 Work 办理记录。没有回执的已尝试输入保留失败证据，不自动重放。
+- Chief 投递回执和 Work 办理记录按各自的资源生命周期保存。
 
 
 ## Resource 容量

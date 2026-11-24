@@ -20,7 +20,7 @@ import { SnapshotMessages, triggerMessages, type Snapshot } from "./snapshot.ts"
 import { ReplayTimeoutSchema, settleMs } from "./config.ts";
 
 export const replayTools = new Set([
-  "read_input", "assess_input", "say", "list_topics", "read_topic", "group_topics", "route_input",
+  "read_input", "say", "list_topics", "read_topic", "group_topics", "route_input",
   "list_persons", "read_person", "upsert_note", "list_work", "read_work", "list_connectors",
   "read_message", "read_chat_messages", "read_thread_messages", "memory_search", "session_search",
 ]);
@@ -103,6 +103,10 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
       messages.assertCoverage();
       const inputs = aide.topics.inputStore.list();
       const done = inputs.every(i => i.status.route?.completedAt && (!i.status.assess || !!i.status.assess.completedAt));
+      const delivered = new Set(inputs.flatMap(i => i.status.assess?.completedAt && i.status.assess.executionId ? [i.status.assess.executionId] : []));
+      const failed = aide.invocations().find(i => delivered.has(i.executionId)
+        && (i.phase === "failed" || i.phase === "cancelled" || i.result && i.result.stopReason !== "end_turn"));
+      if (failed) throw new Error(`Replay Chief execution did not finish: ${failed.executionId} (${failed.result?.stopReason ?? failed.phase})`);
       const topics = aide.topics.list();
       const roots = topics.filter(t => !t.default && !t.parentRef);
       const weave = await resources.get<Record<string, never>, WeaveStatus>({ ...WEAVE_TYPE, name: "global", namespace: "v1" });

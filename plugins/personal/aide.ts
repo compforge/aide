@@ -1,3 +1,5 @@
+import { recoverInputDeliveries } from "./chief/delivery.ts";
+import type { ReadSession } from "./observation/session.ts";
 import { chiefSession } from "./chief/agent/session.ts";
 import { routeSession } from "./route/agent/session.ts";
 import { batchById } from "./batch/members.ts";
@@ -23,7 +25,7 @@ import type { PiConfig } from "../../src/host/harness/pi/config.ts";
 import { updateTopic } from "./topic/state.ts";
 import { personalExecution } from "./execution/context.ts";
 import type { OutputStore } from "./output/store.ts";
-import { attemptPatch, resourceRef, changeAttempt, changeAssessment } from "./input/state.ts";
+import { attemptPatch, resourceRef, changeAttempt, changeDelivery } from "./input/state.ts";
 import { topicPolicy } from "./topic/config.ts";
 import { finalizeExecution, type LoopStatus } from "./execution/loop.ts";
 import { canActivate, eligible, immediate } from "./execution/input.ts";
@@ -32,7 +34,7 @@ import { routed } from "./route/delivery.ts";
 import { routeByRules } from "./route/rules.ts";
 import { z } from "zod";
 import type { ExecutionScope } from "../../src/protocol/verbs.ts";
-import type { TopicSpec, TopicStatus } from "./topic/model.ts";
+import type { TopicResource, TopicSpec, TopicStatus } from "./topic/model.ts";
 import type { Logger } from "pino";
 import type { Resource, ResourceType } from "@compforge/aide-plugin";
 import { InputAttention, inputAttention, isInternalInput, type InputReceipt, type InputSpec, type InputStatus } from "./input/model.ts";
@@ -73,7 +75,7 @@ export class Personal {
   readonly core: ApplicationRuntime;
   private readonly pending = new Set<Promise<unknown>>();
 
-  constructor(private readonly options: { timezone: string; persons: Persons; channelMe: Me; topic?: unknown; weave?: unknown }, private readonly log: Logger,
+  constructor(private readonly options: { timezone: string; persons: Persons; channelMe: Me; readSession?: ReadSession; topic?: unknown; weave?: unknown }, private readonly log: Logger,
     runtime: { runtime: ApplicationRuntime; connectors: ConnectorClient; inputs: InputStore; outputs: OutputStore; resolveContact?: ConstructorParameters<typeof TopicStore>[4] }) {
     this.core = runtime.runtime;
     this.connectors = runtime.connectors;
@@ -188,7 +190,7 @@ export class Personal {
       const input = batch[0]!;
       if (batch.some(i => isInternalInput(i.spec)) && batch.length !== 1) throw new Error("Maintenance admits exactly one Input");
       if (args.operation === "steer" && (scheduled || batch.some(i => !immediate(i.spec)))) throw new Error("Only Immediate Inputs may steer Chief");
-      const deliveryId = scheduled ? `batch:${scheduled.metadata.uid}` : `input:${input.metadata.uid}`;
+      const deliveryId = `${topic.status.execution.id}:${scheduled?.metadata.uid ?? input.metadata.uid}`;
       const startedAt = new Date().toISOString();
       try {
         await commitStatus(resources, [
@@ -210,7 +212,7 @@ export class Personal {
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
       const budget = topicPolicy(this.options.topic).contextChars;
       const items = chiefPreviews(batch, budget - 2000);
-      const prompt = `New Inputs:\n${JSON.stringify({ inputId: items[0]!.inputId, inputIds: items.map(i => i.inputId) })}\n${items.map(i => i.description).join("\n\n")}\nAssess each listed inputId once with assess_input. Leave unfinished prior tasks pending.`;
+      const prompt = `New Inputs:\n${JSON.stringify({ inputId: items[0]!.inputId, inputIds: items.map(i => i.inputId) })}\n${items.map(i => i.description).join("\n\n")}`;
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
           operation: args.operation, invocationId: invocation.invocationId,
@@ -223,9 +225,9 @@ export class Personal {
             const currentBatch = await batchById(resources, scheduled.metadata.uid);
             if (currentBatch?.status.phase === "running" && currentBatch.status.assess?.executionId === topic.status.execution.id)
               await commitStatus(resources, [{ operation: "patchStatus", resource: currentBatch, patch: {
-                phase: "ready", assess: undefined } }]);
+                phase: "ready", assess: { errorAt: new Date().toISOString(), lastError: result.value.reason ?? "Chief declined delivery", retryable: true } } }]);
           } else {
-            for (const input of batch) await changeAssessment(resources, input, topic.status.execution.id,
+            for (const input of batch) await changeDelivery(resources, input, topic.status.execution.id,
               { executionId: undefined, deliveryId: undefined, agent: undefined, startedAt: undefined, lastError: undefined, errorAt: undefined, retryable: undefined });
           }
           // Queue the owning agent Reconcile after the current execution; retrying intake on this bookkeeping would hot-loop unsupported verbs.
@@ -236,7 +238,7 @@ export class Personal {
         this.log.info({ topicUid: ref.uid, inputId: args.inputId, operation: args.operation, accepted }, "Chief notification dispatched by Reconcile");
         return { accepted, reason: result.value.reason };
       } catch (error) {
-        for (const i of scheduled ? [] : batch) await changeAssessment(resources, i, topic.status.execution.id, { lastError: String(error), errorAt: new Date().toISOString(), retryable: true });
+        for (const i of scheduled ? [] : batch) await changeDelivery(resources, i, topic.status.execution.id, { lastError: String(error), errorAt: new Date().toISOString(), retryable: true });
         if (scheduled) {
           const currentBatch = await batchById(resources, scheduled.metadata.uid);
           if (currentBatch?.status.phase === "running" && currentBatch.status.assess?.executionId === topic.status.execution.id) await commitStatus(resources, [{ operation: "patchStatus", resource: currentBatch, patch: { assess: { ...currentBatch.status.assess, errorAt: new Date().toISOString(), lastError: String(error), retryable: true } } }]);
@@ -298,6 +300,10 @@ export class Personal {
     for (const type of [TOPIC_TYPE, ROUTE_TYPE, WEAVE_TYPE]) for (const c of await resources.list<unknown, LoopStatus>(type)) {
       if (!c.status.execution) continue;
       const id = c.status.execution.id;
+      if (c.kind === "Topic" && this.options.readSession) {
+        try { await recoverInputDeliveries(resources, c as TopicResource, this.options.readSession); }
+        catch (error) { this.log.warn({ err: error, topicUid: c.metadata.uid, executionId: id }, "Native delivery evidence unavailable"); }
+      }
       await finalizeExecution({ resources, logger: { debug: () => {}, info: (message, detail) => this.log.info({ detail }, message), warn: (message: string, detail?: unknown) => this.log.warn({ detail }, message), error: () => {} } }, c, id);
       this.log.warn({ resourceUid: c.metadata.uid, executionId: id }, "Recovered interrupted agent without replaying actions");
     }

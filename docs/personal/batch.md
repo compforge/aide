@@ -15,15 +15,15 @@ Input 保存原始事实、origin、attention、权限依据与 Work 办理回�
 - preparing：Secretary 创建 Batch。成员归组与 ready 在同一事务提交；失败不留下半组成员，中断留下的空 preparing 资源由后续协调取消。
 - ready：固定成员的批次可被 Chief 接纳。事务内检查成员和真实处理归属，防止与独立研判并发重复领取。
 - running：Chief 原子更新 Topic execution 与 Batch 回执。成员不领取独立 execution，不进入独立调度。
-- completed：Chief 通过 `assess_input` 以 Batch UID 提交整项研判，Batch.status.assess 复用 Input 的 Assessment，保存 result、completedAt 和 completedBy。转交材料时另用 append_input 指定原成员 Input，并遵守其来源权限。
-- failed：明确记录的终态失败，不再接纳。执行异常或缺少完成回执只记录可重试错误并退回 ready，等待角色 trigger 间隔后重试同一 Batch；成员不拆散。
+- completed：运行时确认 Batch 已进入 Chief 上下文。成员可继续作为 Work 的来源材料。
+- failed：无法确认已派发材料的投递结果时，保存错误证据并停止自动重投。明确未投递的 Batch 退回 ready，按下次可投递时间参与排序。
 - cancelled：Secretary 在接纳前发现材料过期或处理归属失效时取消安排。成员关系仍保留，并通过回填得到取消原因。
 
-Input Reconcile 监听 Batch 终态，按 batchId 将完成或失败回执投影到成员 assess。回填可重复执行，重启后仍能继续；Chief 不等待或逐条写成员回执。运行中的执行身份直接以 Batch 为准，不能依赖异步投影。`assess_input` 拒绝独立研判 Batch 成员。
+Input Reconcile 监听 Batch 终态，按 batchId 将完成或失败回执投影到成员 assess。回填可重复执行，重启后仍能继续；Chief 不等待或逐条写成员回执。运行中的执行身份直接以 Batch 为准，不能依赖异步投影。
 
 Batch.status.phase 表达准备与调度阶段，status.assess 与 Input 使用同一执行、完成及错误回执结构；不另设 summary、error 或 finishedAt 同义字段。
 
-Chief 的首次 prompt、followUp、`list_inputs`、`read_input` 与 `assess_input` 共用一个 inputId。普通项沿用 Input name，组批项使用 Batch UID，列表按项分页，详情按页展开成员证据。向已有委托转交材料时，以成员 inputId 指明原始来源。原生投递明确拒绝时仅将尚未完成的 Batch 退回 ready；结果不明时保留 running 和可重试错误，待执行结束后回到 ready；已提交的 Batch 完成回执不会被覆盖。领域 root 拥有 Batch，由该领域的 Chief Reconcile 触发 Agent。
+Chief 的首次 prompt、followUp、`list_inputs` 与 `read_input` 共用一个 inputId。普通项沿用 Input name，组批项使用 Batch UID，列表按项分页，详情按页展开成员证据。向已有委托转交材料时，以成员 inputId 指明原始来源。原生投递明确拒绝时仅将尚未完成的 Batch 退回 ready；结果不明时核对原生投递事实；已提交的 Batch 完成回执不会被覆盖。领域 root 拥有 Batch，由该领域的 Chief Reconcile 触发 Agent。
 
 ## 保留与恢复
 

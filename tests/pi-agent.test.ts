@@ -55,8 +55,7 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
   let aide: Aide, phase = 0, gateStep = 0, taskStep = 0, chiefStep = 0;
   let firstUid = "", secondUid = "";
   let evidence: { id: string; uid: string; version: string };
-  const currentInput = () => aide.topics.inputStore.query("topic", aide.topics.resource("gate")!.metadata.uid)
-    .find(i => !i.status.assess?.completedAt)!.metadata.name;
+  const currentInput = () => aide.topics.inputStore.query("deliveryExecution", aide.topics.resource("gate")!.status.execution!.id)[0]!.metadata.name;
   const fixture = await setup(t, request => {
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
     if (names.includes("report_task")) {
@@ -76,12 +75,11 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
       switch (chiefStep++) {
         case 0: return { tool: "report_handoff", args: { id: input.spec.handoff!.id, inputId: input.metadata.name, phase: "working", report: "Domain accepted analysis" } };
         case 1: return { tool: "upsert_work", args: { kind: "task", title: "Domain analysis", instruction: "Analyze domain evidence and reply to the handoff", trigger: null, inputId: input.metadata.name } };
-        case 2: return { tool: "assess_input", args: { inputId: input.metadata.name, summary: "Assigned analysis to domain Task" } };
         default: return { text: "Domain task assigned" };
       }
     }
     for (const name of ["list_topics", "read_topic", "list_notes", "read_note", "list_work", "read_work", "read_input", "delegate_request"]) assert.ok(names.includes(name), name);
-    assert.ok(names.includes("assess_input"));
+    assert.ok(!names.includes("assess_input"));
     for (const name of ["assess_batch", "bash", "write", "edit", "upsert_note", "retire_note"]) assert.ok(!names.includes(name), name);
     if (phase === 0) switch (gateStep++) {
       case 0: return { tool: "list_topics", args: {} };
@@ -89,17 +87,15 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
       case 2: return { tool: "read_topic", args: { uid: secondUid } };
       case 3: return { tool: "read_note", args: { noteId: evidence.id } };
       case 4: return { tool: "cite_output", args: { notes: [{ uid: evidence.uid, version: evidence.version }] } };
-      case 5: return { tool: "assess_input", args: { inputId: currentInput(), summary: "Compared current evidence" } };
       default: return { text: "两个领域的进展有共同点。" };
     }
     if (phase === 1) switch (gateStep++) {
       case 0: return { tool: "list_work", args: { kind: "task" } };
       case 1: return { tool: "delegate_request", args: { topicUid: firstUid, title: "Domain analysis", request: "Analyze current domain evidence", inputId: currentInput() } };
-      case 2: return { tool: "assess_input", args: { inputId: currentInput(), summary: "Delegated analysis" } };
       default: return { text: "已创建分析事项，结果会回到 Gate。" };
     }
     assert.match(JSON.stringify(request.messages), /两个领域的进展有共同点/);
-    return gateStep++ === 0 ? { tool: "assess_input", args: { inputId: currentInput(), summary: "Follow-up answered" } } : { text: "继续上次讨论。" };
+    return { text: "继续上次讨论。" };
   });
   const home = join(fixture.config.cwd, "gate-native-home");
   const { ConfigSchema } = await import("../src/config.ts");
@@ -122,7 +118,7 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
     await aide.settled();
     const gate = aide.topics.resource("gate")!;
     assert.equal(gate.status.agent?.harness, "gate"); assert.ok(gate.status.agent?.sessionId);
-    assert.equal(aide.topics.inputs("gate")[0]!.status.assess?.result?.summary, "Compared current evidence");
+    assert.ok(aide.topics.inputs("gate")[0]!.status.assess?.completedAt);
     assert.ok(aide.outputs().some(o => o.text.includes("两个领域的进展")));
     assert.equal(aide.work("gate").list().length, 0);
     phase = 1; gateStep = 0;
@@ -286,7 +282,7 @@ test("Replay SDK groups roots and routes subsequent source input to the new root
     if (last.role === "tool") return { text: "Handled internally" };
     const activation = messageText(last.content).split("Activation: ").at(-1)?.split("\n")[0];
     if (!activation) throw new Error("No replay Input activation");
-    return { tool: "assess_input", args: { inputId: JSON.parse(activation).inputId, summary: "Recorded replay evidence" } };
+    return { text: "Received." };
   });
   const directory = join(fixture.config.cwd, "replay-sdk"); mkdirSync(directory); mkdirSync(join(directory, "workspace"));
   const start = "2026-10-19T00:00:00.000Z", end = "2026-10-19T01:00:00.000Z";
@@ -514,8 +510,7 @@ test("Aide isolates continuous native contexts across topics, restart and recrea
     const messages = request.messages as Array<{role: string; content: unknown}>;
     const activation = messageText(messages.findLast(m => m.role === "user")!.content).split("Activation: ").at(-1)!.split("\n")[0]!;
     const inputId = JSON.parse(activation).inputId;
-    return index % 2 === 0 ? { tool: "assess_input", args: { inputId, summary: "Handled request" } }
-      : { text: `native-response-${Math.floor(index / 2)}` };
+    return { text: `native-response-${index}` };
   });
   const home = join(fixture.config.cwd, "aide");
   const log = pino({ level: "silent" });
@@ -536,17 +531,17 @@ test("Aide isolates continuous native contexts across topics, restart and recrea
     const original = binding("lark:app:group-a", "lark:app:group-a");
     await send("lark:app:group-a", "lark:app:group-a", "a2");
     assert.equal(binding("lark:app:group-a", "lark:app:group-a"), original);
-    assert.match(JSON.stringify(fixture.requests[2]), /native-response-0/);
+    assert.match(JSON.stringify(fixture.requests[1]), /native-response-0/);
     await send("lark:app:group-b", "lark:app:group-b", "b1");
     assert.notEqual(binding("lark:app:group-b", "lark:app:group-b"), original);
-    assert.doesNotMatch(JSON.stringify(fixture.requests[4]), /question-a1|native-response-0/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[2]), /question-a1|native-response-0/);
     await aide.close();
     aide = open(); await aide.start();
     assert.equal(aide.runtime.plugins.listInstances().length, 1);
     await send("lark:app:group-a", "lark:app:group-a", "a3");
     assert.equal(binding("lark:app:group-a", "lark:app:group-a"), original);
-    assert.match(JSON.stringify(fixture.requests[6]), /native-response-1/);
-    assert.doesNotMatch(JSON.stringify(fixture.requests[6]), /question-b1/);
+    assert.match(JSON.stringify(fixture.requests[3]), /native-response-1/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[3]), /question-b1/);
     assert.equal(aide.outputs().filter((message) => message.topicId === "lark:app:group-a").length, 3);
     await aide.close();
     aide = open(); await aide.start();
@@ -755,7 +750,7 @@ test("Chief retains native context across acknowledged Inputs and restart", { ti
     const activation = raw.split("Activation: ").at(-1)?.split("\n")[0];
     if (!activation) throw new Error("No input activation");
     const inputId = JSON.parse(activation).inputId;
-    return { tool: "assess_input", args: { inputId, summary: "Recorded the observation" } };
+    return { text: "Received." };
   });
   const home = join(fixture.config.cwd, "continuous-home");
   let aide: Aide;
@@ -848,7 +843,6 @@ test("Weave uses a dedicated native session and commits grouping through its res
 test("Aide steers immediate Input and independently completes both inputs within one Chief invocation", { timeout: 20_000 }, async t => {
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   const fixture = await setup(t, (_request, index) => index === 0 ? { text: "Inspecting the first input", pause }
-    : index === 1 || index === 2 ? { tool: "assess_input", args: { inputId: index === 1 ? "first" : "urgent", summary: "Observation handled without notification" } }
     : { text: "Handled internally" });
   const home = join(fixture.config.cwd, "steer-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
@@ -932,7 +926,7 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
     const inputId = ids.find(id => !chiefAssessed.has(id));
     if (!inputId) return { text: "Handled" };
     chiefAssessed.add(inputId);
-    return { tool: "assess_input", args: { inputId, summary: "Recorded fact" } };
+    return { text: "Received." };
   });
   const home = join(fixture.config.cwd, "route-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
@@ -958,9 +952,9 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
     assert.equal(input.status.route.completedBy?.agent.harness, "route");
     assert.ok(input.status.assess?.executionId);
     const assessment = input.status.assess!;
-    assert.equal(assessment.completedBy?.agent.harness, "chief"); assert.ok(assessment.completedBy?.toolCallId);
+    assert.equal(assessment.agent?.harness, "chief"); assert.equal(assessment.completedBy, undefined);
     const job = await inputJob(input, [], agent => fixture.observation.read(fixture.config.cwd, fixture.config.config, agent.sessionId));
-    for (const call of [input.status.route.completedBy!, assessment.completedBy!])
+    for (const call of [input.status.route.completedBy!])
       assert.ok(job.nodes.some(n => n.kind === "tool_call" && (n as ToolCall).tool_call_id === call.toolCallId && n.session?.id === call.agent.sessionId));
     assert.doesNotThrow(() => inspect(job));
     assert.ok(input.status.assess!.completedAt);
@@ -1269,12 +1263,10 @@ test("Pi Observation preserves request Background and stable native links after 
 });
 
 /** @case Deferred arrivals never enter native queues, but an active Chief may discover and assess them. */
-test("Chief can read and assess a late Deferred Input without steer or followUp", { timeout: 20_000 }, async t => {
+test("Reading a late Deferred Input does not consume its scheduling obligation", { timeout: 20_000 }, async t => {
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   const fixture = await setup(t, (_request, index) => index === 0 ? { tool: "read_input", args: {}, pause }
     : index === 1 ? { tool: "read_input", args: { inputId: "deferred" } }
-    : index === 2 ? { tool: "assess_input", args: { inputId: "deferred", summary: "Relevant observation inspected" } }
-    : index === 3 ? { tool: "assess_input", args: { inputId: "first", summary: "Request handled" } }
     : { text: "Handled internally" });
   const home = join(fixture.config.cwd, "deferred-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
@@ -1293,9 +1285,8 @@ test("Chief can read and assess a late Deferred Input without steer or followUp"
   release(); await aide.settled();
   const first = aide.topics.inputStore.get("first")!.status.assess!;
   const deferred = aide.topics.inputStore.get("deferred")!.status.assess!;
-  assert.ok(deferred.completedAt); assert.equal(deferred.startedAt, undefined); assert.ok(deferred.completedBy);
+  assert.ok(first.completedAt); assert.equal(deferred.completedAt, undefined); assert.equal(deferred.startedAt, undefined);
   assert.equal(deferred.executionId, undefined, "read-only discovery does not create automatic admission");
-  assert.equal(deferred.completedBy?.agent.sessionId, first.completedBy?.agent.sessionId);
   assert.match(JSON.stringify(fixture.requests[2]!.messages), /late-deferred-evidence/);
   assert.equal(aide.invocations().filter(i => i.topicId === "me").length, 1);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
@@ -1311,13 +1302,12 @@ test("Weave queues a review Input after busy Chief business without mixing tools
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   let aide: Aide;
   const fixture = await setup(t, (_request, index) => {
-    if (index === 0) return { tool: "assess_input", args: { inputId: "first", summary: "Reviewed" }, pause };
+    if (index === 0) return { tool: "read_input", args: { inputId: "first" }, pause };
     if (index === 1) return { text: "Business finished" };
     if (index === 2) {
       const parent = aide.topics.resource("parent")!;
       return { tool: "upsert_note", args: { summaryOf: resourceRef(parent), version: contentVersion(parent), text: "Combined understanding" } };
     }
-    if (index === 3) return { tool: "assess_input", args: { inputId: aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!.metadata.name, summary: "Reviewed tree change" } };
     return { text: "Done" };
   });
   aide = new Aide(join(fixture.config.cwd, "weave-notify-home"), { cwd: fixture.config.cwd, timezone: "UTC",
@@ -1361,9 +1351,9 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
   const { INPUT_ORIGINS, BUSINESS_INPUT_ORIGINS } = await import("../plugins/personal/chief/agent/input-tools.ts");
   type Task = import("../plugins/personal/chief/agent/input-tools.ts").ChiefInputTask;
   let task: Task = { executionId: "review-run", origin: "aide:curate", inputs: [
-    { id: "maintenance", origin: "aide:curate", immediate: false, text: "Review changed Notes" },
+    { id: "maintenance", origin: "aide:curate", text: "Review changed Notes" },
   ] };
-  let reviewed = 0, assessed = 0, said = 0;
+  let reviewed = 0, said = 0;
   const switched: string[] = [];
   const fixture = await setup(t, (request, index) => {
     const names = (request.tools as { function: { name: string } }[]).map(tool => tool.function.name);
@@ -1376,7 +1366,7 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
       assert.ok(!names.includes("maintenance_action")); assert.ok(!names.includes("memory_add"));
       assert.match(JSON.stringify(request.messages), /Current Input origin: channel/);
     }
-    if (index === 0) return { tool: "assess_input", args: { inputId: "business", summary: "wrong task" } };
+    if (index === 0) return { tool: "say", args: {} };
     if (index === 1) return { tool: "maintenance_action", args: {} };
     if (index === 2) return { tool: "maintenance_action", args: {} };
     if (index === 3) return { tool: "say", args: {} };
@@ -1385,16 +1375,13 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
   const result = () => ({ content: [{ type: "text" as const, text: "ok" }], details: {} });
   const session = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding: {
     read: () => task,
-    inputOrigin: id => id === "business" ? "channel" : "aide:curate",
     changed: current => switched.push(current.origin),
   }, tools: [
-    { name: "assess_input", label: "Assess", inputOrigins: INPUT_ORIGINS, description: "Assess current input",
-      parameters: Type.Object({ inputId: Type.String(), summary: Type.String() }), async execute() { assessed++; return result(); } },
     { name: "maintenance_action", label: "Review", inputOrigins: ["aide:curate"], description: "Review notes",
       parameters: Type.Object({}), async execute() {
         reviewed++;
-        task = { ...task, inputs: [...task.inputs, { id: "business", origin: "channel", immediate: true, text: "Answer now" }] };
-        await session.steer('New Input: {"inputId":"business"}');
+        task = { ...task, inputs: [...task.inputs, { id: "business", origin: "channel", text: "Answer now" }] };
+        await session.steer('[aide-input:business]\nNew Input: {"inputId":"business"}');
         return result();
       } },
     { name: "say", label: "Say", inputOrigins: BUSINESS_INPUT_ORIGINS, description: "Answer business input",
@@ -1404,9 +1391,9 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
   try {
     await session.prompt('Activation: {"inputId":"maintenance"}');
     assert.equal(fixture.requests.length, 5);
-    assert.equal(reviewed, 1); assert.equal(assessed, 0); assert.equal(said, 1);
+    assert.equal(reviewed, 1); assert.equal(said, 1);
     assert.deepEqual(switched, ["aide:curate", "channel"]);
-    assert.match(JSON.stringify(fixture.requests[1]!.messages), /Assess only business material/);
+    assert.match(JSON.stringify(fixture.requests[1]!.messages), /not found|unavailable|not available/i);
     assert.match(JSON.stringify(fixture.requests[3]!.messages), /not found|unavailable|not available/i);
     assert.ok(task.inputs.some(i => i.id === "maintenance"), "interruption does not acknowledge maintenance");
   } finally { session.dispose(); }
@@ -1419,8 +1406,8 @@ test("followup cannot create Work or revise another Ongoing", async t => {
     return { text: "Continue the assigned check only" };
   }, "chief");
   const session = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding: {
-    read: () => ({ executionId: "check", origin: "aide:followup", inputs: [{ id: "assigned", origin: "aide:followup", immediate: false, text: "Verify receipt" }] }),
-    inputOrigin: () => "aide:followup", ongoingCheck: async () => "unrelated-check", changed() {},
+    read: () => ({ executionId: "check", origin: "aide:followup", inputs: [{ id: "assigned", origin: "aide:followup", text: "Verify receipt" }] }),
+    ongoingCheck: async () => "unrelated-check", changed() {},
   } });
   try {
     await session.prompt("Verify receipt");
@@ -1435,15 +1422,15 @@ test("followup cannot create Work or revise another Ongoing", async t => {
 test("Chief restores the same session with the new execution's Input tools", { timeout: 20_000 }, async t => {
   const fixture = await setup(t, () => ({ text: "Done" }), "chief");
   let task: import("../plugins/personal/chief/agent/input-tools.ts").ChiefInputTask = {
-    executionId: "review", origin: "aide:curate", inputs: [{ id: "review", origin: "aide:curate", immediate: false, text: "Review" }],
+    executionId: "review", origin: "aide:curate", inputs: [{ id: "review", origin: "aide:curate", text: "Review" }],
   };
   const inputBinding: import("../plugins/personal/chief/agent/input-tools.ts").ChiefInputBinding = {
-    read: () => task, inputOrigin: () => task.origin, changed() {},
+    read: () => task, changed() {},
   };
   const first = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding });
   const sessionId = first.sessionId;
   try { await first.prompt("Review input"); } finally { first.dispose(); }
-  task = { executionId: "business", origin: "channel", inputs: [{ id: "business", origin: "channel", immediate: true, text: "Respond now" }] };
+  task = { executionId: "business", origin: "channel", inputs: [{ id: "business", origin: "channel", text: "Respond now" }] };
   const resumed = await createChiefAgent({ ...fixture.config, sessionId, work: fixture.work, inputBinding });
   try {
     await resumed.prompt("Business input");
@@ -1463,7 +1450,7 @@ for (const [initialOrigin, origin] of [["aide:curate", "source"], ["aide:curate"
 test(`Chief changes tools only when Pi delivers ${origin} followUp after ${initialOrigin}`, { timeout: 20_000 }, async t => {
   const { Type } = await import("typebox");
   let task: import("../plugins/personal/chief/agent/input-tools.ts").ChiefInputTask = { executionId: "initial", origin: initialOrigin, inputs: [
-    { id: "initial", origin: initialOrigin, immediate: initialOrigin === "channel", text: "Initial task" },
+    { id: "initial", origin: initialOrigin, text: "Initial task" },
   ] };
   const action = origin === "source" ? "say" : "move_topic";
   let reviewed = 0, said = 0;
@@ -1474,12 +1461,12 @@ test(`Chief changes tools only when Pi delivers ${origin} followUp after ${initi
     return { text: "Business turn complete" };
   }, "chief");
   const session = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding: {
-    read: () => task, inputOrigin: () => task.origin, changed() {},
+    read: () => task, changed() {},
   }, tools: [
     { name: "maintenance_action", label: "Initial action", description: "Handle initial task", inputOrigins: [initialOrigin], parameters: Type.Object({}),
       async execute() {
         reviewed++;
-        task = { ...task, inputs: [...task.inputs, { id: "normal", initial: false, origin, immediate: false, text: "Normal business fact" }] };
+        task = { ...task, inputs: [...task.inputs, { id: "normal", initial: false, origin, text: "Normal business fact" }] };
         await session.followUp('[aide-input:normal]\nNew Input: {"inputId":"normal"}');
         return { content: [{ type: "text", text: "Reviewed" }], details: {} };
       } },
@@ -1509,8 +1496,8 @@ test("Chief Summary tools edit only the owner of the admitted Input", async t =>
     topicNote: async update => { written.push(update); return {}; },
     inputBinding: {
       read: () => ({ executionId: "review", origin: "aide:summary", inputs: [
-        { id: "request", origin: "aide:summary", immediate: false, text: "Review selected Person", summaryOwnerUid: "selected-id" }] }),
-      inputOrigin: () => "aide:summary", changed() {},
+        { id: "request", origin: "aide:summary", text: "Review selected Person", summaryOwnerUid: "selected-id" }] }),
+      changed() {},
       noteSummaryOwner: async id => id + "-id",
     } });
   try { await session.prompt("Review this person"); }

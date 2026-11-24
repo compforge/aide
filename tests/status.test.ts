@@ -50,7 +50,7 @@ test("Input conditions follow exact receipts atomically and stale writers cannot
   const input = await f.resources.create<InputSpec, InputStatus>(INPUT_TYPE, { name: "fact", spec: { origin: "source", originId: "fixture", text: "evidence" }, status: inputStatus({ topic: resourceRef(root), assess: {} }) });
   const assessed = await patchStatus(f.resources, input, { assess: { completedAt: at, result: { summary: "Reviewed" } },
     handle: { worker: { resource: { ...TASK_TYPE, namespace: "v1", name: "task", uid: "worker" }, assignedAt: at, request: { action: "context" } } } });
-  assert.ok(conditionTrue(assessed.status.conditions, "Assessed"));
+  assert.ok(conditionTrue(assessed.status.conditions, "Delivered"));
   assert.equal(conditionTrue(assessed.status.conditions, "HandlingComplete"), false);
   await assert.rejects(patchStatus(f.resources, input, { assess: { lastError: "stale" } }), /version conflict/);
   await assert.rejects(commitStatus(f.resources, [
@@ -68,7 +68,7 @@ test("Current Input creation through commitStatus initializes its conditions", a
   const [input] = await commitStatus(f.resources, [{ operation: "create", type: INPUT_TYPE, name: "new-input",
     spec: { origin: "source", originId: "fixture", text: "evidence" }, status: {} }]);
   const status = input!.status as InputStatus;
-  assert.equal(status.conditions?.find(condition => condition.type === "Assessed")?.status, "False");
+  assert.equal(status.conditions?.find(condition => condition.type === "Delivered")?.status, "False");
   assert.equal(status.conditions?.find(condition => condition.type === "HandlingComplete")?.status, "Unknown");
 });
 

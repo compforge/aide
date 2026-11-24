@@ -1,5 +1,5 @@
 import type { ResourceReader, ResourceValidationContext } from "@compforge/aide-plugin";
-import { INPUT_TYPE, InputAttention, assessmentFinished, inputAttention, isInternalInput, type InputSpec, type InputStatus } from "../input/model.ts";
+import { INPUT_TYPE, InputAttention, deliveryFinished, inputAttention, isInternalInput, type InputSpec, type InputStatus } from "../input/model.ts";
 import type { Input } from "../input/state.ts";
 import { inputExpired } from "../input/retention.ts";
 import { requireTopic } from "../topic/ownership.ts";
@@ -13,7 +13,7 @@ export function batchKey(input: Input): string {
     s.originRef, s.relation, s.sensitivity, s.visibility, s.timezone, s.handoff]);
 }
 export const unclaimed = (input: Input) => !input.metadata.deletionTimestamp && !inputExpired(input)
-  && !!input.status.assess && !assessmentFinished(input.status.assess) && !input.status.assess.executionId;
+  && !!input.status.assess && !deliveryFinished(input.status.assess) && !input.status.assess.executionId;
 export async function batchById(resources: ResourceReader, uid: string) {
   return (await resources.page<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "uid", value: uid }, limit: 1 })).items[0];
 }

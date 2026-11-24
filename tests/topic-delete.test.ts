@@ -4,7 +4,7 @@ import { receiveDomain } from "./address-fixture.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { moveMaterial, moveTopic } from "../plugins/personal/topic/organize.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
-import { assessInput } from "../plugins/personal/chief/assess.ts";
+import { deliverInput } from "./input-state-fixture.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { fixtureAddress, fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
@@ -42,7 +42,7 @@ test("Web deletes a revision-checked Topic and preserves shared Input and siblin
   const fact = await aide.topics.submit("shared-input", { origin: "source", originId: "personal.environments", text: "共同观察" });
   await deliver({ resources, logger: { info() {} } }, fact, [a.metadata], "Initial evidence");
   await resources.patchStatus(aide.topics.resource("a")!, { execution: { id: "fixture", startedAt: new Date().toISOString() } });
-  await assessInput(resources, aide.topics.resource("a")!, "fixture", { inputId: "shared-input", summary: "Done" });
+  await deliverInput(resources, aide.topics.resource("a")!, "fixture", "shared-input");
   await resources.replace(b, { ...b.spec, parentRef: resourceRef(a) }, b.status);
   await moveMaterial(resources, aide.topics.resource("a")!, { kind: "Input", id: "shared-input", topicUid: b.metadata.uid, reason: "Evidence belongs with b" });
   await moveTopic(resources, aide.topics.resource("a")!, { uid: b.metadata.uid, parentUid: null, reason: "Independent topic" });

@@ -1,5 +1,5 @@
 import { deadlineClock } from "./fixtures/clock.ts";
-import { assessInput } from "../plugins/personal/chief/assess.ts";
+import { deliverInput } from "./input-state-fixture.ts";
 import { BATCH_TYPE } from "../plugins/personal/batch/model.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -69,7 +69,7 @@ test("Review completion failure retries atomically and repeated completion canno
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   await reconcileChief(f.context, f.execution("write-failure", async () => {
     const failing = { ...f.resources, async commit() { throw new Error("receipt store unavailable"); } };
-    await assessInput(failing, f.root(), "write-failure", { inputId: review.metadata.name, summary: "checked" });
+    await deliverInput(failing, f.root(), "write-failure", review.metadata.name);
   }), f.root(), f.policy);
   const pending = f.aide.topics.inputStore.get(review.metadata.name)!;
   assert.equal(pending.status.assess?.completedAt, undefined);
@@ -79,11 +79,11 @@ test("Review completion failure retries atomically and repeated completion canno
   await f.resources.patchStatus(pending, { assess: { ...pending.status.assess, errorAt: new Date(Date.now() - 61_000).toISOString() } });
   await reconcileChief(f.context, f.execution("retry", async () => {
     const args = { inputId: review.metadata.name, summary: "checked" };
-    await assessInput(f.resources, f.root(), "retry", args);
+    await deliverInput(f.resources, f.root(), "retry", args.inputId);
     const after = f.root();
     assert.equal(after.status.notifiedWeaveRevision, 1);
     assert.equal(after.status.chiefWorkload?.completed, 1);
-    await assessInput(f.resources, f.root(), "retry", args);
+    await deliverInput(f.resources, f.root(), "retry", args.inputId);
     assert.equal(f.root().metadata.resourceVersion, after.metadata.resourceVersion);
   }), f.root(), f.policy);
   assert.ok(f.aide.topics.inputStore.get(review.metadata.name)!.status.assess?.completedAt);
@@ -119,7 +119,7 @@ test("Maintenance completion retries a conflicting Topic write atomically", asyn
       }
       return f.resources.commit(writes);
     } };
-    await assessInput(resources, f.root(), "race", { inputId: review.metadata.name, summary: "checked" });
+    await deliverInput(resources, f.root(), "race", review.metadata.name);
     assert.equal(f.root().status.chiefWorkload?.completed, 6);
     assert.equal(f.root().status.notifiedWeaveRevision, 1);
   }), f.root(), f.policy);
@@ -135,8 +135,8 @@ test("Every Chief origin counts once and successful receipt retries never count 
     const id = `item-${index}`, executionId = `run-${index}`;
     await f.input(id, InputAttention.Normal, origin);
     await reconcileChief(f.context, f.execution(executionId, async () => {
-      await assessInput(f.resources, f.root(), executionId, { inputId: id, summary: "done" });
-      await assessInput(f.resources, f.root(), executionId, { inputId: id, summary: "repeated receipt" });
+      await deliverInput(f.resources, f.root(), executionId, id);
+      await deliverInput(f.resources, f.root(), executionId, id);
     }), f.root(), f.policy);
     assert.equal(f.root().status.chiefWorkload?.completed, index + 1);
   }
@@ -159,9 +159,9 @@ test("Secretary schedules by completion count and Review preserves work complete
   let lateAt = "";
   await reconcileChief(f.context, f.execution("review", async () => {
     await f.input("late", InputAttention.Normal);
-    await assessInput(f.resources, f.root(), "review", { inputId: "late", summary: "new work" });
+    await deliverInput(f.resources, f.root(), "review", "late");
     lateAt = f.aide.topics.inputStore.get("late")!.status.assess!.completedAt!;
-    await assessInput(f.resources, f.root(), "review", { inputId: review.metadata.name, summary: "reviewed snapshot" });
+    await deliverInput(f.resources, f.root(), "review", review.metadata.name);
   }), f.root(), f.policy);
   assert.equal(f.root().status.chiefWorkload?.completed, 4, "Review itself contributes one completion");
   assert.equal(f.root().status.chiefWorkload?.reviewed, 2, "later work is not swallowed by Review acknowledgement");
@@ -201,7 +201,7 @@ test("Review renaming a child Note does not create a new maintenance need", asyn
   await reconcileChief(f.context, f.execution("rename", async () => {
     const updated = await upsertTopicNote(f.resources, f.root(), "rename", { noteId: note.noteId, version: note.version, name: "new", text: "unchanged facts" }, "rename");
     assert.notEqual(updated.version, note.version);
-    await assessInput(f.resources, f.root(), "rename", { inputId: review.metadata.name, summary: "renamed" });
+    await deliverInput(f.resources, f.root(), "rename", review.metadata.name);
   }), f.root(), f.policy);
   for (let i = 0; i < 3; i++) {
     await f.resources.patchStatus(f.root(), { reviewCheckedAt: new Date(0).toISOString(), idleReviewReset: null });

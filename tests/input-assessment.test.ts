@@ -14,7 +14,7 @@ import { join } from "node:path";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { assessInput } from "../plugins/personal/chief/assess.ts";
+import { deliverInput } from "./input-state-fixture.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { admit } from "./input-state-fixture.ts";
 import { cancelAssignments, resourceRef } from "../plugins/personal/input/state.ts";
@@ -35,14 +35,15 @@ test("Concurrent Chief assessments record a single receipt without assigning Wor
   const input = await aide.topics.submit("fact", { origin: "source", originId: "fixture", text: "shared evidence" });
   await deliver(context, input, [a.metadata], "One current Topic");
   await resources.patchStatus(a, { execution: { id: "a", startedAt: new Date().toISOString() } });
-  await Promise.all(["first", "second"].map(summary => assessInput(resources, a, "a", { inputId: "fact", summary })));
+  await admit(resources, "fact", "a");
+  await Promise.all([1, 2].map(() => deliverInput(resources, a, "a", "fact")));
   const result = aide.topics.inputStore.get("fact")!;
   assert.ok(result.status.assess!.completedAt);
-  assert.ok(["first", "second"].includes(result.status.assess!.result!.summary));
+  assert.equal(result.status.assess!.result, undefined);
   assert.deepEqual(Object.keys(result.status.handle ?? {}), []);
   assert.deepEqual(aide.topics.pending(a.metadata.uid), []);
   assert.equal("pendingInputIds" in aide.topics.resource("a")!.status, false);
-  await assessInput(resources, a, "a", { inputId: "fact", summary: "repeat" });
+  await deliverInput(resources, a, "a", "fact");
   assert.deepEqual(aide.topics.inputStore.get("fact"), result);
 });
 
@@ -61,7 +62,7 @@ test("Failed assessment preserves the separate Work receipt and Topic state", as
   const topicBefore = aide.topics.resource("me")!.status;
   const failing = { ...resources, commit: (writes: Parameters<typeof resources.commit>[0]) => resources.commit([...writes,
     { operation: "create", type: { ...INPUT_TYPE, kind: "Unregistered" }, name: "failure", spec: {}, status: {} }]) };
-  await assert.rejects(assessInput(failing, c, "live", { inputId: "fact", summary: "handoff" }), /Unknown resource/);
+  await assert.rejects(deliverInput(failing, c, "live", "fact"), /Unknown resource/);
   assert.deepEqual(aide.topics.inputStore.get("fact"), before);
   assert.deepEqual(aide.topics.resource("me")!.status, topicBefore);
   assert.deepEqual(aide.topics.inputStore.query("handlePending", w.uid!), handlesBefore);
@@ -83,12 +84,15 @@ test("Input protects every unfinished stage; deleting its Work ends handling and
   await resources.patchStatus(aide.topics.resource("me")!, { execution: { id: "live", startedAt: new Date().toISOString() } });
   await admit(resources, "one", "live");
   await aide.work("me").appendInput(w.id, { id: "one" });
-  await assessInput(resources, c, "live", { inputId: "one", summary: "Delegated" });
+  await deliverInput(resources, c, "live", "one");
   await assert.rejects(second(), /capacity/);
   const target = (await resources.list(TASK_TYPE))[0]!;
   await resources.delete(target, target.metadata.name);
   await cancelAssignments(resources, resourceRef(target));
   assert.equal(store.get("one")!.status.handle![w.uid!]!.result!.disposition, "cancelled");
+  await collectResources(store.storage);
+  await assert.rejects(second(), /capacity/);
+  await resources.patchStatus(aide.topics.resource("me")!, { execution: null });
   await collectResources(store.storage);
   await second();
   assert.equal(store.get("one"), undefined);
@@ -129,7 +133,7 @@ test("quiet assessments retain topic understanding; explicit synthesis can updat
     const fact = await aide.topics.submit(`quiet-${i}`, { origin: "source", originId: "fixture", text: "same-image Pod churn" });
     await deliver(context, fact, [c.metadata], "same subject");
     await admit(resources, fact.metadata.name, "live");
-    await assessInput(resources, c, "live", { inputId: fact.metadata.name, summary: "No new action" });
+    await deliverInput(resources, c, "live", fact.metadata.name);
     assert.ok(aide.topics.inputStore.get(fact.metadata.name)!.status.assess!.completedAt);
   }
   const current = aide.topics.resource("me")!;
@@ -154,23 +158,23 @@ test(`${attention} assessment cannot complete across an execution switch during 
     if (!switched) { switched = true; await resources.patchStatus(aide.topics.resource("me")!, { execution: { id: "new", startedAt: new Date().toISOString() } }); }
     return resources.commit(writes);
   } };
-  await assert.rejects(assessInput(racing, c, "old", { inputId: "switch", summary: "quiet" }), /no longer active/);
+  await assert.rejects(deliverInput(racing, c, "old", "switch"), /no longer active/);
   assert.equal(aide.topics.inputStore.get("switch")!.status.assess!.completedAt, undefined);
-  if (attention === InputAttention.Deferred) assert.equal(aide.topics.inputStore.get("switch")!.status.assess!.executionId, undefined);
+  assert.equal(aide.topics.inputStore.get("switch")!.status.assess!.executionId, "old");
 });
 
-test("Assessment records completion evidence without claiming Chief execution ownership", async t => {
+test("Delivery retains the admission binding without a model tool receipt", async t => {
   const { aide, resources, context } = setup(t);
   const c = await aide.topics.ensure("me");
   const input = await aide.topics.submit("recover", { origin: "channel", originId: "web", text: "check effects" });
   await deliver(context, input, [c.metadata], "explicit");
   const currentAgent = { harness: "chief", sessionId: "recovery-native" };
   await resources.patchStatus(aide.topics.resource("me")!, { agent: currentAgent, execution: { id: "new-run", startedAt: new Date().toISOString() } });
-  await assessInput(resources, c, "new-run", { inputId: "recover", summary: "Verified effects" }, "ack-native-id");
+  await deliverInput(resources, c, "new-run", "recover");
   const receipt = aide.topics.inputStore.get("recover")!.status.assess!;
-  assert.equal(receipt.executionId, undefined); assert.equal(receipt.agent, undefined);
-  assert.deepEqual(receipt.completedBy, { agent: currentAgent, executionId: "new-run", toolCallId: "ack-native-id" });
-  await assessInput(resources, c, "new-run", { inputId: "recover", summary: "repeat" }, "different-call");
+  assert.equal(receipt.executionId, "new-run"); assert.equal(receipt.agent, undefined);
+  assert.equal(receipt.completedBy, undefined);
+  await deliverInput(resources, c, "new-run", "recover");
   assert.deepEqual(aide.topics.inputStore.get("recover")!.status.assess, receipt);
 });
 
@@ -186,7 +190,7 @@ test("Failed assessment cannot be completed by a later Chief execution", async t
   const failed = aide.topics.inputStore.get(input.metadata.name)!;
   const agent = { harness: "chief", sessionId: "another-native" };
   await resources.patchStatus(aide.topics.resource("me")!, { agent, execution: { id: "new-run", startedAt: new Date().toISOString() } });
-  await assert.rejects(assessInput(resources, c, "new-run", { inputId: input.metadata.name, summary: "Verified prior effects" }, "later-ack"), /has failed; submit a new Input/);
+  await deliverInput(resources, c, "new-run", input.metadata.name);
   await assert.rejects(resources.patchStatus(failed, { assess: { ...failed.status.assess, completedAt: new Date().toISOString() } }), /has failed/);
   await assert.rejects(aide.work("me").create(task, input.metadata.name, "retry-failed-input"), /Failed Input cannot be assigned/);
   assert.equal((await resources.list(TASK_TYPE)).length, 0, "failed handoff rolls back Task creation");

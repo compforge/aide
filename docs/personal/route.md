@@ -14,7 +14,7 @@ Channel / Source → Input
                 Input.status.topic + route + assess
                                          ↓
                     Topic Reconcile → Chief Agent
-                         ├─ assess_input → 研判回执
+                         ├─ 投递至 Chief 上下文 → 投递回执
                          └─ 按需 upsert_work → Task / Routine / Ongoing
 ```
 
@@ -63,7 +63,7 @@ Input 自身保护未完成的 route、assess、handle。全部完成后才进�
 
 `route_input` 仅提供给 Route。工具验证本次 execution 确实接纳了 Input，目标必须是现存 Topic UID。一次事务写入 `Input.status.topic`、`Input.status.route.result`、completedAt 和一条全局空 `assess`；status.topic 是唯一的当前归属，route.result 保存初次路由判断。沿 parentRef 找 root，Weave 归组不搬迁 Input，Chief 可以在树内细化归属；建立 assess 即完成路由，Chief 接纳另由 Topic Reconcile 竞争。目标版本检查与写入处于同一事务，删除或替换目标不能导致误投。
 
-已完成的重复调用不改分派结果、不重置 assess。工具调用成功才表示路由完成；模型结束或说“已分派”不算确认。Chief 使用独立的 `assess_input`，`say` 另行产生 Output。
+已完成的重复调用不改分派结果、不重置 assess。工具调用成功才表示路由完成；模型结束或说“已分派”不算确认。运行时确认 Chief 收到材料，`say` 另行产生 Output。
 
 ### 连续上下文与记忆
 
