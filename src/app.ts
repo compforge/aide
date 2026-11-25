@@ -1,3 +1,5 @@
+import { ONGOING_TYPE, type OngoingSpec, type OngoingStatus } from "../plugins/personal/ongoing/model.ts";
+import { OngoingInputUnavailable } from "../plugins/personal/work/service.ts";
 import { upgradeOngoingChecks } from "../plugins/personal/ongoing/upgrade.ts";
 import { TopicSessionPolicy, type AgentSessionMode } from "../plugins/personal/execution/session.ts";
 import { isMe } from "../plugins/personal/person/model.ts";
@@ -259,6 +261,17 @@ export class Aide {
   }
 
   work(topicId: string) { return this.personal.work(topicId); }
+
+  async appendOngoingSupplement(id: string, text: string, key?: string) {
+    const matter = this.topics.resources.find<OngoingSpec, OngoingStatus>(ONGOING_TYPE, id);
+    const topic = matter && this.topics.byRef(matter.spec.topic);
+    if (!matter || matter.metadata.deletionTimestamp || !topic || topic.metadata.deletionTimestamp)
+      throw new OngoingInputUnavailable("missing");
+    const me = await this.persons.findIdentity(LOCAL_ME);
+    const sender = me && personRef(me);
+    const source = addressRef(this.addresses.observe(webAddress("gate"), sender ? [sender] : [], { type: "web" }));
+    return this.work(topic.spec.id).appendOngoingSupplement(id, text, { source, sender }, key);
+  }
 
   weaveSession(scope: Parameters<Personal["weaveSession"]>[0], config: Parameters<Personal["weaveSession"]>[1]) { return this.personal.weaveSession(scope, config); }
 

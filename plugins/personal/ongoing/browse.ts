@@ -4,7 +4,7 @@ import { ONGOING_TYPE } from "./model.ts";
 import { TOPIC_TYPE } from "../topic/model.ts";
 
 interface GateOngoing {
-  uid: string; title: string; question: string | null; progress: string | null;
+  id: string; uid: string; title: string; question: string | null; progress: string | null;
   checkAt: string | null; topicId: string | null; topicName: string | null;
 }
 export type GateOngoingPage = ReturnType<typeof browseOpenOngoings>;
@@ -19,7 +19,7 @@ export function browseOpenOngoings(storage: ResourceStorage, query: PageQuery) {
   return storage.transaction(() => {
     const total = Number(storage.db.prepare(`SELECT count(*) AS n FROM resources o WHERE ${where}`).get(ONGOING_TYPE.apiVersion)!.n);
     const bounds = pageBounds(total, size, query.page);
-    const items = storage.db.prepare(`SELECT o.uid, json_extract(o.data, '$.object.spec.title') AS title,
+    const items = storage.db.prepare(`SELECT o.uid, json_extract(o.data, '$.object.metadata.name') AS id, json_extract(o.data, '$.object.spec.title') AS title,
       json_extract(o.data, '$.object.spec.question') AS question, json_extract(o.data, '$.object.status.progress') AS progress,
       json_extract(o.data, '$.object.status.nextCheckAt') AS checkAt,
       json_extract(t.data, '$.object.spec.id') AS topicId, json_extract(t.data, '$.object.spec.name') AS topicName

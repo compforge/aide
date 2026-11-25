@@ -26,3 +26,5 @@ Secretary 按保存的时间递交 `aide:followup`。Chief 先核对 Ongoing、�
 `append_input` 可给 Ongoing 追加原始 Input 或当场记录的材料。Input 的 `status.handle` 按 Work UID 保存关联。Secretary 将新增材料的 ID 一起递交给领域 Chief，原有预约继续有效。Chief 用 `read_work` 查看关联 Input 和 Output。
 
 Chief 在业务 Input 或跟进轮次中调用 `ask_me({ workId, text })` 私下询问 Me。Output 的 `spec.work` 指向事项，`purpose=question` 表示询问，`inputIds` 记录触发材料。预约时间变化不影响同一轮询问。事项已关闭或提醒中的问题已被替换时，旧提醒不能发问。同一事项、问题和触发材料重试时复用已接纳的 Output，实际送达结果见其 delivery 状态。
+
+Me 可以在 Web Gate「跟进」里打开任一开放事项，补充最新进展、结论或对问询的答复。提交将原文作为用户 Input 追加到事项，Secretary 通知所属领域的 Chief。Chief 根据补充更新进展或记录结论并关闭。

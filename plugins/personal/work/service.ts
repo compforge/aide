@@ -1,5 +1,7 @@
 import { OUTPUT_TYPE, type OutputSpec, type OutputStatus } from "../output/model.ts";
 import { ongoingView, ONGOING_TYPE, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
+import type { AddressRef } from "../address/model.ts";
+import type { PersonRef } from "../person/model.ts";
 import { ResourceAlreadyExists } from "@compforge/aide-plugin";
 import { NOTE_TYPE, type NoteSpec, type NoteStatus } from "../note/model.ts";
 import { noteRoot } from "../note/reconcile.ts";
@@ -25,6 +27,10 @@ export const WorkDefinitionSchema = z.object({
   kind: z.enum(["task", "routine"]), title: z.string().trim().min(1),
   instruction: z.string().trim().min(1), trigger: TriggerSchema.nullable(),
 }).strict();
+export class OngoingInputUnavailable extends Error {
+  constructor(readonly reason: "missing" | "closed") { super(reason); }
+}
+
 export type WorkDefinition = z.infer<typeof WorkDefinitionSchema>;
 type OngoingDefinition = { kind: "ongoing"; title: string; progress?: string; question?: string; checkAt?: string };
 const decisionText = z.string().trim().min(1).max(32000);
@@ -162,24 +168,35 @@ export class WorkService {
     return this.read(work.id);
   }
 
+  async appendOngoingSupplement(id: string, text: string, contact: { source: AddressRef; sender?: PersonRef }, key?: string) {
+    const { inputId } = await this.appendInput(id, { text }, {}, key, contact);
+    return { inputId };
+  }
+
   /** @spec Each Work receives an original Input once. Concurrent appends retain each recipient's receipt.
    * @link docs/personal/input.md#投递与办理
    */
-  async appendInput(id: string, material: z.input<typeof appendMaterial>, raw: z.input<typeof WorkInputRequestSchema> = {}, key: string = randomUUID()) {
+  async appendInput(id: string, material: z.input<typeof appendMaterial>, raw: z.input<typeof WorkInputRequestSchema> = {}, key: string = randomUUID(),
+    supplement?: { source: AddressRef; sender?: PersonRef }) {
     const request = WorkInputRequestSchema.parse(raw);
     const actor = this.store.topics.resource(this.topicId);
     if (!actor) throw new Error("Work Topic is unavailable");
     const { id: suppliedId, text } = appendMaterial.parse(material);
-    const inputId = suppliedId ?? digest([actor.metadata.uid, "chief-input", key]);
+    const inputId = suppliedId ?? digest(supplement ? [id, "web-ongoing-supplement", key] : [actor.metadata.uid, "chief-input", key]);
     const at = new Date().toISOString();
-    const draft = text === undefined ? undefined : chiefDecision(actor, text, at);
+    const ref = resourceRef(actor);
+    const draft = text === undefined ? undefined : supplement
+      ? { spec: { origin: "channel" as const, originId: "web", text, topicId: actor.spec.id, relation: "sent" as const, ...supplement },
+          status: { topic: ref, route: { completedAt: at, result: { topics: [ref], reason: "Me supplemented an Ongoing" } } } }
+      : chiefDecision(actor, text, at);
     for (let attempt = 0; ; attempt++) {
       const matter = this.store.resources.find<OngoingSpec, OngoingStatus>(ONGOING_TYPE, id);
+      if (supplement && (!matter || matter.metadata.deletionTimestamp || matter.spec.topic.uid !== actor.metadata.uid))
+        throw new OngoingInputUnavailable("missing");
       if (matter && (matter.metadata.deletionTimestamp || !this.scope().includes(matter.spec.topic.uid))) throw new Error("Ongoing is outside this Topic");
       const work = matter ? ongoingView(matter) : this.read(id);
       const ongoing = work.kind === "ongoing";
       const target = work.kind === "ongoing" ? matter! : this.store.resources.get(workType(work.kind), id);
-      if (ongoing && (work.closure || !["answer", "context"].includes(request.action))) throw new Error("Only open Ongoing accepts material or answers");
       const input = this.store.topics.inputStore.get(inputId);
       if (input) {
         if (input.metadata.deletionTimestamp || !input.status.topic || !this.scope().includes(input.status.topic.uid))
@@ -194,6 +211,10 @@ export class WorkService {
       if (previous) {
         if (!isDeepStrictEqual(previous.request, request)) throw new Error("Input already has a different Work request");
         return { ...work, inputId };
+      }
+      if (ongoing && (work.closure || !["answer", "context"].includes(request.action))) {
+        if (supplement) throw new OngoingInputUnavailable("closed");
+        throw new Error("Only open Ongoing accepts material or answers");
       }
       const handle = { ...input?.status.handle, [target.metadata.uid]: { resource: resourceRef(target), assignedAt: at, request } };
       try {
