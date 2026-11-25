@@ -1,4 +1,6 @@
-import { ONGOING_TYPE, followupInputId, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
+import { DELEGATED_WORK_TYPES, type WorkResource } from "../work/resources.ts";
+import { BATCH_TYPE, type BatchStatus } from "../batch/model.ts";
+import { ONGOING_TYPE, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
 import { isGateTopic } from "./boundary.ts";
 import { HANDOFF_TYPE, type HandoffSpec, type HandoffStatus } from "../handoff/model.ts";
 import { AddressRefSchema, type AddressRef } from "../address/model.ts";
@@ -152,12 +154,41 @@ export class TopicStore {
   async say(topicId: string, inputId: string | undefined, text: string, executionId?: string,
     options: Omit<SayInput, "text"> & { contentKind?: "agent" } = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { agent?: import("@compforge/aide-plugin").AgentStatus; execution?: { id: string } | null }>): Promise<SayReceipt> {
     const initial = await this.ensure(topicId);
-    const request = options.inputIds?.length === 1 ? this.inputStore.get(options.inputIds[0]!) : undefined;
-    const followup = request?.spec.origin === "aide:followup" ? request : undefined;
-    if (followup && (!executionId || initial.status.execution?.id !== executionId || followup.status.assess?.executionId !== executionId
+    const evidence = [...new Set(options.inputIds)].map(id => {
+      const input = this.inputStore.get(id);
+      if (!input) throw new Error(`say Input is not attached to this Topic: ${id}`);
+      return input;
+    });
+    const reminders = evidence.filter(i => i.spec.origin === "aide:followup");
+    const asking = options.purpose === "question";
+    if (reminders.length && !asking) throw new Error("Use ask_me to ask about an Ongoing");
+    if (asking && (!options.workId || owner || !executionId || initial.status.execution?.id !== executionId || !evidence.length
       || !options.to?.me || options.target || options.receivers || options.respondToInputId || options.respondToHandoffId))
-      throw new Error("Only the active followup may ask Me");
-    const id = followup ? followup.metadata.name : options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
+      throw new Error("Only the active Chief may ask Me privately about an Ongoing");
+    if (asking) {
+      const batches = new Set(this.resources.list<unknown, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "deliveryExecution", value: executionId! } }).map(b => b.metadata.uid));
+      if (evidence.some(i => i.status.assess?.executionId !== executionId && !batches.has(i.status.batchId ?? "")
+        || i.spec.origin.startsWith("aide:") && i.spec.origin !== "aide:followup"))
+        throw new Error("Question requires an admitted business Input or Ongoing followup");
+    }
+    const readSubject = () => {
+      if (!options.workId) return;
+      const matter = this.resources.find<OngoingSpec, OngoingStatus>(ONGOING_TYPE, options.workId);
+      const delegated = !matter && !asking ? DELEGATED_WORK_TYPES.map(t => this.resources.find<WorkResource["spec"], WorkResource["status"]>(t, options.workId!)).find(w => w) : undefined;
+      const work = matter ?? delegated;
+      const topicUid = matter?.spec.topic.uid ?? delegated?.status.topic.uid;
+      if (!work || work.metadata.deletionTimestamp || owner && owner.metadata.uid !== work.metadata.uid || !this.scope(initial.metadata.uid).some(t => t.metadata.uid === topicUid))
+        throw new Error("Work is unavailable in this scope");
+      if (asking && (!matter || matter.status.closure || reminders.some(i => i.spec.observation?.ongoingUid !== matter.metadata.uid
+        || (i.spec.observation?.question === undefined ? matter.status.followupInputId !== i.metadata.name
+          : i.spec.observation.question !== (matter.spec.question ?? null)))))
+        throw new Error("Question no longer matches an open Ongoing");
+      return { work, question: matter?.spec.question };
+    };
+    const subject = readSubject();
+    const legacy = reminders.find(i => i.spec.observation?.question === undefined);
+    const id = legacy?.metadata.name ?? (asking && subject ? digest([subject.work.metadata.uid, subject.question ?? null, evidence.map(i => i.metadata.uid).sort()])
+      : options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID());
     const previous = this.outputStore.get(id);
     if (options.respondToInputId && options.to) throw new Error("say cannot combine respondToInputId with to");
     if (options.respondToHandoffId && (options.respondToInputId || options.to || options.target)) throw new Error("Choose a single reply destination");
@@ -252,11 +283,12 @@ export class TopicStore {
         owner = latest;
       }
       if (executionId && (owner ? owner.status.execution?.id : c.status.execution?.id) !== executionId) throw new Error("Output execution is no longer active");
-      const matter = followup && this.resources.find<OngoingSpec, OngoingStatus>(ONGOING_TYPE, String(followup.spec.observation?.ongoingId));
-      if (followup && (!matter || matter.metadata.uid !== followup.spec.observation?.ongoingUid || followupInputId(matter) !== id || matter.status.followupInputId !== id))
-        throw new Error("Followup no longer matches an open Ongoing question");
-      // @spec Persist the one-question receipt with acceptance, across retries and Output capacity eviction.
-      if (matter?.status.askedFollowupId === id) return { outputId: id, accepted: true };
+      const latestSubject = readSubject();
+      const matter = latestSubject?.work;
+      if (subject && (matter?.metadata.uid !== subject.work.metadata.uid || asking && latestSubject?.question !== subject.question))
+        throw new Error("Ongoing question changed during submission");
+      if (legacy && (this.outputStore.get(id) || this.outputStore.storage.receipt(`output:${id}`))) return { outputId: id, accepted: true };
+      if (asking && this.outputStore.get(id)?.spec.work?.uid === matter?.metadata.uid) return { outputId: id, accepted: true };
       const draft: OutputDraft = { id, topicId, text, workId: null };
       // @spec Provenance belongs to the first admission. System notices have no agent execution;
       // their deduplication key is not a tool-call ID, even when this Topic has an active Chief.
@@ -265,13 +297,13 @@ export class TopicStore {
       const accepted = this.outputStore.get(id);
       const createdBy = accepted ? accepted.spec.createdBy
         : executionId ? agentCall((owner ?? c).status, options.idempotencyKey) : undefined;
-      const association = { ...(conversation ? { conversation } : {}), ...(handoffId ? { handoffId } : {}), ...(options.contentKind ? { contentKind: options.contentKind } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
+      const association = { ...(matter ? { work: resourceRef(matter), purpose: options.purpose } : {}), ...(conversation ? { conversation } : {}), ...(handoffId ? { handoffId } : {}), ...(options.contentKind ? { contentKind: options.contentKind } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
       try {
         await commitStatus(this.client, [
           { operation: "patchStatus", resource: c, patch: {} },
           ...(owner ? [{ operation: "patchStatus" as const, resource: owner, patch: {} }] : []),
           outputWrite(c, draft, association),
-          ...(matter ? [{ operation: "patchStatus" as const, resource: matter, patch: { askedFollowupId: id } }] : []),
+          ...(matter && matter.metadata.uid !== owner?.metadata.uid ? [{ operation: "patchStatus" as const, resource: matter, patch: {} }] : []),
         ]);
         return { outputId: id, accepted: true };
       } catch (error) {

@@ -1,3 +1,4 @@
+import { upgradeOngoingChecks } from "../plugins/personal/ongoing/upgrade.ts";
 import { TopicSessionPolicy, type AgentSessionMode } from "../plugins/personal/execution/session.ts";
 import { isMe } from "../plugins/personal/person/model.ts";
 import { addressRef, type AddressRef } from "../plugins/personal/address/model.ts";
@@ -355,6 +356,8 @@ export class Aide {
   }
   start(): Promise<void> {
     return this.starting ??= Promise.resolve().then(async () => {
+      const upgraded = upgradeOngoingChecks(this.inputs.storage);
+      if (upgraded) this.log.info({ upgraded }, "Ongoing appointments upgraded");
       await this.inputs.storage.prepare({ signal: this.startupAbort.signal, log: entry => this.log[entry.level]({ ...entry.attributes, err: entry.error }, entry.message) });
       await this.initializePeople();
       await this.personal.start();

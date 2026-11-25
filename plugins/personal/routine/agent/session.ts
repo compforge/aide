@@ -22,7 +22,7 @@ import type { ExecutionScope } from "../../../../src/protocol/verbs.ts";
 import type { Manager } from "../../../../src/host/plugin/manager.ts";
 import type { Store } from "../../work/store.ts";
 import { createRoutineAgent } from "./agent.ts";
-import { reportWork } from "../../work/report.ts";
+import { reportWorkTool } from "../../work/agent/report.ts";
 import { ROUTINE_TYPE, type RoutineSpec, type RoutineStatus } from "../model.ts";
 import { inputPrinter } from "../../input/printer.ts";
 import { say } from "../../output/action.ts";
@@ -61,16 +61,7 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
           return result({ inputId, handling: input.status.handle[routine.metadata.uid], text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } }),
       sayTool((id, input) => say(verbs(), { ...input, idempotencyKey: id })),
-      tool({ name: "report_routine", label: "Report routine", description: "Atomically update Routine progress and acknowledge only inputs actually handled. report is a brief account of what was actually handled, preserving actors, authorization and confirmation state. This never updates long-lived summary or recent Notes. Use the independent summary and Note tools only when needed. Use say separately for user-visible communication.",
-        parameters: Type.Object({ observedGeneration: Type.Optional(Type.Integer({ minimum: 1, description: "metadata.generation from the current resource. Read and verify the updated goal if it changed during execution." })), inputIds: Type.Array(Type.String()), report: Type.String({ minLength: 1, maxLength: 16000, description: "Brief result and evidence for this handling attempt, not long-lived understanding." }),
-          action: Type.Union([Type.Literal("done"), Type.Literal("wait"), Type.Literal("ask")]), question: Type.Optional(Type.String()), nextAt: Type.Optional(Type.String()) }),
-        async execute(_id, args) {
-          const routine = current();
-          const report = await reportWork(plugins.resourceClient("personal"), routine, routine.status.execution!.id, args, _id);
-          log.info({ routineId: routine.metadata.name, routineUid: routine.metadata.uid, executionId: routine.status.execution!.id,
-            inputIds: report.inputIds, status: report.status }, "Routine progress reported");
-          return result(report);
-        } }),
+      reportWorkTool(plugins.resourceClient("personal"), current, log),
     ];
     // @tmp Existing Gate Work retains its admitted read scope; guardWork rejects every new Gate Work.
     if (isGateTopic(store.topics.byRef(current().status.topic))) {

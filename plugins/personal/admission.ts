@@ -1,3 +1,4 @@
+import { ONGOING_TYPE, type OngoingSpec } from "./ongoing/model.ts";
 import { composeMail, type MailDraft } from "./stream/writer.ts";
 import { statusPatch } from "./status.ts";
 import { topicSubtree } from "./topic/tree.ts";
@@ -23,29 +24,31 @@ export function personalAdmission(inputs: InputStore, outputs: OutputStore): Res
         return writes.create(type, { ...init, spec: { ...spec, parentRef: resourceRef(gate) } });
       }
     }
-    if (type.apiVersion === TASK_TYPE.apiVersion && type.kind === TASK_TYPE.kind) {
-      if (init.namespace && init.namespace !== "v1") throw new Error("Task uses the Personal global namespace");
-      const spec = init.spec as TaskSpec;
+    const isOngoing = type.kind === ONGOING_TYPE.kind && type.apiVersion === ONGOING_TYPE.apiVersion;
+    if ((type.apiVersion === TASK_TYPE.apiVersion && type.kind === TASK_TYPE.kind) || isOngoing && (init.spec as OngoingSpec).initialInputId) {
+      if (init.namespace && init.namespace !== "v1") throw new Error("Work uses the Personal global namespace");
+      const spec = init.spec as TaskSpec | OngoingSpec;
       if (!spec.initialInputId) throw new Error("Task requires an initial Input");
       const input = inputs.get(spec.initialInputId);
-      const target = (init.status as import("./task/model.ts").TaskStatus).topic;
+      const target = isOngoing ? (init.spec as OngoingSpec).topic : (init.status as import("./task/model.ts").TaskStatus).topic;
       const topic = inputs.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, target.name, target.namespace);
-      if (topic.metadata.uid !== target.uid) throw new Error("Task Topic was replaced");
+      if (topic.metadata.uid !== target.uid) throw new Error("Work Topic was replaced");
       const members = new Set(topicSubtree(topic, parent => inputs.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { namespace: parent.metadata.namespace, matchIndex: { name: "parent", value: parent.metadata.uid } })).map(t => t.metadata.uid));
       const attached = input && input.status.topic && members.has(input.status.topic.uid);
       if (topic.metadata.deletionTimestamp || !input || input.metadata.deletionTimestamp || !attached)
-        throw new Error("Initial Input is not assigned to the Task Topic");
+        throw new Error("Initial Input is not assigned to the Work Topic");
       if (isInternalInput(input.spec)) throw new Error("Maintenance Input cannot be delegated");
-      const existing = inputs.resources.find(TASK_TYPE, init.name);
+      const existing = inputs.resources.find(type, init.name);
       if (existing) {
-        if (existing.metadata.deletionTimestamp || !isDeepStrictEqual(existing.spec, spec)) throw new Error("Task creation identity is already used");
+        if (existing.metadata.deletionTimestamp || !isDeepStrictEqual(existing.spec, spec)) throw new Error("Work creation identity is already used");
         return existing;
       }
-      const task = writes.create(type, init);
-      writes.patchStatus(input, statusPatch(input, { handle: { ...input.status.handle, [task.metadata.uid]: {
-        resource: resourceRef(task), assignedAt: new Date().toISOString(), request: { action: "context" },
+      const work = writes.create(type, init);
+      const at = new Date().toISOString();
+      writes.patchStatus(input, statusPatch(input, { handle: { ...input.status.handle, [work.metadata.uid]: {
+        resource: resourceRef(work), assignedAt: at, ...(isOngoing ? { completedAt: at } : {}), request: { action: "context" },
       } } }));
-      return task;
+      return work;
     }
     if (type.apiVersion === INPUT_TYPE.apiVersion && type.kind === INPUT_TYPE.kind) {
       if (init.namespace && init.namespace !== "v1") throw new Error("Input uses the Personal global namespace");

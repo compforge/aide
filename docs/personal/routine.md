@@ -60,11 +60,11 @@ Routine 没有静默资源回收阶段。职责、trigger 和累计认识持续�
 | say | 创建用户可见 Output，关联 Routine UID、execution 和可选 Input |
 | summarize_routine | 独立修订本资源的长期认识 |
 | upsert_note | 按同一事项创建或更新近期 Note，目标由 Host 绑定 |
-| report_routine | 原子提交进展、当前轮次状态和明确列出的 Input 回执 |
+| report_work | 原子提交进展、当前轮次状态和明确列出的 Input 回执 |
 
 工具绑定宿主确定的 Routine UID；每次调用检查当前 execution，模型不能选择其它资源范围。文件、CLI 和能力包使用 Pi 原生机制与现有凭证。
 
-report_routine 的 inputIds 必须是已接纳、已处理的输入，与一次资源状态更新共同提交。未列出的 Input 不会被确认。report 是本次办理说明，同时保存在 lastReport；summary 和 Note 独立维护，不因每轮报告而重写。
+report_work 的 inputIds 必须是已接纳、已处理的输入，与一次资源状态更新共同提交。未列出的 Input 不会被确认。report 是本次办理说明，同时保存在 lastReport；summary 和 Note 独立维护，不因每轮报告而重写。
 
 - done 完成本轮。尚有未确认 Input 时继续 ready，否则回到 scheduled；cron 重新计算下次时间，纯事件职责保持 nextTriggerAt=null 等待事件。
 - ask 保存问题并进入 waiting，问题通过 say 单独发送；回答经 Chief 分派为新 Input 后继续。
@@ -72,7 +72,7 @@ report_routine 的 inputIds 必须是已接纳、已处理的输入，与一次�
 
 finalText 只保留为执行记录，不解析为业务结果、不自动发送给用户。没有回执的已接纳 Input 或没有报告的定时执行进入 uncertain，保留错误和执行关联。明确恢复前先核对已有副作用，不自动重放。暂停期间收到报告仍保留 paused。
 
-say 和 report_routine 分别持久化。Output 投递失败只重试投递，不重复本轮工作。新发现若需要独立目标，可通过 say 提出后续 Task，由 Chief 安排；Routine 不自行扩展职责。
+say 和 report_work 分别持久化。Output 投递失败只重试投递，不重复本轮工作。新发现若需要独立目标，可通过 say 提出后续 Task，由 Chief 安排；Routine 不自行扩展职责。
 
 执行开始记录目标或职责版本。spec 在执行途中改变时，旧报告不能确认新版本；Agent 需用 read_routine 重新读取资源、核对结果，并显式报告当前 observedGeneration。暂停期间可以保存旧执行针对原版本的结果，但不能据此确认新版本目标。
 
@@ -93,7 +93,7 @@ custom → user：Background.text()，当前业务背景 v1
   topic：所属话题背景
   work：同一 Topic 的相关 Task / Routine 概况
 user：Input 1 或本轮定时触发说明
-assistant / tool：判断变化、按需 say、report_routine 提交本轮结果
+assistant / tool：判断变化、按需 say、report_work 提交本轮结果
 后续请求的 custom → user 前缀：objective 认识 v2  # 已提交的新结论或跟进状态
 user：Input 2
 assistant / tool：结合当前认识处理新观察

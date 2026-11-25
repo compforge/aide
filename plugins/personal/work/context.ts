@@ -44,7 +44,7 @@ export function workContextTools(kind: "task" | "routine", resources: ResourceCl
       } }),
     tool({ name: "upsert_note", label: "Upsert note", description: `${noteDescription} ${kind === "task"
       ? "Track this task's progress, blockers, attempts and verification results. Distinguish planned, executed and verified actions."
-      : "Track this responsibility's recent checks, anomalies and follow-up. Update one Note for the same continuing anomaly or occurrence; distinct occurrences can have distinct Notes."} The Host binds the target. This does not replace report_${kind} for done/wait/ask outcomes.`,
+      : "Track this responsibility's recent checks, anomalies and follow-up. Update one Note for the same continuing anomaly or occurrence; distinct occurrences can have distinct Notes."} The Host binds the target. This does not replace report_work for done/wait/ask outcomes.`,
       parameters: Type.Object(noteFields, { additionalProperties: false }),
       async execute(callId, args, signal) {
         signal?.throwIfAborted(); const owner = read();

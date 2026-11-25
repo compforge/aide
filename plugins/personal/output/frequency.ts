@@ -33,6 +33,10 @@ export function nextDeliveryAt(store: OutputStore, output: Readonly<Output>, now
  * @case tests/output-frequency.test.ts
  */
 export function canEvictOutput(output: Readonly<Output>, context: ResourceValidationContext): boolean {
+  if (output.spec.purpose === "question" && output.spec.work) {
+    const matter = context.get<unknown, import("../ongoing/model.ts").OngoingStatus>(output.spec.work, output.spec.work.uid);
+    if (matter && !matter.status.closure && !matter.metadata.deletionTimestamp) return false;
+  }
   if (output.status.phase !== "delivered" || !output.status.deliveredAt) return true;
   const delivered = Date.parse(output.status.deliveredAt), now = Date.now();
   for (const ref of output.status.delivery?.receivers ?? []) {

@@ -332,7 +332,7 @@ export class Personal {
       if (!notice || work.metadata.deletionTimestamp) continue;
       try {
         await this.topics.say(this.store.topicId(work.status.topic), undefined, notice.text, undefined,
-          { to: { me: true }, inputIds: [], idempotencyKey: notice.id });
+          { workId: work.metadata.name, to: { me: true }, inputIds: [], idempotencyKey: notice.id });
         const current = await resources.get<WorkSpec, import("./work/agent-status.ts").WorkAgentStatus>(resourceRef(work));
         if (current?.status.recoveryNotice?.id === notice.id) await patchStatus(resources, current, { recoveryNotice: null });
         this.log.info({ workId: work.metadata.name, noticeId: notice.id }, "Recovery notification accepted");

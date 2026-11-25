@@ -1,5 +1,5 @@
 import { confirmCuratedNotes } from "../plugins/personal/note/confirm.ts";
-import { deliverInput } from "./input-state-fixture.ts";
+import { deliverInput, routeTo } from "./input-state-fixture.ts";
 import { upsertOngoing, readOngoing } from "../plugins/personal/ongoing/service.ts";
 import { prepareOngoingCheck } from "../plugins/personal/secretary/ongoing.ts";
 import { topicPolicy } from "../plugins/personal/topic/config.ts";
@@ -487,19 +487,31 @@ test("Chief declares all responsibilities through Work tools and keeps Ongoing o
     const value = await tools.find(tool => tool.name === name)!.execute(key, args, undefined, undefined, {} as never);
     return JSON.parse((value.content[0] as { text: string }).text);
   };
-  const input = await f.aide.topics.submit("approval-input", { origin: "source", originId: "test", text: "Materials submitted", topicId: "knowledge" });
-  const args = { kind: "ongoing", title: "Approval", question: "Was it accepted?" };
+  const initialInput = await f.aide.work("knowledge").createInput("Verify approval");
+  const input = await f.aide.work("knowledge").createInput("Materials submitted");
+  const args = { kind: "ongoing", title: "Approval", inputId: initialInput.inputId, question: "Was it accepted?" };
   const matter = await call("upsert_work", args);
   assert.equal((await call("upsert_work", args)).id, matter.id);
   assert.equal(matter.kind, "ongoing");
   assert.equal((await call("list_work", {})).some((w: { id: string }) => w.id === matter.id), true);
   assert.equal((await call("read_work", { id: matter.id })).version, matter.version);
-  await assert.rejects(call("append_input", { workId: matter.id, input: { id: input.metadata.name } }), /Unknown work/);
-  assert.equal(f.aide.topics.inputStore.get(input.metadata.name)?.status.handle?.[matter.uid], undefined);
+  assert.equal(matter.initialInputId, initialInput.inputId);
+  const sourced = await call("upsert_work", { kind: "ongoing", title: "Inspect supporting evidence", sourceId: initialInput.inputId });
+  assert.equal(sourced.initialInputId, initialInput.inputId);
+  await call("upsert_work", { kind: "ongoing", workId: sourced.id, version: sourced.version, outcome: "Evidence reviewed" });
+  assert.ok(f.aide.topics.inputStore.get(initialInput.inputId)?.status.handle?.[matter.uid]?.completedAt);
+  const append = () => call("append_input", { workId: matter.id, input: { id: input.inputId } });
+  await Promise.all([append(), append()]);
+  assert.equal(f.aide.topics.inputStore.get(input.inputId)?.status.handle?.[matter.uid]?.resource.uid, matter.uid);
+  await prepareOngoingCheck(f.context, await readOngoing(f.resources, f.read(), matter.id), topicPolicy());
+  const reminder = f.aide.topics.inputStore.list().find(i => i.spec.observation?.trigger === "work_input");
+  assert.deepEqual(reminder?.spec.observation?.inputIds, [input.inputId]);
+  assert.ok(f.aide.topics.inputStore.get(input.inputId)?.status.handle?.[matter.uid]?.completedAt);
+  assert.equal((await call("read_work", { id: matter.id })).checkAt, matter.checkAt);
   const followupTools = toolsForInput(tools, "aide:followup");
   assert.ok(followupTools.includes("upsert_work"));
   assert.ok(!followupTools.includes("append_input"));
-  await call("upsert_work", { kind: "ongoing", workId: matter.id, version: matter.version, outcome: "Confirmed receipt of approval" });
+  await call("upsert_work", { kind: "ongoing", workId: matter.id, version: (await call("read_work", { id: matter.id })).version, outcome: "Confirmed receipt of approval" });
   assert.deepEqual(await call("list_work", { kind: "ongoing" }), []);
   assert.equal((await call("list_work", { kind: "ongoing", includeClosed: true }))[0].status, "closed");
 });
@@ -524,19 +536,85 @@ test("Ongoing checks have an independent identity, one durable request and one p
   assert.equal(request.spec.observation?.trigger, "question_due");
   await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "live", startedAt: new Date().toISOString() } });
   const ask = () => f.aide.topics.say("knowledge", undefined, args.question, "live",
-    { to: { me: true }, inputIds: [request.metadata.name] });
+    { workId: initial.id, purpose: "question", to: { me: true }, inputIds: [request.metadata.name] });
   await fixtureMe(f.aide);
   await deliverInput(f.resources, f.read(), "live", request.metadata.name);
+  await upsertOngoing(f.resources, f.read(), { ongoingId: initial.id, version: (await read()).metadata.resourceVersion,
+    checkAt: new Date(due + 86_400_000).toISOString() }, "reschedule");
   const first = await ask();
   assert.deepEqual(await ask(), first);
   assert.equal(f.aide.topics.outputStore.get(first.outputId)?.spec.target.uid, f.aide.defaultAddress().uid);
-  assert.equal((await read()).status.askedFollowupId, request.metadata.name);
+  assert.equal(f.aide.topics.outputStore.get(first.outputId)?.spec.work?.uid, initial.uid);
+  assert.equal(f.aide.topics.outputStore.get(first.outputId)?.spec.purpose, "question");
   assert.equal((await read()).status.closure, undefined);
   const closed = await upsertOngoing(f.resources, f.read(), { ongoingId: initial.id,
     version: (await read()).metadata.resourceVersion, outcome: "Me confirmed final sign-off" }, "close");
+  await assert.rejects(ask(), /open Ongoing/);
   assert.equal(closed.closure?.outcome, "Me confirmed final sign-off");
   assert.equal(closed.checkAt, undefined);
   assert.equal(await prepareOngoingCheck(f.context, await read(), policy, due), undefined);
+});
+
+test("new material and a due appointment share one followup and one question opportunity", async t => {
+  const f = await setup(t), work = f.aide.work("knowledge");
+  const matter = await work.create({ kind: "ongoing", title: "Verify approval", checkAt: "2024-01-01T00:00:00.000Z" });
+  const { inputId } = await work.appendInput(matter.id, { text: "Approval is still pending." });
+  const read = () => readOngoing(f.resources, f.read(), matter.id);
+  await prepareOngoingCheck(f.context, await read(), topicPolicy());
+  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:followup")!;
+  assert.deepEqual(request.spec.observation?.inputIds, [inputId]);
+  assert.equal((await read()).status.followupInputId, request.metadata.name);
+  assert.equal(await prepareOngoingCheck(f.context, await read(), topicPolicy()), undefined);
+});
+
+test("business Inputs and delivered Batch members can ask about an open Work before its timer", async t => {
+  const { prepareBatch } = await import("../plugins/personal/batch/prepare.ts");
+  const { BATCH_TYPE } = await import("../plugins/personal/batch/model.ts");
+  const { assignInput } = await import("../plugins/personal/input/assignment.ts");
+  const f = await setup(t);
+  await fixtureMe(f.aide);
+  const matter = await upsertOngoing(f.resources, f.read(), { title: "Approval", question: "Is approval final?" }, "approval");
+  for (const batched of [false, true]) {
+    const input = await f.aide.topics.submit(`evidence-${batched}`, { origin: "source", originId: "fixture", text: "The draft was submitted",
+      attention: batched ? InputAttention.Deferred : InputAttention.Normal });
+    await routeTo(f.resources, f.read().metadata, input);
+    const routed = f.aide.topics.inputStore.get(input.metadata.name)!;
+    const ask = () => f.aide.topics.say("knowledge", undefined, "Is approval final?", "live", {
+      workId: matter.id, purpose: "question", to: { me: true }, inputIds: [input.metadata.name] });
+    await assert.rejects(ask(), /admitted/);
+    if (batched) {
+      const batch = await prepareBatch(f.context, f.read(), [routed], new Date().toISOString());
+      const ready = await f.resources.get({ ...BATCH_TYPE, namespace: "v1", name: batch!.metadata.name });
+      await f.resources.patchStatus(ready!, { phase: "running", assess: { executionId: "live", startedAt: new Date().toISOString() } });
+    } else {
+      await assignInput(f.context, routed);
+      await deliverInput(f.resources, f.read(), "live", input.metadata.name);
+    }
+    const accepted = await ask();
+    assert.deepEqual(await ask(), accepted);
+    assert.equal(f.aide.topics.outputStore.get(accepted.outputId)?.spec.inputUids?.[input.metadata.name], input.metadata.uid);
+  }
+  const view = await f.aide.work("knowledge").readItem(matter.id);
+  assert.ok(view.kind === "ongoing");
+  assert.deepEqual(view.outputs.map(o => o.phase), ["pending", "pending"]);
+});
+
+test("startup converts existing Ongoing checks without rearming a consumed appointment", async t => {
+  const { upgradeOngoingChecks } = await import("../plugins/personal/ongoing/upgrade.ts");
+  const { digest } = await import("../plugins/personal/identity.ts");
+  const f = await setup(t);
+  const matter = await upsertOngoing(f.resources, f.read(), { title: "Await response" }, "legacy");
+  const storage = f.aide.topics.inputStore.storage;
+  const priorId = `followup-${digest([matter.uid, 2])}`;
+  storage.db.prepare(`UPDATE resources SET data = json_set(json_remove(data,'$.object.status.nextCheckAt'),
+    '$.object.status.planRevision',2,'$.object.status.followupInputId',?,'$.object.status.askedFollowupId',?,'$.object.spec.checkAt',?) WHERE uid=?`)
+    .run(priorId, priorId, matter.checkAt!, matter.uid);
+  assert.equal(upgradeOngoingChecks(storage), 1);
+  assert.equal(upgradeOngoingChecks(storage), 0);
+  const saved = await readOngoing(f.resources, f.read(), matter.id);
+  assert.equal(saved.status.followupInputId, priorId);
+  assert.equal(saved.status.nextCheckAt, matter.checkAt);
+  assert.equal(await prepareOngoingCheck(f.context, saved, topicPolicy(), Date.parse(matter.checkAt!) + 1), undefined);
 });
 
 test("a time-only Ongoing check can complete silently and does not repeat the consumed plan", async t => {
@@ -573,7 +651,7 @@ test("curating or retiring evidence leaves its Ongoing open; updated plans fence
   await assert.rejects(readOngoing(f.resources, other, matter.id), /scope/);
   const rescheduled = await upsertOngoing(f.resources, f.read(), { ongoingId: matter.id, version: paused.version, checkAt }, "resume");
   assert.equal(rescheduled.checkAt, checkAt);
-  assert.equal((await read()).status.planRevision, 3);
+  assert.equal((await read()).status.nextCheckAt, checkAt);
 });
 
 test("retrospective decisions reuse sourced Work across rounds and retain the Note's independent evidence", async t => {
@@ -704,11 +782,11 @@ test("evidence that a matter is still ongoing settles the old check without aski
     progress: "Owner confirmed review and scheduled sign-off for tomorrow", ...followup }, "progress");
   await fixtureMe(f.aide);
   await assert.rejects(f.aide.topics.say("knowledge", undefined, "Has sign-off happened?", "live", {
-    to: { me: true }, inputIds: [request.metadata.name] }), /no longer matches/);
+    purpose: "question", workId: matter.id, to: { me: true }, inputIds: [request.metadata.name] }), /no longer matches/);
   await deliverInput(f.resources, f.read(), "live", request.metadata.name);
   const updated = await read();
   assert.equal(updated.status.closure, undefined);
-  assert.equal(updated.spec.checkAt, followup.checkAt);
+  assert.equal(updated.status.nextCheckAt, followup.checkAt);
   assert.equal(updated.spec.question, followup.question);
   assert.equal(f.aide.outputs().length, 0);
 });

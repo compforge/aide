@@ -84,7 +84,7 @@ export function relatedWork(store: Store, topicId: string) {
         lastReport: work.lastReport ? { at: work.lastReport.at, text: preview(work.lastReport.text, 500) } : undefined };
     });
   const ongoing = store.ongoingResources(scope).map(w => ({ id: w.metadata.name, uid: w.metadata.uid, topicId: store.topicId(w.spec.topic),
-    kind: "ongoing" as const, title: preview(w.spec.title, 200), status: "open", nextAt: w.spec.checkAt, question: preview(w.spec.question, 500),
+    kind: "ongoing" as const, title: preview(w.spec.title, 200), status: "open", nextAt: w.status.nextCheckAt, question: preview(w.spec.question, 500),
     progress: preview(w.status.progress, 500) }));
   return [...delegated, ...ongoing].sort((a, b) => (a.uid ?? "").localeCompare(b.uid ?? ""));
 }

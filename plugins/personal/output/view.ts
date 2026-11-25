@@ -18,7 +18,7 @@ export function outputView(output: Readonly<Output>, streams: StreamStore): Outp
   const { metadata, spec, status } = output;
   const content = readAgentStream(streams.reader(status.delivery?.stream ?? spec.stream), streams);
   return { role: "aide", id: metadata.name, topicId: spec.topicId, topicUid: spec.topic.uid,
-    generation: content.phase, text: content.text, at: metadata.creationTimestamp, target: status.delivery?.target ?? spec.target, receivers: (status.delivery?.receivers ?? spec.receivers)?.toJSON(), workId: spec.producer?.name ?? null,
+    generation: content.phase, text: content.text, at: metadata.creationTimestamp, target: status.delivery?.target ?? spec.target, receivers: (status.delivery?.receivers ?? spec.receivers)?.toJSON(), workId: spec.work?.name ?? spec.producer?.name ?? null,
     executionId: spec.executionId, inputIds: spec.inputIds, status: { ...status, ...(status.delivery ? { delivery: { ...status.delivery, receivers: [...status.delivery.receivers] } } : { delivery: undefined }) }, deliveredAt: status.deliveredAt };
 }
 

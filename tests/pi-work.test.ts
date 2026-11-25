@@ -55,6 +55,7 @@ test(`${definition.kind} CRUD preserves identity, enforces revisions and topic s
   assert.equal(service.read(work.id).kind, definition.kind);
   assert.equal(writes(), beforeRead);
   const appended = await service.appendInput(work.id, { text: "修改目标" }, { action: "update", changes: { instruction: "检查更新后的 aide 仓库" } }, "request-1");
+  assert.ok(appended.kind !== "ongoing");
   assert.equal(appended.instruction, definition.instruction);
   assert.equal(appended.status, work.status);
   await service.appendInput(work.id, { text: "修改目标" }, { action: "update", changes: { instruction: "检查更新后的 aide 仓库" } }, "request-1");

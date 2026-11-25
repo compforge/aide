@@ -18,6 +18,8 @@ export interface OutputSpec {
   topicId: string;
   executionId?: string;
   producer?: ResourceRef;
+  work?: ResourceRef & { uid: string };
+  purpose?: "question";
   inputIds?: string[];
   /** Exact input incarnations at Output creation, keyed by input name. */
   inputUids?: Record<string, string>;
@@ -51,6 +53,8 @@ import type { VerbResult } from "@compforge/aide-plugin";
 /** Persists an Output; success acknowledges creation, while status separately reports delivery (never reading). */
 export interface SayInput {
   readonly text: string;
+  readonly workId?: string;
+  readonly purpose?: "question";
   readonly notes?: readonly { uid: string; version: string }[];
   readonly inputIds?: readonly string[];
   readonly idempotencyKey?: string;

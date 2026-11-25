@@ -79,7 +79,7 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
           const items = page.items.filter(m => !m.metadata.deletionTimestamp && (args.includeClosed || !m.status.closure)
             && (!args.q || [m.spec.title, m.spec.question, m.status.progress, m.status.closure?.outcome].join(" ").toLowerCase().includes(args.q.toLowerCase())))
             .map(m => ({ id: m.metadata.name, uid: m.metadata.uid, kind: "ongoing", topicUid: m.spec.topic.uid, title: m.spec.title,
-              status: m.status.closure ? "closed" : "open", checkAt: m.spec.checkAt }));
+              status: m.status.closure ? "closed" : "open", checkAt: m.status.nextCheckAt }));
           return result({ items, scanned: page.items.length, continue: page.metadata.continue });
         }
         const type = DELEGATED_WORK_TYPES.find(t => t.kind.toLowerCase() === args.kind)!;

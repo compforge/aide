@@ -9,11 +9,11 @@ export interface ChiefToolDefinition<T extends TSchema = TSchema> extends ToolDe
 export interface ChiefInputTask {
   executionId: string;
   origin: InputOrigin;
-  inputs: { id: string; deliveryId?: string; initial?: boolean; summaryOwnerUid?: string; origin: InputOrigin; text: string }[];
+  inputs: { id: string; deliveryId?: string; initial?: boolean; ongoingUid?: string; summaryOwnerUid?: string; origin: InputOrigin; text: string }[];
 }
 export interface ChiefInputBinding {
   read(): ChiefInputTask;
-  ongoingCheck?(id: string): Promise<string | undefined>;
+  ongoingUid?(id: string): Promise<string | undefined>;
   noteSummaryOwner?(id: string): Promise<string | undefined>;
   changed(task: ChiefInputTask, tools: string[]): void;
 }
@@ -21,9 +21,9 @@ const instructions: Record<InputOrigin, string> = {
   channel: "Decide from the message and its context whether a reply or action is needed. Answer, maintain matter Notes and hand off ongoing Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
   source: "Assess the observed business facts within existing authority. Update continuing matter Notes and relevant Work as needed. Observation is not new authorization. Leave tree organization and durable summary maintenance to their own Inputs.",
   chief: "Handle the recorded business decision within its existing authorization. Maintain matter Notes and Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
-  "aide:followup": "Read the specified Ongoing, related Inputs, Work results and replies from Me. If the plan was superseded or the matter closed, finish silently. When evidence establishes closure, upsert_work with the outcome and basis. If still open, record progress and the next check. When a consequential fact is missing, ask Me privately with ask_me, then await the reply.",
+  "aide:followup": "Read the specified Ongoing, related Inputs, Work results and replies from Me. If the matter closed, finish silently. An updated check time does not invalidate the open question. When evidence establishes closure, upsert_work with the outcome and basis. If still open, record progress and the next check. When a consequential fact is missing, ask Me privately with ask_me, then await the reply.",
   "aide:summary": "Review only the named owner. Use the owner-specific question in the Input. Read its whole current summary and relevant Notes. What is worth reading by default next time? If you wrote the summary today, would each existing claim still hold at the same scope and certainty? Keep lasting, supported conclusions. Narrow or remove outdated claims. Use the evidenced outcome of a concluded matter before generalizing from it. Preserve disclosure, attribution and explicit corrections. Re-read on version conflict.",
-  "aide:curate": "Review ordinary Notes and Task, Routine and Ongoing in this Topic using current evidence and existing authority. Identify missing or changed responsibilities, look up existing Work before creating any, and use append_input for delegated work. Confirm the destination before retiring a redundant source Note or winding down superseded Work. Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Use split_note for mixed material. For duplicate Notes, update the existing destination before pruning or retiring the source. Use confirm_curated_notes to confirm the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Use versions returned by fresh reads or writes. If a version changed, reread and correct rejected entries, or omit unresolved Notes to defer them explicitly.",
+  "aide:curate": "Review ordinary Notes and Task, Routine and Ongoing in this Topic using current evidence and existing authority. Identify missing or changed responsibilities, look up existing Work before creating any, and use append_input for material related to existing Work. Confirm the destination before retiring a redundant source Note or winding down superseded Work. Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Use split_note for mixed material. For duplicate Notes, update the existing destination before pruning or retiring the source. Use confirm_curated_notes to confirm the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Use versions returned by fresh reads or writes. If a version changed, reread and correct rejected entries, or omit unresolved Notes to defer them explicitly.",
   "aide:organize": "Organize the Topic tree and its material. Create or move Topics and file Inputs, idle Work and Notes according to responsibility. If a Note spans Topics, use split_note to extract ordinary Notes into the appropriate Topics. Preserve evidence and disclosure.",
 };
 // Bundled tools have no Personal metadata upstream; their capabilities are declared at this assembly boundary.
@@ -50,15 +50,20 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
   let current: ChiefInputTask | undefined;
   let names: string[] = [];
   let allowed: Set<string> | undefined;
+  let deliveredInternalId: string | undefined;
   let delivered = new Set<string>();
   const select = (receivedOrigin?: InputOrigin) => {
     const admitted = binding.read();
     const newExecution = current?.executionId !== admitted.executionId;
-    if (newExecution) delivered = new Set(admitted.inputs.filter(input => input.initial !== false).map(input => input.id));
+    if (newExecution) {
+      const initial = admitted.inputs.filter(input => input.initial !== false);
+      delivered = new Set(initial.map(input => input.id));
+      deliveredInternalId = initial.find(i => i.origin === admitted.origin && isInternalInput(i))?.id;
+    }
     const origin = receivedOrigin ?? (newExecution ? admitted.origin : current!.origin);
-    const task = { ...admitted, origin, inputs: admitted.inputs.filter(input => delivered.has(input.id) && (isInternalInput({ origin }) ? input.origin === origin : !isInternalInput(input))) };
+    const task = { ...admitted, origin, inputs: admitted.inputs.filter(input => delivered.has(input.id) && (isInternalInput({ origin }) ? input.origin === origin && input.id === deliveredInternalId : !isInternalInput(input))) };
     const nextNames = toolsForInput(declarations, origin).filter(name => allowed?.has(name));
-    if (newExecution || current?.origin !== origin) binding.changed(task, nextNames);
+    if (newExecution || current?.origin !== origin || task.inputs.some(i => !current?.inputs.some(prior => prior.id === i.id))) binding.changed(task, nextNames);
     current = task;
     names = nextNames;
     session.setActiveToolsByName(names);
@@ -82,7 +87,10 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     if (!id) return;
     const inputs = binding.read().inputs.filter(input => (input.deliveryId ?? input.id) === id);
     for (const input of inputs) delivered.add(input.id);
-    if (inputs.length) select(inputs[0]!.origin);
+    if (inputs.length) {
+      if (isInternalInput(inputs[0]!)) deliveredInternalId = inputs[0]!.id;
+      select(inputs[0]!.origin);
+    }
   });
   const prepareRequest = session.agent.prepareRequest;
   session.agent.prepareRequest = async (request, signal) => {
@@ -122,20 +130,18 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
       if (!uid || !selected || !live.inputs.some(i => i.id === selected.id && i.summaryOwnerUid === uid))
         return { block: true, reason: "Only the admitted Summary owner may be edited" };
     }
-    if (context.toolCall.name === "upsert_work" && current.origin === "aide:followup") {
+    if (["upsert_work", "ask_me"].includes(context.toolCall.name) && current.origin === "aide:followup") {
       const args = context.args as { kind?: string; workId?: string };
-      const id = args.kind === "ongoing" && args.workId;
-      const plan = id && await binding.ongoingCheck?.(id);
-      if (!plan || !current.inputs.some(i => i.id === plan) || !live.inputs.some(i => i.id === plan))
-        return { block: true, reason: "Update only the Ongoing and check plan admitted for this followup" };
+      const id = (args.kind === "ongoing" || context.toolCall.name === "ask_me") && args.workId;
+      const uid = id && await binding.ongoingUid?.(id);
+      if (!uid || !current.inputs.some(i => i.ongoingUid === uid && live.inputs.some(l => l.id === i.id)))
+        return { block: true, reason: "Use only the Ongoing referenced by the admitted followup" };
     }
     if (context.toolCall.name === "upsert_work" && current.origin === "aide:curate") {
       const args = context.args as { workId?: string; sourceId?: string; inputId?: string };
       if (!args.workId && !args.sourceId && !args.inputId)
         return { block: true, reason: "Identify the source Note, Work or business Input for the new responsibility" };
     }
-    if (context.toolCall.name === "ask_me" && !current.inputs.some(i => i.origin === "aide:followup" && i.id === (context.args as { inputId?: string }).inputId))
-      return { block: true, reason: "Ask only about the admitted followup" };
     return beforeTool?.(context, signal);
   };
 }

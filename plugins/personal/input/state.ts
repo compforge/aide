@@ -6,7 +6,7 @@ import { readTopicSubtree } from "../topic/tree.ts";
 export type Input = Readonly<Resource<InputSpec, InputStatus>>;
 export const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "v1" as const, name });
 export const resourceRef = (r: Readonly<Resource<unknown, unknown>>) => ({ apiVersion: r.apiVersion, kind: r.kind, namespace: r.metadata.namespace, name: r.metadata.name, uid: r.metadata.uid });
-export const stage = (owner: ResourceRef) => owner.kind === "Route" ? "route" : ["Task", "Routine"].includes(owner.kind) ? "handle" : "assess";
+export const stage = (owner: ResourceRef) => owner.kind === "Route" ? "route" : ["Task", "Routine", "Ongoing"].includes(owner.kind) ? "handle" : "assess";
 /** Current Topic ownership determines material visibility; assessment/admission is global to the Input. */
 export function belongsToTopic(input: Input, owner: ResourceRef, topicUids?: ReadonlySet<string>): boolean {
   return !!input.status.topic && (topicUids ? topicUids.has(input.status.topic.uid) : input.status.topic.uid === owner.uid);
