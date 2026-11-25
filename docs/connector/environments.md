@@ -60,7 +60,8 @@ const dev = await context.connectors.environments.get("开发环境");
 
 目录不绑定 Personal，也不生成 Resource、Task、Source 或持久观察状态。宿主公共接口不返回提供方凭证；这不是插件安全隔离机制，Runner 仍使用服务用户的执行身份。
 
-Workload 采样复用 `@compforge/harness-toolbox` 的原生 Kubernetes ResourceAccess 和 Pod 解析。每次采样建立有界访问范围，结束或失败时取消剩余请求；全局目录不永久持有所有环境的客户端。
+Workload 采样复用 `@compforge/harness-toolbox` 的 `KubernetesClient` 和 Pod 解析。Connector 首次查询某环境时创建客户端，同一环境的后续采样复用它。
+客户端通过 LIST/WATCH 同步查询过的 namespace 和资源类型，缓存可用时本地读取，首次同步或断线期间直读 Kubernetes API。采样结束或失败时取消该次剩余请求，Connector 关闭时停止后台同步。
 
 ## Environment 变化
 

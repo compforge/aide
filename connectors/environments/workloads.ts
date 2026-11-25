@@ -1,7 +1,5 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { z } from "zod";
-import { resourceAccess, type ResourceAccess } from "@compforge/harness-toolbox/kubernetes/resources";
+import type { ResourceAccess, ResourceRequestOptions } from "@compforge/harness-toolbox/kubernetes/resources";
 import { parsePods } from "@compforge/harness-toolbox/kubernetes/pod";
 import type { EnvironmentDefinition, EnvironmentSnapshot, WorkloadSnapshot } from "@compforge/aide-plugin";
 
@@ -77,24 +75,17 @@ export function observationNamespace(environment: EnvironmentDefinition, namespa
   return selected;
 }
 
-export async function readWorkloads(environment: EnvironmentDefinition, namespace?: string): Promise<EnvironmentSnapshot> {
-  const selected = observationNamespace(environment, namespace);
-  if (!("kubeconfig" in environment)) throw new Error("Kubernetes access is missing");
-  const abort = new AbortController();
-  const timeout = setTimeout(() => abort.abort(new Error("Environment observation timed out")), 25_000);
-  try {
-    const kubeconfig = environment.kubeconfig.startsWith("~/") ? join(homedir(), environment.kubeconfig.slice(2)) : environment.kubeconfig;
-    const access = resourceAccess({ kubeconfig, context: environment.context }, abort.signal,
-      { timeoutMs: 10_000, concurrency: 2, maxBytes: 8 * 1024 * 1024 });
-    return await collectWorkloads(access, environment.name, selected);
-  } finally { clearTimeout(timeout); abort.abort(); }
-}
-
 /** All reads must succeed; an unavailable list is never an empty list. */
-export async function collectWorkloads(access: ResourceAccess, environment: string, namespace: string): Promise<EnvironmentSnapshot> {
-  const endpoints = { deployments: "Deployment", statefulsets: "StatefulSet", daemonsets: "DaemonSet", replicasets: "ReplicaSet", pods: "Pod" };
-  const lists = await Promise.all(Object.entries(endpoints).map(async ([endpoint, kind]) => {
-    const list = ListSchema.parse(await access.get(namespace, endpoint));
+export async function collectWorkloads(access: Pick<ResourceAccess, "list">, environment: string, namespace: string, options?: ResourceRequestOptions): Promise<EnvironmentSnapshot> {
+  const endpoints = [
+    { apiVersion: "apps/v1", resource: "deployments", kind: "Deployment" },
+    { apiVersion: "apps/v1", resource: "statefulsets", kind: "StatefulSet" },
+    { apiVersion: "apps/v1", resource: "daemonsets", kind: "DaemonSet" },
+    { apiVersion: "apps/v1", resource: "replicasets", kind: "ReplicaSet" },
+    { apiVersion: "v1", resource: "pods", kind: "Pod" },
+  ];
+  const lists = await Promise.all(endpoints.map(async ({ apiVersion, resource, kind }) => {
+    const list = ListSchema.parse(await access.list({ apiVersion, resource, namespace }, options));
     // Typed API lists may omit kind on each item; the endpoint supplies it.
     return { ...list, items: list.items.map((item) => ({ ...z.record(z.string(), z.unknown()).parse(item), kind })) };
   }));
