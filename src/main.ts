@@ -1,3 +1,5 @@
+import { parseArgs } from "node:util";
+import { AgentSessionMode } from "../plugins/personal/execution/session.ts";
 import { PiObservations, ObservationConfigSchema } from "../agents/pi/observation.ts";
 import type { PiConfig } from "./host/harness/pi/config.ts";
 import { ChannelSettings } from "./channel/settings.ts";
@@ -19,6 +21,8 @@ import { larkTransport } from "./channel/lark/client.ts";
 import { withAsyncFileLock } from "./host/file-lock.ts";
 
 export async function startAide(options: { connectorRegistration?: import("@compforge/aide-connector").ConnectorPackage } = {}): Promise<void> {
+const { values } = parseArgs({ options: { "agent-session": { type: "string", default: "continue" } } });
+const agentSession = AgentSessionMode.parse(values["agent-session"]);
 const environment = Object.freeze({ ...process.env });
 const log = pino({ level: environment.LOG_LEVEL ?? "info" });
 const home = resolve(environment.AIDE_HOME ?? `${homedir()}/.aide`);
@@ -45,7 +49,7 @@ await withAsyncFileLock(path, async () => {
   try {
     const transports = new Map(Object.values(config.channels).filter(c => c.enabled).map(c => [c.appId, larkTransport(c, log.child({ appId: c.appId }))]));
     const aide: Aide = new Aide(home, {
-      config, connectors, connectorCatalog: await connectors.list(),
+      agentSession, config, connectors, connectorCatalog: await connectors.list(),
       readSession: agent => {
         const selected = sessionConfigs[agent.harness];
         if (!selected) throw new Error("Session observation is not supported for this Harness");
@@ -75,7 +79,7 @@ await withAsyncFileLock(path, async () => {
       return bot;
     });
     await aide.start();
-    log.info({ host, port, path }, "Aide listening");
+    log.info({ host, port, path, agentSession }, "Aide listening");
     await new Promise<void>((done) => {
       const stop = () => {
         process.off("SIGTERM", stop);

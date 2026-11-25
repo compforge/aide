@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import type { AgentStatus, ResourceClient, ResourceDefinition } from "@compforge/aide-plugin";
-import { AgentStatusSchema, prepareAgent, saveAgent } from "../plugins/personal/execution/session.ts";
+import { AgentStatusSchema, TopicSessionPolicy, prepareAgent, saveAgent } from "../plugins/personal/execution/session.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ExecutionService } from "../src/host/runtime/execution.ts";
@@ -31,6 +31,19 @@ async function setup(t: { after(fn: () => void | Promise<void>): void }) {
 }
 const target = { id: "configured", harness: "test" };
 const request = { verb: "harness" as const, input: { title: "native", prompt: "only this input", timeoutMs: 3000 } };
+
+test("new-mode session selection follows the persisted replacement for each Topic", () => {
+  const policy = new TopicSessionPolicy("new");
+  assert.equal(policy.startNew("chief", "old-chief"), true);
+  assert.equal(policy.startNew("chief", "old-chief"), true, "creation or binding failed");
+  assert.equal(policy.startNew("chief", "new-chief"), false);
+  assert.equal(policy.startNew("gate", "old-gate"), true);
+  assert.equal(policy.startNew("unbound"), false);
+  assert.equal(policy.startNew("unbound", "first-session"), false);
+  const nextBoot = new TopicSessionPolicy("continue");
+  assert.equal(nextBoot.startNew("chief", "new-chief"), false);
+  assert.equal(nextBoot.startNew("idle", "old-idle"), false);
+});
 
 test("Operator saves recovery parameters with resource version and UID checks", async t => {
   const { resources, scope, store, resource } = await setup(t);

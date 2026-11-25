@@ -88,10 +88,24 @@ test("Gate Web requests bypass semantic Route, stream replies, deduplicate and r
   await aide.receive(fixtureIncoming({ channelId: "web", topicId: "domain", id: "domain", text: "领域问题" }));
   await aide.settled(); assert.equal(chiefCalls, 0); assert.equal(gateCalls, 2);
   assert.ok(!aide.topics.inputStore.list().some(i => i.status.topic?.uid === gate.metadata.uid && i.spec.origin.startsWith("aide:")));
+  await aide.close(); aide = new Aide(home, { ...options, agentSession: "new" }, log);
+  await aide.start(); await aide.settled();
+  assert.deepEqual(aide.topics.resource("gate")!.status.agent, gate.status.agent, "an idle new-mode boot leaves Gate bound");
   await aide.close(); aide = new Aide(home, options, log);
   await aide.receive(fixtureIncoming({ channelId: "web", topicId: "gate", id: "followup", text: "继续追问" }));
   await aide.settled();
   assert.equal(gateCalls, 3); assert.deepEqual(aide.topics.resource("gate")!.status.agent, gate.status.agent);
+
+  await aide.close(); aide = new Aide(home, { ...options, agentSession: "new" }, log);
+  const sendGate = async (id: string) => {
+    await aide.receive(fixtureIncoming({ channelId: "web", topicId: "gate", id, text: id }));
+    await aide.settled();
+    return aide.topics.resource("gate")!.status.agent?.sessionId;
+  };
+  const replacement = await sendGate("after-upgrade");
+  assert.ok(replacement); assert.notEqual(replacement, gate.status.agent?.sessionId);
+  assert.equal(await sendGate("again"), replacement);
+  assert.equal(gateCalls, 5);
 });
 
 test("Gate read tools discover multiple roots and enforce the active owner on every call", async t => {

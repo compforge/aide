@@ -20,7 +20,7 @@ import { runInput, finalizeExecution } from "../plugins/personal/execution/loop.
 import { nextInputs as nextRoleInputs } from "../plugins/personal/execution/input.ts";
 import { preparedInputs as nextInputs } from "../plugins/personal/chief/queue.ts";
 import { resourceRef, changeDelivery } from "../plugins/personal/input/state.ts";
-import { deliverInput } from "./input-state-fixture.ts";
+import { continueTopicSession, deliverInput } from "./input-state-fixture.ts";
 import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 import type { TopicResource } from "../plugins/personal/topic/model.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
@@ -164,7 +164,7 @@ for (const closeFails of [false, true]) test(`Compaction failure unbinds Chief a
   const calls: { operation: string; sessionId?: string }[] = [];
   const agent = { harness: "chief", sessionId: "old-session" };
   await f.resources.patchStatus(f.current(topic), { agent });
-  const execution = { executionId: "failed-run", verbs: { async harness(args: { operation?: string; sessionId?: string }) {
+  const execution = { executionId: "failed-run", verbs: { action: continueTopicSession, async harness(args: { operation?: string; sessionId?: string }) {
     calls.push({ operation: args.operation ?? "prompt", sessionId: args.sessionId });
     if (args.operation === "close") {
       assert.equal(f.current(topic).status.agent, undefined);
@@ -202,7 +202,7 @@ for (const outcome of ["error", "cancelled", "timeout"] as const) test(`${outcom
   await f.input("fact", [topic]);
   const agent = { harness: "chief", sessionId: "retained-session" };
   await f.resources.patchStatus(f.current(topic), { agent });
-  const execution = { executionId: "run", verbs: { async harness(args: { operation?: string }) {
+  const execution = { executionId: "run", verbs: { action: continueTopicSession, async harness(args: { operation?: string }) {
     assert.equal(args.operation, undefined);
     if (outcome === "error") throw newHarnessError("harness_execution_failed", "summary token cap", agent);
     return { state: outcome === "cancelled" ? "dismissed" : "timeout", agent };

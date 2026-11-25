@@ -9,7 +9,7 @@ import { assignInput } from "../plugins/personal/input/assignment.ts";
 import { seedNotes } from "./fixtures/notes.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
-import { deliverInput } from "./input-state-fixture.ts";
+import { continueTopicSession, deliverInput } from "./input-state-fixture.ts";
 import { runInput } from "../plugins/personal/execution/loop.ts";
 import { preparedInputs as nextInputs } from "../plugins/personal/chief/queue.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
@@ -69,7 +69,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
   await f.resources.replace(b, { ...b.spec, review: { enabled: false } }, b.status);
   const definition = { kind: "task" as const, title: "Check", instruction: "Check evidence", trigger: null };
   let task1 = "", task2 = "", rootPrompts = 0;
-  const execution: any = { executionId: "old-chief", withContext() { return this; }, verbs: { async harness(args: any) {
+  const execution: any = { executionId: "old-chief", withContext() { return this; }, verbs: { action: continueTopicSession, async harness(args: any) {
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native-a" } };
     task1 = (await f.aide.work(a.spec.id).create(definition, "first")).id;
     await groupTopics(f.resources, await f.weave(), { topics: [{ uid: a.metadata.uid, version: understandingVersion(f.refresh(a)) }],
@@ -78,7 +78,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
     assert.equal(f.refresh(a).spec.parentRef?.uid, b.metadata.uid);
     assert.equal(f.aide.topics.inputStore.get("first")!.status.assess?.executionId, "old-chief", "Weave preserves the original admission");
     await f.input("second", "source:a");
-    const rootExecution: any = { executionId: "root-chief", withContext() { return this; }, verbs: { async harness(message: any) {
+    const rootExecution: any = { executionId: "root-chief", withContext() { return this; }, verbs: { action: continueTopicSession, async harness(message: any) {
       if (message.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native-b" } };
       rootPrompts++;
       task2 = (await f.aide.work(b.spec.id).create(definition, "second")).id;
@@ -265,7 +265,7 @@ test("Unfinished synthesis retries one review Input without refreshing business 
   const root = f.aide.topics.list().find(t => isRootTopic({ spec: t }))!;
   await patchSummary(f.resources, f.refresh(a), { summary: "Changed after grouping" });
   let prompts = 0;
-  const execution: any = { executionId: "retry", withContext() { return this; }, verbs: { async harness(args: any) {
+  const execution: any = { executionId: "retry", withContext() { return this; }, verbs: { action: continueTopicSession, async harness(args: any) {
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
     prompts++;
     throw newHarnessError("harness_execution_failed", "unavailable");
