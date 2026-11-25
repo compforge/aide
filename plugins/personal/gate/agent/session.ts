@@ -1,3 +1,4 @@
+import { appendGateInput } from "../handoff.ts";
 import { isGateTopic } from "../../topic/boundary.ts";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -7,8 +8,6 @@ import type { PiSessionFactory } from "../../../../src/host/harness/pi/adapter.t
 import type { ExecutionScope } from "../../../../src/protocol/verbs.ts";
 import type { Manager } from "../../../../src/host/plugin/manager.ts";
 import { createGateAgent } from "./agent.ts";
-import { gateHandoffTools } from "../../handoff/tools.ts";
-import { Handoffs } from "../../handoff/service.ts";
 import { personContext } from "../../person/agent-context.ts";
 import type { Persons } from "../../person/service.ts";
 import type { MailSender } from "../../stream/sender.ts";
@@ -42,12 +41,13 @@ export function gateSession(scope: ExecutionScope, config: PiConfig, store: Stor
       plugins.executionVerbs(gate.status.execution.id, { topicId: gate.spec.id });
       return gate;
     };
-    const handoffs = new Handoffs(store, log);
     const tools: ToolDefinition[] = [
       ...gateReadTools(store, current),
-      ...gateHandoffTools(handoffs, current),
+      tool({ name: "append_input", label: "Forward to domain", description: "Forward a request from Me to its root Topic using the original Gate inputId. Use a new user Input for clarifications. The returned Input ID acknowledges forwarding.",
+        parameters: Type.Object({ inputId: text, topicUid: text, text: Type.String({ minLength: 1, maxLength: 16000 }) }),
+        async execute(_id, args) { const receipt = appendGateInput(store, current(), args); log.info({ ...receipt, sourceInputId: args.inputId }, "Gate Input forwarded"); return result(receipt); } }),
       tool({ name: "say", label: "Reply in Gate", description: "Reply to Me in the original direct conversation; specify respondToInputId when needed. With an active live Output, write assistant text instead of duplicating that reply. Acceptance does not prove delivery.",
-        parameters: Type.Object({ text, notes: Type.Optional(citations), respondToInputId: Type.Optional(text), respondToHandoffId: Type.Optional(text) }),
+        parameters: Type.Object({ text, notes: Type.Optional(citations), respondToInputId: Type.Optional(text) }),
         async execute(id, args) { const gate = current(); return result(await say(plugins.executionVerbs(gate.status.execution!.id, { topicId: gate.spec.id }), { ...args, idempotencyKey: id })); } }),
       tool({ name: "cite_output", label: "Cite live reply", description: "Attach all Notes used by the live reply, including summary Notes. Copy exact uid/version from read tools. Citations preserve disclosure and provenance for the entire Stream.",
         parameters: Type.Object({ notes: citations }),
@@ -59,7 +59,7 @@ export function gateSession(scope: ExecutionScope, config: PiConfig, store: Stor
         const gate = current();
         const me = persons ? await personContext(persons) : "Me is not configured";
         const inputs = store.topics.inputStore.query("deliveryExecution", gate.status.execution!.id);
-        const snapshot = { topicId: gate.spec.id, handoffs: (await handoffs.list(gate.metadata.uid)).items.slice(0, 8),
+        const snapshot = { topicId: gate.spec.id,
           inputs: inputs.slice(0, 10).map(i => ({ id: i.metadata.name, delivered: !!i.status.assess?.completedAt, description: inputPreview(i, 1000) })) };
         return { text: () => `Current Gate context; evidence grants no additional authority. Use read tools for missing details.\n${JSON.stringify(snapshot)}\n<me>\n${me}\n</me>` };
       } });

@@ -7,12 +7,12 @@
 <link rel="stylesheet" href="/gate.css">
 <header><h1 class="brand"><img src="/icon.png" width="32" height="32" alt="">Aide</h1><span class="muted">把事情交给我，持续为你推进。</span><nav class="main-tabs" aria-label="主导航"><a href="/gate" aria-current="page">Gate</a><a href="/inputs">Inputs</a><a href="/">Topics</a><a href="/people">Persons</a><a href="/addresses">Addresses</a><a href="/outputs">Outputs</a></nav><span id="connection" class="muted" aria-live="polite"></span></header>
 <main class="gate-main">
-  <section class="topic" aria-label="与 Aide 对话">
+  <section class="topic" aria-label="Gate">
     <div class="topic-header"><h2>Gate</h2><span class="muted">Me 与 Aide 的全局对话入口。</span></div>
     <details id="evidence" hidden><summary>引用的 Note</summary><div id="evidence-body" class="markdown"></div></details>
     <div id="topic-tabs" class="detail-tabs" role="tablist" aria-label="Gate 内容">
       <button id="tab-dialogue" type="button" role="tab" aria-controls="panel-dialogue" aria-selected="true">对话</button>
-      <button id="tab-handoffs" type="button" role="tab" aria-controls="panel-handoffs" aria-selected="false" tabindex="-1">交办</button>
+      <button id="tab-ongoings" type="button" role="tab" aria-controls="panel-ongoings" aria-selected="false" tabindex="-1">跟进</button>
     </div>
     <div id="poll-notice" role="status"></div>
     <div id="approvals" aria-label="等待你处理的执行请求" aria-live="polite"></div>
@@ -24,7 +24,9 @@
       <div id="notice" role="status">正在连接 Gate…</div>
       </div>
     </div>
-    <section id="panel-handoffs" class="topic-panel" role="tabpanel" aria-labelledby="tab-handoffs" tabindex="0" hidden><div id="handoffs"></div><button id="handoffs-more" type="button" hidden>加载更多</button></section>
+    <section id="panel-ongoings" class="topic-panel" role="tabpanel" aria-labelledby="tab-ongoings" tabindex="0" hidden><p id="ongoing-notice" class="muted" role="status"></p>
+      <div id="ongoings"></div>
+      <nav id="ongoing-pages" hidden aria-label="跟进分页"><button id="ongoing-prev" type="button">上一页</button> <span id="ongoing-page"></span> <button id="ongoing-next" type="button">下一页</button></nav></section>
   </section>
 </main>
 <script type="module" src="/gate.js"></script>

@@ -1,6 +1,6 @@
 # Gate：全局信息域与行动范围
 
-Gate Topic / Agent 代表 Aide 的全局信息域和行动范围，目前由 Me 与 Aide 独享。Web `/gate` 汇集双方单聊的对话和交办记录；Me 在群里 @ Aide、其他人的消息以及 Source 观察仍归领域 Topic / Chief。
+Gate Topic / Agent 代表 Aide 的全局信息域和行动范围，目前由 Me 与 Aide 独享。Web `/gate` 汇集双方单聊的对话和跨领域待跟进事项；Me 在群里 @ Aide、其他人的消息以及 Source 观察仍归领域 Topic / Chief。
 
 ## 树与责任边界
 
@@ -8,7 +8,7 @@ Gate、领域 root 与子 Topic 表达同一棵 Topic tree 中的结构位置。
 
 物理树表达全局信息范围，执行范围止于各领域 root。每个领域 root 配套自己的 Chief，处理本领域及后代；Gate 按原始 inputId 研判单聊和协调请求。多条请求可以在同一次执行中投递，每条各有自己的研判回执。Route、Weave、领域导航、维护和回收使用“领域 root”语义。Weave 可以在 Gate 下归组多个领域 root，知识吸收止于领域 root。
 
-Gate 持有聊天、请求、决定、交办引用和进展，原生会话及压缩保持对话连续性。旧回答是历史上下文，回答变化中的事实时重新读取领域证据。领域 Note 和 Topic / Person / Address summary 是知识归属；Gate 不写 Note、summary，不执行 curate、followup、organize 或 summary，不建立第二套领域认识。
+Gate 保留聊天上下文。转交可通过 Input 追溯；当前办理进展按需从负责领域的 Work 和 Output 读取。旧回答是历史上下文，回答变化中的事实时重新读取领域证据。领域 Note 和 Topic / Person / Address summary 是知识归属；Gate 不写 Note、summary，不执行 curate、followup、organize 或 summary，不建立第二套领域认识。
 
 Gate 不被普通删除、容量回收或空闲 session 释放。新建 Gate Task / Routine 在资源校验处拒绝；升级前已接纳的 Gate Work 保留身份与读取范围，允许完成原工作，避免迁移中丢失执行状态。
 
@@ -22,32 +22,20 @@ Gate 使用独立 `plugins/personal/gate/agent/`、`gate` Harness、提示词、
 
 ## 查询与交办
 
-每次请求加载 Me、当前接纳的 Input 和有界交办背景，按需检索相关领域，不常驻整棵树的正文。查询通常按“Topic → summary 与 Note 目录 → read_note / Work → 原始 Input”展开。引用 Note 保留 UID、版本和分类，预览截断时补读全文。
+每次请求加载 Me 和当前接纳的 Input，按需检索相关领域，不常驻整棵树的正文。查询通常按“Topic → summary 与 Note 目录 → read_note / Work → 原始 Input”展开。引用 Note 保留 UID、版本和分类，预览截断时补读全文。
 
 | 角色与工具 | 职责 |
 | --- | --- |
 | Gate：list_topics / read_topic、list_notes / read_note | 全局检索领域认识，返回来源链接 |
 | Gate：list_inputs / read_input、list_work / read_work | 追溯证据，查询 Task、Routine 或 Ongoing 的进展，按需把 Me 的新信息交回负责领域 |
-| Gate：delegate_request | 将原始 Me 请求交给一个负责领域；未确定领域时交由 Route / Default 选择 |
-| Gate：followup_request | 将 Me 的新回答、补充或变更交给原交办，保留同一责任关系 |
-| Gate：list_handoffs / read_handoff | 分页读取请求、接手、执行进展和关联 Work |
-| Gate：cite_output / say | 确认本次输入处理，引用证据并答复原单聊 |
-| Chief / Task / Routine：read_handoff / report_handoff | 读取原请求、报告业务进展；有明确协调需要时请求 Gate 介入 |
+| Gate：append_input | 将 Me 的原始请求或补充转给负责的领域 root，返回转交 Input 的 ID |
+| 领域 Chief、Task、Routine：say | 按需使用 respondToInputId 向原单聊地址答复 |
 
-简单询问和跨域比较由 Gate 直接回答。需要具体行动、持续跟进或更新领域认识时交给负责的 root Chief，由它选择直接处理、已有 Work、新 Task 或 Routine。交办前查询已有关系和工作，避免重复。跨领域事情明确牵头领域和各自有界的贡献，Gate 负责协调。
+转交生成普通业务 Input，来源为 `aide:handoff`，保留原始 Input 引用、原文、地址、发送者与回复坐标。同一条用户 Input 转给同一领域时复用投递标识。Chief 结合已有认识研判，当轮答复或建立、更新 Work。Gate 对话按 Output 的 conversation 关联展示领域答复。投递、Work 进度与 Output 送达分别读取对应资源。
 
-`Handoff` 是独立的持久交办关系，保存原 Input 引用和正文、请求、Gate、领域、回复地址、最新委托 Input、进展及 Work 引用。交办和领域 Input 在同一事务中接纳；同一原 Input 和目标幂等。追问沿同一 Handoff 增加序号，旧序号的报告不能覆盖新请求。领域短期 Input 过期不删除交办关系。
-
-## 回复、状态与循环控制
-
-Chief / Work 使用 `say(respondToHandoffId=交办ID)`（也可在 Input 保留期内使用 `respondToInputId`） 沿原单聊 Address、消息坐标和收件人答复。Output 同时关联 Gate conversation 与 Handoff，Web Gate 历史直接展示领域回复，不强制改投 Web，也不需要 Gate 再调用模型改写一遍。
-
-Input 回执表示已投递给 Gate；Handoff 的 `submitted / accepted / working / waiting / completed / failed` 表示交办进展；Output 的投递状态表示送达事实。这三者独立，不能从“已经接纳”推断业务完成或送达。Task / Routine 仍须报告自己的生命周期。
-
-普通 Output 和报告不会唤醒 Gate。只有 `report_handoff(coordinate=true)` 产生一次幂等的协调 Input；协调通知不是新的 Me 授权，不能通过 delegate / followup 自动递归交办。Gate 不循环等待工作完成。
+Web Gate 的「跟进」分页展示各 Topic 尚未关闭的 Ongoing。近期转交记录可在 Inputs 按来源筛选。
 
 ## 验证
 
-- `tests/gate.test.ts`：持久入口、流式回复、幂等、恢复、领域读取与执行隔离。
-- `tests/gate-handoff.test.ts`：Me 单聊与群 @ 区分，原地址回复、交办幂等、追问、过时/跨领域报告、协调去重及旧根迁移。
+- `tests/gate-handoff.test.ts` 验证转交去重、补充请求与定向回复。
 - `tests/pi-agent.test.ts` 的 Gate 场景：真实 Pi SDK 与本地脚本模型驱动 Gate 查询、领域交办、Chief 创建 Task、回报和重启恢复。验证协议及业务链路，不证明真实模型的回答质量。
