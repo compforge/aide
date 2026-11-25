@@ -1,4 +1,8 @@
-import { browseOpenOngoings } from "../plugins/personal/ongoing/browse.ts";
+import { seedNotes } from "./fixtures/notes.ts";
+import { writeSummary } from "../plugins/personal/note/summary.ts";
+import { webAddress } from "../src/channel/address.ts";
+import { TASK_TYPE, type TaskSpec, type TaskStatus } from "../plugins/personal/task/model.ts";
+import { browseGateNotes, browseGateWork } from "../plugins/personal/gate/browse.ts";
 import { upsertOngoing } from "../plugins/personal/ongoing/service.ts";
 import { isGateTopic } from "../plugins/personal/topic/boundary.ts";
 import assert from "node:assert/strict";
@@ -76,10 +80,13 @@ test("Gate Web requests bypass semantic Route, stream replies, deduplicate and r
   const state = await (await fetch(base + "/gate/state")).json() as { topicId: string; uid: string };
   assert.equal(state.topicId, "gate");
   const gateHtml = await (await fetch(base + "/gate")).text();
-  assert.deepEqual([...gateHtml.matchAll(/role="tab"[^>]*>([^<]+)/g)].map(match => match[1]), ["对话", "跟进"]);
-  const pending = await fetch(base + "/gate/ongoings?page=3");
+  assert.deepEqual([...gateHtml.matchAll(/role="tab"[^>]*>([^<]+)/g)].map(match => match[1]), ["对话", "Note", "Work"]);
+  const pending = await fetch(base + "/gate/work?page=3");
   assert.equal(pending.status, 200);
   assert.deepEqual(await pending.json(), { total: 0, pageSize: 20, pages: 1, page: 1, items: [] });
+  assert.equal((await fetch(base + "/gate/work?kind=note")).status, 400);
+  assert.equal((await fetch(base + "/gate/notes?nature=summary")).status, 400);
+  assert.equal((await fetch(base + "/gate/notes?nature=unclassified")).status, 200);
   const send = (value: unknown) => fetch(base + "/gate/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
   assert.equal((await send({ id: "bad", text: "hello", topicId: "domain" })).status, 400);
   const message = { id: "hello", text: "跨 Topic 问题" };
@@ -166,9 +173,14 @@ test("Gate pages open Ongoings across domains by check time and clamps a disappe
   const early = await upsertOngoing(resources, b, { ...plan, title: "Earlier", checkAt: "2099-01-01T00:00:00.000Z" }, "b");
   const unscheduled = await upsertOngoing(resources, a, { ...plan, title: "Unscheduled" }, "c");
   const open = await upsertOngoing(resources, a, { ongoingId: unscheduled.id, version: unscheduled.version, checkAt: null, question: null }, "clear");
-  const read = (page: number) => browseOpenOngoings(aide.topics.resources.storage, { pageSize: 2, page });
+  const read = (page: number) => browseGateWork(aide.topics.resources.storage, { kind: "ongoing", pageSize: 2, page });
   assert.deepEqual(read(1).items.map(i => [i.uid, i.topicId]), [[early.uid, "second"], [late.uid, "first"]]);
   assert.deepEqual(read(2).items.map(i => i.uid), [open.uid]);
+  const previousList = await fetch(base + "/gate/ongoings?pageSize=2&page=2");
+  assert.deepEqual((await previousList.json() as { items: unknown[] }).items, [{
+    uid: open.uid, id: open.id, title: "Unscheduled", question: null, progress: null, checkAt: null,
+    topicId: "first", topicName: read(2).items[0]!.topicName,
+  }]);
   const supplement = (id: string, text: string, key = "supplement") =>
     fetch(base + "/gate/ongoings/supplement", {
       method: "POST", headers: { "content-type": "application/json", "idempotency-key": key }, body: JSON.stringify({ id, text }),
@@ -200,4 +212,44 @@ test("Gate pages open Ongoings across domains by check time and clamps a disappe
   const refreshed = read(2);
   assert.equal(refreshed.page, 1);
   assert.equal(refreshed.total, 2);
+  const closed = browseGateWork(aide.topics.resources.storage, { state: "ended" });
+  assert.deepEqual(closed.items.map(item => [item.status, item.id, item.kind === "ongoing" && item.outcome]), [["closed", open.id, "Done"]]);
+});
+
+
+test("Gate filters Notes independently of their summary owner and pages all Work kinds together", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-gate-lists-"));
+  const aide = new Aide(home, fakeOptions({ async execute() { throw new Error("Unexpected execution"); } }, home), log);
+  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  const client = aide.personal.store.client, storage = aide.topics.resources.storage;
+  const first = await aide.topics.ensure("one"), second = await aide.topics.ensure("two");
+  const person = await aide.persons.observe({ provider: "test", scope: "gate", id: "one" }, "Alex");
+  const address = aide.addresses.observe(webAddress("home"));
+  await seedNotes(client, first, [{ id: "draft", text: "Draft" }, { id: "how", text: "How", nature: "procedural" }]);
+  await seedNotes(client, second, [{ id: "fact", text: "Fact", nature: "semantic", updatedAt: "2020-01-01T00:00:00.000Z" }]);
+  await writeSummary(client, aide.topics.resource("one")!, { text: "Topic summary", nature: "semantic" });
+  await writeSummary(client, person, { text: "Person summary", nature: "semantic" });
+  await writeSummary(client, address, { text: "Address summary", nature: "procedural" });
+  assert.deepEqual(browseGateNotes(storage, { nature: "unclassified" }).items.map(n => n.title), ["Draft"]);
+  const semantic = browseGateNotes(storage, { nature: "semantic", page: 3, pageSize: 1 });
+  assert.equal(semantic.total, 3);
+  assert.deepEqual(semantic.items.map(n => [n.title, n.topicId]), [["Fact", "two"]]);
+  const notes = browseGateNotes(storage, {});
+  assert.equal(notes.total, 6);
+  assert.deepEqual(notes.items.filter(n => n.summaryKind).map(n => n.summaryKind).sort(), ["Address", "Person", "Topic"]);
+  assert.equal(notes.items.find(n => n.subject.uid === person.metadata.uid)?.ownerName, "Alex");
+
+  const task = await aide.work("one").create({ kind: "task", title: "Investigate", instruction: "Inspect", trigger: null });
+  await aide.work("two").create({ kind: "routine", title: "Report", instruction: "Report", trigger: { cron: null, timezone: "UTC", event: "check" } });
+  const actor = await client.patchStatus(aide.topics.resource("two")!, { execution: { id: "seed", startedAt: new Date().toISOString() } });
+  await upsertOngoing(client, actor, { title: "Confirm" }, "check");
+  const page = browseGateWork(storage, { pageSize: 2 });
+  assert.equal(page.total, 3);
+  const rest = browseGateWork(storage, { page: 2, pageSize: 2 });
+  assert.deepEqual([...page.items, ...rest.items].map(w => [w.kind, w.topicId]).sort(), [["ongoing", "two"], ["routine", "two"], ["task", "one"]]);
+  const resource = aide.topics.resources.get<TaskSpec, TaskStatus>(TASK_TYPE, task.id);
+  await client.patchStatus(resource, { completion: { at: new Date().toISOString(), text: "Done", observedGeneration: resource.metadata.generation } });
+  assert.equal(browseGateWork(storage, { kind: "task" }).total, 0);
+  assert.deepEqual(browseGateWork(storage, { state: "ended" }).items.map(w => w.status), ["done"]);
+  assert.equal(browseGateWork(storage, { state: "all" }).total, 3);
 });

@@ -1,6 +1,6 @@
 # Gate：全局信息域与行动范围
 
-Gate Topic / Agent 代表 Aide 的全局信息域和行动范围，目前由 Me 与 Aide 独享。Web `/gate` 汇集双方单聊的对话和跨领域待跟进事项；Me 在群里 @ Aide、其他人的消息以及 Source 观察仍归领域 Topic / Chief。
+Gate Topic / Agent 代表 Aide 的全局信息域和行动范围，目前由 Me 与 Aide 独享。Web `/gate` 汇集双方单聊的对话、跨领域认识与工作；Me 在群里 @ Aide、其他人的消息以及 Source 观察仍归领域 Topic / Chief。
 
 ## 树与责任边界
 
@@ -33,7 +33,7 @@ Gate 使用独立 `plugins/personal/gate/agent/`、`gate` Harness、提示词、
 
 转交生成普通业务 Input，来源为 `aide:handoff`，保留原始 Input 引用、原文、地址、发送者与回复坐标。同一条用户 Input 转给同一领域时复用投递标识。Chief 结合已有认识研判，当轮答复或建立、更新 Work。Gate 对话按 Output 的 conversation 关联展示领域答复。投递、Work 进度与 Output 送达分别读取对应资源。
 
-Web Gate 的「跟进」分页展示各 Topic 尚未关闭的 Ongoing。近期转交记录可在 Inputs 按来源筛选。
+Web Gate 的 Note 和 Work 分页展示跨领域的认识与工作，筛选和补充入口见 [Web](../channel/web.md)。近期转交记录可在 Inputs 按来源筛选。
 
 ## 验证
 

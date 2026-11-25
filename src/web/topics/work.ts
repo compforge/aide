@@ -3,7 +3,7 @@ import { byId as $, element } from '../shared/dom.ts';
 import { request, errorMessage } from '../shared/http.ts';
 import { copyText } from '../shared/clipboard.ts';
 import type { TopicWork } from '../../api/types.ts';
-const labels: Record<TopicWork['status'], string> = { open: '跟进中', closed: '已收尾', ready: '准备执行', running: '执行中', waiting: '等你回答', scheduled: '等待触发', paused: '已暂停', done: '已完成', uncertain: '需要核对结果', invalid_result: '结果解析失败' };
+import { workStatusLabels } from '../shared/work-status.ts';
 
 export function createWorkPanel(topicId: string, onChange: () => Promise<void>, signal: AbortSignal) {
   let lastWork = '';
@@ -53,7 +53,7 @@ export function createWorkPanel(topicId: string, onChange: () => Promise<void>, 
       });
       actions.append(copy);
       if (work.kind !== 'ongoing') actions.append(deleteButton(work, groupName));
-      header.append(element('span', labels[work.status], 'badge ' + work.status), actions);
+      header.append(element('span', workStatusLabels[work.status], 'badge ' + work.status), actions);
       node.append(header, element('strong', work.title));
       if (work.kind === 'ongoing') {
         if (work.question) node.append(element('p', '待核实：' + work.question));

@@ -1,6 +1,6 @@
 import { INPUT_ORIGINS } from "../../plugins/personal/input/model.ts";
 import { OngoingInputUnavailable } from "../../plugins/personal/work/service.ts";
-import { browseOpenOngoings } from "../../plugins/personal/ongoing/browse.ts";
+import { browseGateNotes, browseGateWork } from "../../plugins/personal/gate/browse.ts";
 import { AddressRefSchema } from "../../plugins/personal/address/model.ts";
 import { browseAddressNotes } from "../../plugins/personal/address/notes.ts";
 import { browseAddresses } from "../../plugins/personal/address/browse.ts";
@@ -20,7 +20,7 @@ import { validInputResult } from "../host/approval/answer.ts";
 import { IncomingSchema, webTopicLocator } from "../channel/message.ts";
 import { browseTopics } from "../../plugins/personal/topic/browse.ts";
 import { browseTopicChildren } from "../../plugins/personal/topic/children.ts";
-import { NOTE_TYPE, noteView, type NoteSpec, type NoteStatus } from "../../plugins/personal/note/model.ts";
+import { NOTE_TYPE, NoteNatureSchema, noteView, type NoteSpec, type NoteStatus } from "../../plugins/personal/note/model.ts";
 import { GATE_TOPIC_ID, DEFAULT_TOPIC_ID } from "../../plugins/personal/topic/model.ts";
 import { browsePersonNotes } from "../../plugins/personal/person/notes.ts";
 import { browsePersons } from "../../plugins/personal/person/browse.ts";
@@ -55,6 +55,8 @@ const MergePersonSchema = z.object({ source: PersonVersionSchema, target: Person
 const PageSchema = z.object({
   page: z.coerce.number().int().min(1).max(1_000_000).optional(), pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
+const GateNoteListSchema = PageSchema.extend({ nature: NoteNatureSchema.or(z.literal("unclassified")).optional() }).strict();
+const GateWorkListSchema = PageSchema.extend({ kind: z.enum(["ongoing", "task", "routine"]).optional(), state: z.enum(["active", "ended", "all"]).optional() }).strict();
 const TopicListSchema = PageSchema.extend({ parentId: z.string().trim().max(200).optional(), q: z.string().trim().max(200).optional(), selectedId: z.string().min(1).max(200).optional() }).strict();
 const AddressListSchema = PageSchema.extend({ selectedUid: z.string().min(1).max(250).optional() }).strict();
 const PersonListSchema = PageSchema.extend({ q: z.string().trim().max(200).optional(), name: z.string().max(200).optional(),
@@ -153,11 +155,26 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         const gate = await aide.topics.ensure(GATE_TOPIC_ID);
         json(response, 200, { topicId: gate.spec.id, uid: gate.metadata.uid }); return;
       }
+      if (request.method === "GET" && url.pathname === "/gate/notes") {
+        const query = GateNoteListSchema.parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        const started = performance.now();
+        listJson(response, browseGateNotes(aide.topics.resources.storage, query), "gate-notes", started); return;
+      }
+      if (request.method === "GET" && url.pathname === "/gate/work") {
+        const query = GateWorkListSchema.parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        const started = performance.now();
+        listJson(response, browseGateWork(aide.topics.resources.storage, query), "gate-work", started); return;
+      }
       if (request.method === "GET" && url.pathname === "/gate/ongoings") {
         const query = PageSchema.strict().parse(Object.fromEntries(url.searchParams));
         await aide.start();
         const started = performance.now();
-        listJson(response, browseOpenOngoings(aide.topics.resources.storage, query), "gate-ongoings", started); return;
+        const page = browseGateWork(aide.topics.resources.storage, { ...query, kind: "ongoing" });
+        const items = page.items.filter(item => item.kind === "ongoing").map(({ uid, id, title, question, progress, checkAt, topicId, topicName }) =>
+          ({ uid, id, title, question: question ?? null, progress: progress ?? null, checkAt: checkAt ?? null, topicId, topicName }));
+        listJson(response, { ...page, items }, "gate-ongoings", started); return;
       }
       if (request.method === "POST" && url.pathname === "/gate/ongoings/supplement") {
         const { id, text } = z.object({ id: z.string().min(1).max(250), text: z.string().trim().min(1).max(32000) }).strict().parse(await body(request));
