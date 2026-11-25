@@ -11,3 +11,11 @@ main.gate-main { display: flex; max-width: 1440px; }
 #ongoings .work > a { display: block; width: fit-content; margin-top: 4px; }
 #ongoing-pages { margin-top: 12px; }
 #ongoing-page { margin-inline: 8px; }
+
+#ongoing-supplement { width: min(460px, calc(100vw - 32px)); box-sizing: border-box; border: 1px solid #d8dfd5; border-radius: 12px; padding: 20px; color: #20342b; }
+#ongoing-supplement::backdrop { background: rgb(21 37 26 / 35%); }
+#ongoing-supplement h2 { margin: 0; }
+#ongoing-supplement-title { overflow-wrap: anywhere; }
+#ongoing-supplement textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; resize: vertical; }
+#ongoing-supplement-result:empty, #ongoing-supplement-notice:empty { display: none; }
+.ongoing-supplement-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }

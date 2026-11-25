@@ -99,7 +99,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
   return (await context.resources.get<InputSpec, InputStatus>(resourceRef(input)))!;
 }
 
-/** Secretary applies the same pending/cooldown policy to every maintenance origin. */
+/** Pending requests stay single-flight. Newly attached material can wake Chief after the prior delivery settles. */
 export async function tryCreateMaintenanceInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
   agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin, trigger: Parameters<typeof createMaintenanceInput>[5],
   preparation: Parameters<typeof createMaintenanceInput>[6], policy: TopicPolicy, fingerprint: string) {
@@ -113,7 +113,7 @@ export async function tryCreateMaintenanceInput(context: Pick<PluginContext, "re
     // Fourteen attempts reach the cap even with a one-second base cooldown.
     const delay = Math.min(Math.max(7200, policy.capacityCooldownSeconds), policy.capacityCooldownSeconds * 2 ** Math.max(0, attempts - 1));
     const nextAt = Date.parse(input?.status.assess?.completedAt ?? previous.checkedAt) + delay * 1000;
-    if (Date.now() < nextAt) {
+    if (!preparation?.materials?.length && Date.now() < nextAt) {
       context.logger.debug?.("Secretary maintenance cooling down", { attributes: { topicUid: topic.metadata.uid, origin,
         reason: attempts ? "unchanged_need" : "minimum_cooldown", attempts, nextAt: new Date(nextAt).toISOString() } });
       return;

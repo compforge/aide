@@ -1,4 +1,5 @@
 import { INPUT_ORIGINS } from "../../plugins/personal/input/model.ts";
+import { OngoingInputUnavailable } from "../../plugins/personal/work/service.ts";
 import { browseOpenOngoings } from "../../plugins/personal/ongoing/browse.ts";
 import { AddressRefSchema } from "../../plugins/personal/address/model.ts";
 import { browseAddressNotes } from "../../plugins/personal/address/notes.ts";
@@ -157,6 +158,18 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         await aide.start();
         const started = performance.now();
         listJson(response, browseOpenOngoings(aide.topics.resources.storage, query), "gate-ongoings", started); return;
+      }
+      if (request.method === "POST" && url.pathname === "/gate/ongoings/supplement") {
+        const { id, text } = z.object({ id: z.string().min(1).max(250), text: z.string().trim().min(1).max(32000) }).strict().parse(await body(request));
+        const key = z.string().min(1).max(128).optional().parse(request.headers["idempotency-key"]);
+        await aide.start();
+        try { json(response, 200, await aide.appendOngoingSupplement(id, text, key)); }
+        catch (error) {
+          if (!(error instanceof OngoingInputUnavailable)) throw error;
+          if (error.reason === "closed") json(response, 409, { error: "该事项已关闭。" });
+          else json(response, 404, { error: "该事项已不存在。" });
+        }
+        return;
       }
       if (request.method === "GET" && url.pathname === "/gate/note") {
         const { id } = z.object({ id: z.string().min(1).max(250) }).strict().parse(Object.fromEntries(url.searchParams));

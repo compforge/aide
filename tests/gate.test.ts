@@ -149,6 +149,11 @@ test("Gate pages open Ongoings across domains by check time and clamps a disappe
   const home = mkdtempSync(join(tmpdir(), "aide-gate-ongoings-"));
   const aide = new Aide(home, fakeOptions({ async execute() { throw new Error("Unexpected work"); } }, home), log);
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  const server = httpChannel(aide, log);
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}`;
   const resources = aide.personal.store.client;
   async function actor(id: string) {
     const root = await aide.topics.ensure(id);
@@ -164,7 +169,34 @@ test("Gate pages open Ongoings across domains by check time and clamps a disappe
   const read = (page: number) => browseOpenOngoings(aide.topics.resources.storage, { pageSize: 2, page });
   assert.deepEqual(read(1).items.map(i => [i.uid, i.topicId]), [[early.uid, "second"], [late.uid, "first"]]);
   assert.deepEqual(read(2).items.map(i => i.uid), [open.uid]);
-  await upsertOngoing(resources, a, { ongoingId: open.id, version: open.version, outcome: "Done", checkAt: null, question: null }, "close");
+  const supplement = (id: string, text: string, key = "supplement") =>
+    fetch(base + "/gate/ongoings/supplement", {
+      method: "POST", headers: { "content-type": "application/json", "idempotency-key": key }, body: JSON.stringify({ id, text }),
+    });
+  assert.equal((await supplement(open.id, "  ")).status, 400);
+  assert.equal((await supplement("missing", "An update")).status, 404);
+  const text = "审批已通过，可以关闭。";
+  const submitted = await Promise.all([supplement(open.id, text), supplement(open.id, text)]);
+  assert.deepEqual(submitted.map(reply => reply.status), [200, 200]);
+  const [first, duplicate] = await Promise.all(submitted.map(reply => reply.json())) as [{ inputId: string }, { inputId: string }];
+  assert.deepEqual(first, duplicate);
+  const input = aide.topics.inputStore.get(first.inputId)!;
+  assert.equal(input.spec.text, text);
+  assert.equal(input.spec.origin, "channel");
+  assert.equal(input.spec.originId, "web");
+  assert.equal(input.status.topic?.uid, a.metadata.uid);
+  assert.equal(input.status.assess, undefined);
+  assert.equal(input.status.handle?.[open.uid]?.resource.uid, open.uid);
+  assert.equal(read(2).items[0]?.uid, open.uid);
+  await aide.settled();
+  const followup = aide.topics.inputStore.list().find(i => i.spec.origin === "aide:followup" && i.spec.observation?.ongoingUid === open.uid);
+  assert.deepEqual(followup?.spec.observation?.inputIds, [first.inputId]);
+  assert.equal(followup?.status.topic?.uid, a.metadata.uid);
+  const current = await aide.work("first").readItem(open.id);
+  assert.ok(current.kind === "ongoing");
+  await upsertOngoing(resources, await actor("first"), { ongoingId: open.id, version: current.version, outcome: "Done", checkAt: null, question: null }, "close");
+  assert.equal((await supplement(open.id, text)).status, 200, "a lost receipt can be retried after Chief closes the matter");
+  assert.equal((await supplement(open.id, "Another update", "new-key")).status, 409);
   const refreshed = read(2);
   assert.equal(refreshed.page, 1);
   assert.equal(refreshed.total, 2);

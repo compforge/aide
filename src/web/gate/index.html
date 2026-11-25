@@ -25,9 +25,23 @@
       </div>
     </div>
     <section id="panel-ongoings" class="topic-panel" role="tabpanel" aria-labelledby="tab-ongoings" tabindex="0" hidden><p id="ongoing-notice" class="muted" role="status"></p>
+      <p id="ongoing-supplement-result" class="muted" role="status"></p>
       <div id="ongoings"></div>
       <nav id="ongoing-pages" hidden aria-label="跟进分页"><button id="ongoing-prev" type="button">上一页</button> <span id="ongoing-page"></span> <button id="ongoing-next" type="button">下一页</button></nav></section>
   </section>
 </main>
+<dialog id="ongoing-supplement" aria-labelledby="ongoing-supplement-heading" aria-describedby="ongoing-supplement-title">
+  <form id="ongoing-supplement-form">
+    <h2 id="ongoing-supplement-heading">补充跟进信息</h2>
+    <p id="ongoing-supplement-title"></p>
+    <label for="ongoing-supplement-text">进展或结论</label>
+    <textarea id="ongoing-supplement-text" rows="5" maxlength="32000" required autofocus></textarea>
+    <p id="ongoing-supplement-notice" role="status"></p>
+    <div class="ongoing-supplement-actions">
+      <button id="ongoing-supplement-cancel" type="button">取消</button>
+      <button id="ongoing-supplement-submit" type="submit">提交</button>
+    </div>
+  </form>
+</dialog>
 <script type="module" src="/gate.js"></script>
 </html>
