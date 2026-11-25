@@ -1,5 +1,8 @@
 import "./style.css";
-import { mountOngoings } from "./ongoings.ts";
+import { mountGateList } from "./list.ts";
+import type { GateWorkItem } from "../../../plugins/personal/gate/browse.ts";
+import { noteCard, workCard } from "./cards.ts";
+import { mountSupplement } from "./supplement.ts";
 import type { Note } from "../../../plugins/personal/note/model.ts";
 import type { Approval } from "../../api/types.ts";
 import { byId, element } from "../shared/dom.ts";
@@ -15,8 +18,18 @@ const lifetime = new AbortController(), signal = lifetime.signal;
 let timer: ReturnType<typeof setInterval> | undefined;
 let ready = false, polling = false;
 const topicId = "gate", query = "?topicId=" + topicId;
-const ongoings = mountOngoings(signal);
-const tabs = mountTopicTabs(true, signal, () => { dialogue.pause(); if (tabs.isDialogue()) dialogue.show(); else void ongoings.refresh(); });
+const notes = mountGateList("notes", signal, noteCard);
+const work = mountGateList<GateWorkItem>("work", signal, item => workCard(item, openSupplement));
+const openSupplement = mountSupplement(signal, () => void work.refresh());
+function refreshList() {
+  if (tabs.current() === "tab-notes") void notes.refresh();
+  if (tabs.current() === "tab-work") void work.refresh();
+}
+const tabs = mountTopicTabs(true, signal, () => {
+  dialogue.pause();
+  if (tabs.isDialogue()) dialogue.show();
+  else refreshList();
+});
 const dialogue = createDialogue(topicId, signal, () => ready && timer !== undefined && tabs.isDialogue() && !document.hidden);
 const approvals = createApprovals(poll, signal);
 mountComposer(topicId, poll, signal, "/gate/messages");
@@ -34,7 +47,7 @@ async function poll() {
       byId("notice").textContent = "Enter 发送 · Shift + Enter 换行";
       if (tabs.isDialogue()) dialogue.show();
     }
-    if (!tabs.isDialogue()) void ongoings.refresh();
+    refreshList();
     const pending = await request<Approval[]>("/approvals" + query, { signal });
     if (signal.aborted) return;
     approvals.render(pending); byId("poll-notice").textContent = "";

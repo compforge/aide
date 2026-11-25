@@ -8,21 +8,21 @@ main.gate-main { display: flex; max-width: 1440px; }
 #evidence-body { padding-top: 12px; color: #20342b; font-size: 14px; }
 @media (max-width: 760px) { main.gate-main { height: calc(100dvh - 140px); } }
 
-#ongoings .work-header {
+#work-list .work-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
 }
-#ongoings .work-header button, #ongoing-supplement-cancel {
+#work-list .work-header button, #ongoing-supplement-cancel {
   padding: 8px 12px;
   border-radius: 8px;
   background: #e8eee3;
   color: #294f3a;
 }
-#ongoings .work-header button:hover, #ongoing-supplement-cancel:hover { background: #dce7d9; }
-#ongoings .work > a { display: block; width: fit-content; margin-top: 4px; }
-#ongoing-pages { margin-top: 12px; }
-#ongoing-page { margin-inline: 8px; }
+#work-list .work-header button:hover, #ongoing-supplement-cancel:hover { background: #dce7d9; }
+
+.gate-pages { margin-top: 12px; }
+.gate-pages span { margin-inline: 8px; }
 
 #ongoing-supplement { width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; border: 1px solid #d8dfd5; border-radius: 12px; padding: 20px; color: #20342b; }
 #ongoing-supplement::backdrop { background: rgb(21 37 26 / 35%); }
@@ -33,3 +33,12 @@ main.gate-main { display: flex; max-width: 1440px; }
 #ongoing-supplement-notice { margin: 0; }
 #ongoing-supplement-result:empty, #ongoing-supplement-notice:empty { display: none; }
 .ongoing-supplement-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+.gate-filters, .gate-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+.gate-filters select { border: 1px solid #c4cec3; border-radius: 6px; padding: 5px 8px; background: white; color: inherit; font: inherit; }
+.gate-meta { margin-block: 4px; color: #53645a; font-size: .88rem; }
+.note-heading { display: flex; align-items: baseline; gap: 8px; font-weight: 600; }
+.note-heading a, .gate-meta a { color: #30583e; overflow-wrap: anywhere; }
+.summary-icon { position: relative; flex: none; color: #496651; }
+.summary-icon svg { width: 1.05em; height: 1.05em; vertical-align: middle; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.summary-icon:is(:hover, :focus)::after { content: attr(data-tooltip); position: absolute; z-index: 1; top: 100%; left: 0; width: max-content; max-width: min(16rem, 75vw); padding: 4px 8px; border-radius: 4px; background: #294634; color: white; font-size: .8rem; overflow-wrap: anywhere; }
