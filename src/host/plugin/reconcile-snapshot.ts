@@ -2,7 +2,7 @@ import type { ReconcileSnapshot, HarnessConfigurationSnapshot } from "@compforge
 export type { ReconcileSnapshot } from "@compforge/aide-plugin";
 
 /** @spec Reconcile receives configuration only; unrelated executions cannot grow its snapshot.
- * @link docs/kernel.md
+ * @link docs/harness/README.md#operator-调用边界
  */
 export function createReconcileSnapshot(options: {
   readonly cwd?: string;

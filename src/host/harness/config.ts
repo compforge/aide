@@ -24,7 +24,7 @@ export const HarnessesConfigSchema = z.object({
 
 /**
  * @spec Resolve enabled Harness configurations before restoring Sessions or accepting input; reuse them until process exit.
- * @link docs/kernel.md
+ * @link docs/configuration.md#默认执行-harness
  */
 export async function resolveHarnessConfigs(config: AideConfig, sources: {
   home: string; cwd: string; file: string; environment: Readonly<Record<string, string | undefined>>; log: Logger;

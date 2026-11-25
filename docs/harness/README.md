@@ -28,6 +28,8 @@ Harness 运行失败通过 `HarnessError extends AideError` 报告；IPC 保留�
 
 Operator 根据 Harness interface，通过 verb 操作原生 agent loop。调用需要的配置名和会话引用都是显式参数；Harness verb 不读取或修改 CRD，也不知道 status.agent、Topic、Task 或 Routine。
 
+运行时按插件实例、资源 UID 和 Controller 确定执行范围。同名资源重建后获得新的范围。Reconcile 快照仅提供工作目录和已配置的 Harness，原生历史由 Harness 管理。
+
 调用方可以为服务重启保存少量参数，例如：
 
 ~~~ts
@@ -66,6 +68,8 @@ Reconcile 经 `harness` verb 调用一个 `Harness` interface，具体 Adapter �
 首次执行由宿主分配 invocation 身份并限制并发；待处理业务事实由资源保存。运行中的追加直接调用 Harness 的原生能力，沿用当前宿主 invocation。接收回执不代表业务完成；执行进展与结束通过事件流报告。未支持的输入应在接受前明确拒绝；接受后的失败必须在事件流收口。追加操作只能指向调用资源拥有的 invocation。
 
 每次被接受的 HarnessInvocation 都必须报告终态。取消请求发出后仍可能收到在途输出，最终结果以执行事件为准。原生审批中的“取消执行”只中断该审批关联的执行，不能影响使用同一配置 的其它资源；拒绝单次权限则允许 Harness 继续处理。宿主用 invocationId 关联事件，提供方的原生标识留在 Adapter 映射与诊断中。
+
+Adapter 在事件边界把提供方的终态映射为固定词汇，保留原始值供诊断。未识别的终态按保守结果处理。仍在重试的结构化错误保持执行活跃，最终失败在进入 idle 前记录错误。
 
 Adapter 保留提供方明确给出的消息阶段。agentText 表达整轮记录，finalText 只包含明确的最终答复；不能按文本位置猜测结束。调用结束只说明本次执行收口，目标是否达成由业务调用方校验。
 

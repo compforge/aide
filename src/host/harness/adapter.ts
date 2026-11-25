@@ -67,7 +67,7 @@ export interface OpenOptions {
  */
 export type PromptInput = Pick<HarnessInput, "invocationId" | "messageId" | "blocks">;
 
-/** Turn submit 回执：只代表请求被接受，不代表 Turn 完成（见 docs/kernel.md）。 */
+/** Turn submit 回执：只代表请求被接受，不代表 Turn 完成。 */
 export interface PromptReceipt {
   accepted: true;
 }

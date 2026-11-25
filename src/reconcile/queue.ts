@@ -95,7 +95,7 @@ export class ReconcileCapacity {
  * @spec Capacity limits new Reconcile admission. Verb waits release capacity; settled continuations resume without queuing, even above the limit.
  * @rule While resumed work fills or exceeds the limit, no new execution is admitted. Same-resource serialization spans all waits.
  * @rule Parallel waits share one lease; their continuations must not restore capacity more than once or after execution ends.
- * @link docs/kernel.md
+ * @link docs/plugin/README.md#verb-与外部能力
  * @case tests/reconcile-capacity.test.ts
  * @case tests/plugin-runner.test.ts
  */
@@ -226,7 +226,7 @@ export class ReconcileQueue {
  * PluginResourceStore control state，当前堆只负责本进程唤醒。
  * @spec Deadline updates and cancellation are O(log n), with one heap entry per live key.
  * @case tests/reconcile-due.test.ts
- * @link docs/kernel.md
+ * @link docs/plugin/README.md#resource-与协调
  */
 export class ReconcileDueQueue {
   private readonly entries = new Map<string, DueReconcile>();

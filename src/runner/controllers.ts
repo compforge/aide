@@ -19,7 +19,7 @@ interface Registration {
 }
 
 /** @spec One Runner owns Watch mapping, coalescing queues, retries and timers. Host owns durable state and action execution.
- * @link docs/kernel.md
+ * @link docs/plugin/README.md#source-与-watch
  */
 export class Controllers {
   private readonly registrations = new Map<string, Registration>();

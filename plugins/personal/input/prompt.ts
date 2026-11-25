@@ -12,7 +12,7 @@ const LarkParticipants = z.object({ provider: z.literal("lark"), accountId: z.st
 });
 
 /** @spec Only the accepting Channel establishes that a message addresses Aide; sent alone does not.
- * @link docs/kernel.md#输入关系与交流对象
+ * @link docs/personal/input.md#人物与场合
  */
 function communication(input: InputSpec): string {
   if (isInternalInput(input)) return "System-scheduled reflection within existing authority, not a new user request or external observation.\n";

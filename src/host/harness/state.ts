@@ -702,7 +702,7 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       break;
     }
     // Approval requested/answered/cancelled 驱动 per-turn requires_action ↔ running：不变量收在 reducer，
-    // 不要求 adapter 自觉配对 state_update（事件流是唯一真相源；见 docs/kernel.md）。
+    // 不要求 adapter 自觉配对 state_update（事件流是唯一真相源）。
     // 原生 state_update(requires_action) 仍然有效——覆盖登录、设备确认等没有结构化
     // Approval 的场景（workflow：反向不强制成立）。
     case "approval.requested": {

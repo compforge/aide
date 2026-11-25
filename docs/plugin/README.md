@@ -8,21 +8,23 @@ Host 持有 Resource 存储、Connector 和可选 Harness 执行能力；Runner 
 
 实例关闭或 Runner 失败时撤销运行能力并终止未完成调用；资源定义随 Host 保留。Runner 意外退出后，Manager 撤销旧 Binding，等待应用的中断协调回调完成，再按指数退避重新激活；默认从 1 秒增至最多 1 分钟，稳定运行一分钟后重置退避。中断协调失败继续重试，不提前启动新 Controller。禁用实例或关闭 Manager 会取消重启。内存状态与异步调用栈不跨进程恢复，插件依据持久业务进展决定下一步。
 
-插件私有目录分为 package global 与 instance，见 [部署状态目录](../deployment.md#状态目录)。纯资源插件无需配置 Harness。
+Host 在恢复资源和启动 Controller 前加载资源定义，校验、打印与容量规则在 Runner 离线时仍可使用。原生执行审批由 Host 处理。一个插件实例对应一个 Runner，进程内插件沿用同一公共契约。插件私有目录分为 package global 与 instance，见 [部署状态目录](../deployment.md#状态目录)。纯资源插件无需配置 Harness。
 
 ## Resource 与协调
 
 资源身份由插件实例、类型、namespace、name 与 UID 表达。spec 保存目标，status 保存进展；定义、事务、Printer、索引与容量见 [Resource](resource.md)。每种 CRD 在 plugin package 下有自己的目录，模型、Reconcile 和专属辅助代码就近组织；跨资源协作留在插件层。
 
-资源变化、Source、Watch、cron 和 requeueAfterMs 共用去重队列。同一 Controller 对同一资源串行，不同资源受 Controller 与 Runner 容量约束；具名 Controller 有独立的队列、锁和定时记录，共享资源更新仍需版本检查。
+ResourceClient 写入在事务内完成校验、版本与索引更新，提交后发布变化。资源变化、Source、Watch、cron 和 requeueAfterMs 共用去重队列。同一 Controller 对同一资源串行，不同资源受 Controller 与 Runner 容量约束；具名 Controller 有独立的队列、锁和定时记录，共享资源更新仍需版本检查。
 
 事件用于唤醒，Reconcile 每次读取当前事实决定是否行动。主资源的纯 status 更新不自动唤醒自身，需感知该变化的协作方显式声明 Watch。回调重试不保证外部副作用只发生一次，插件应保存接纳状态与完成凭据。
+
+Runner 的定时队列按 deadline 维护带位置索引的最小堆，每个活跃 key 只有一个条目。新增、改期和取消为 O(log n)，到期时只弹出已到期项。卸载 scope 时遍历本进程定时项。重启后从持久化的 control 状态恢复唤醒计划。
 
 追加型 think/text 内容使用 [Stream](stream.md)，正文独立持久化并按 seq 读取，结构性 owner 控制生命周期。Stream 变化不隐式唤醒消费方。
 
 ## Source 与 Watch
 
-框架 Source 负责发现和订阅资源，Watch 把其它资源变化映射为协调请求，CronSource 定期唤醒已有资源。这些机制提供触发，业务 Controller 决定如何推进。
+框架 Source 负责发现和订阅资源，Watch 把其它资源变化映射为协调请求，CronSource 定期唤醒已有资源。Host 按插件实例和精确资源类型维护订阅，注册和卸载时同步更新，再向匹配的 Controller 或 Runner 分发。namespace 与事件谓词在各自边界过滤。业务 Controller 读取当前状态决定如何推进。
 
 Personal 的业务 Source 则用资源保存观察范围、水位和待提交计划，经 Connector 获取事实并形成 Input。两个层次的 Source 分别承担框架触发与领域观察，具体接入见 [Connector 与 Source](../connector/README.md)。
 
@@ -30,7 +32,7 @@ Personal 的业务 Source 则用资源保存观察范围、水位和待提交计
 
 Plugin / Operator 通过 ResourceClient 操作 CRD，通过 Verb 发起非 CRD 操作。harness verb 封装 [Harness interface](../harness/README.md)，命名 action 由应用装配；Connector 提供类型化外部访问。verb 诊断记录关联身份、操作、耗时和结果，不复制敏感参数与原生历史。
 
-等待 verb 时释放 Controller / Runner 执行容量，同一资源的当前 Reconcile 调用栈仍保持串行。期限覆盖等待与执行，取消和失败后的业务含义由插件决定。
+等待 Host verb 时，Reconcile 释放 Controller 和 Runner 两层执行容量，对该资源仍持有串行执行权。等待结束直接恢复，可能暂时超过并发阈值。计数降到阈值以下后，再接纳新协调。成功的 Host 操作会续期无进展 watchdog；累计活跃时间另有预算，两种计时都在等待 Host verb 期间暂停。独立的 verb 期限仍生效。配置见 [Reconcile 调度](../configuration.md#reconcile-调度)。
 
 execution.withContext 为动作附加不透明 attributes；主资源身份由运行时提供，业务关联由插件解释。Harness verb 只接收配置和原生会话参数，不读写 CRD；调用者决定如何保存恢复引用。原生接收回执、工具业务回执和外部送达分别确认。
 

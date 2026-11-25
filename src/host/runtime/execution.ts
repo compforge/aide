@@ -20,7 +20,7 @@ const activeExecutors = new Set<string>();
 /**
  * @spec Aide coordinates live calls and approvals; only native Harness sessions recover agent state.
  * @why Operators supply recovery parameters; this service never accesses their resources. Progress is transient.
- * @link docs/kernel.md
+ * @link docs/harness/README.md#工具上下文与恢复边界
  */
 export class ExecutionService implements HarnessExecution {
   private backend?: { records: HarnessActivity; controller: InvocationExecutor; calls: HarnessCalls; unsubscribe: () => void };

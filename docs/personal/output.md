@@ -132,7 +132,7 @@ Topic 的 `spec.address?: AddressRef` 只在创建时从首个 Channel Input 初
 2. `target` 明确选择场合；可与 respondToInputId 同时提供，例如将群内问题的敏感答复改到合适的私有地址。
 3. 两者都未提供时，关联 Input（未指定时为当前调用关联的材料）中的 immediate Channel 输入具有同一个有效地址，则按规则回复该地址，包括原群。不能唯一确定时，由当前 Agent 判断相关 Address 并通过 target 指定；Agent 也无法确定、仍省略地址时，通过默认 Address 联系 Me。Topic.address 不作为通知的隐式目标。Source 的 attention 即使为 immediate，也不使观察地址成为隐式回复目标。
 
-根据外部观察主动沟通时，Agent 仍须独立判断授权，并选择已知的通知目标；指定 target 只是明确目的地，不自动产生授权。助理身份和代理边界见 [Kernel](../kernel.md#助理定位与身份边界)。
+根据外部观察主动沟通时，Agent 仍须独立判断授权，并选择已知的通知目标；指定 target 只是明确目的地，不自动产生授权。助理身份和代理边界见 [Personal](README.md#助理身份与授权)。
 
 `Output.receivers` 是可选的 Person 资源引用列表，与 Input.sender 使用相同引用结构。它记录内容说给谁，target 记录送到哪里：可以在同一个群回复多人，也可以把多处信息整理后向另一个地址的负责人汇报。显式 receivers 覆盖直接回复的默认值，空列表表示不指定个人；仅关联 inputIds 不推导收件人。显式收件人不改变投递数量、不添加群内 @。默认通知固定接收人为 Me，由应用结合所选 Channel 解析其平台身份；其他收件人可以通过 to 与 channelId 解析私聊位置，或明确提供 target。
 

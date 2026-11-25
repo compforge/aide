@@ -41,6 +41,6 @@ Web 私有过程按持久执行引用读取有界记录，历史详情不可用�
 
 新的 Channel 需要解决平台消息接收、会话映射、去重与回复投递，并复用已有输入与交互入口。业务判断留在插件，Agent 执行留在 Harness。当前使用具体适配器，尚未抽取通用 Channel SDK。
 
-内核对象与持久化见 [Kernel](../kernel.md)，Personal 判断流程见 [Personal](../personal/README.md)，部署见 [部署与诊断](../deployment.md)。
+资源对象与持久化见 [Resource](../plugin/resource.md)，Personal 判断流程见 [Personal](../personal/README.md)，部署见 [部署与诊断](../deployment.md)。
 
 Channel 通过 `src/channel/service.ts` 的输入与投影接口接入应用，不依赖 Personal 或 Chief 的实现。Web 的 HTTP handler 位于 `src/api/`，通过扩展接口 `src/api/service.ts` 使用应用提供的 Work 侧栏、删除与事件能力；浏览器代码位于 `src/web/`。

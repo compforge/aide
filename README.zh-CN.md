@@ -8,7 +8,7 @@ Aide 是自托管的个人 Agent，持续理解你关注的人和事，并跟进
 
 例如：“跟进这个 PR 直到合入，处理评审意见，需要我决策时再问我，合入后告诉我。”同一项工作可以跨越多轮执行和等待。关闭聊天窗口或关掉笔记本后，Aide 仍会在服务器上继续工作。
 
-Aide 同时积累一个 TypeScript 版 controller-runtime 底座，资源与协调语义参考 Kubernetes。Personal 是首个应用，负责领域模型与判断；底座负责持久化、索引查询、Watch 与调度。两者以实际个人助手需求共同演进，详见 [底座设计](docs/kernel.md)。
+Aide 同时积累一个 TypeScript 版 controller-runtime 底座，资源与协调语义参考 Kubernetes。Personal 是首个应用，负责领域模型与判断；底座负责持久化、索引查询、Watch 与调度。两者以实际个人助手需求共同演进，详见 [底座设计](docs/plugin/README.md)。
 
 ## 可以让它做什么
 
