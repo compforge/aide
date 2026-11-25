@@ -2,7 +2,7 @@
 
 披露权限与实际投递见 [披露边界](disclosure.md)：材料使用 sensitivity/visibility，人物使用 clearance；Output 由 Reconciler 检查后投递。
 
-Note 是近期与长期认识的统一正文资源。Agent 结合已有 Note 和最新 Input 形成判断，按需修订 Note、推进工作并产生必要的 Output。普通 Note 是独立的事项认识，将围绕同一件事、适用同一组 sensitivity/visibility 的事实整合为持续更新的当前认识。分类或受众范围不同的事实另建 Note；是否同一事项与是否同一分类共同决定新增还是更新。它保留理解这件事所需的进展、依据、结论和未决问题，以稳定 ID 承接后续变化。Note 通常跨越多条 Input 跟进一件具体事情，summary 从中选择更长期、可复用的认识，通过 summaryOf 关联其所总结的对象。Chief 和 Work Agent 通过统一 upsert_note 维护 Note；subject 关联主题或工作，people 关联涉及的人物。
+普通 Note 保存值得留存的事实性知识（semantic）或可复用的方法与步骤（procedural）。同一知识的新证据可以修订原 Note，保留来源、适用范围和不确定性。每篇 Note 使用统一的 sensitivity 与 visibility；披露范围不同的知识分开保存。Chief 和 Work Agent 使用 upsert_note 写入普通 Note，subject 关联主题或工作，people 关联涉及的人物。summaryOf 标识对象摘要。
 
 Note 为主题与人物的长期认识、主题组织提供依据，提炼主线见 [Personal](README.md#从-input-到认识与成果)。summary 选择长期有效的内容，recent 按更新时间查询 Note；近期展示窗口与 Note 的独立生命周期分别管理。
 
@@ -10,7 +10,7 @@ Note 为主题与人物的长期认识、主题组织提供依据，提炼主线
 
 ### 初记与梳理
 
-Chief 的首要任务是处理 Input。有值得留存的事实或未决事项时，Chief 才新建或更新普通 Note。这份记录是基于当时证据形成的初步认识。单条 Input 可能只反映一方的说法或某个阶段的进展，初次记录应保留来源、适用范围和待核实之处，`nature` 可以暂缺。后续 Input 围绕同一事项补充证据时，Chief 可以继续修订同一篇 Note。
+Chief 先决定当前 Input 是否需要回应或行动。预期还有下文、值得持续跟进的事项用 Ongoing 承接；Task 和 Routine 通过办理报告记录本轮结果。办理中遇到值得留存的事实或方法，Chief 可顺手写一篇普通 Note 草稿。分类明确时填写 nature，拿不准时留空。即使已填写 nature，这个版本也要等 curate 核对后才算梳理过。
 
 Secretary 把同一 root Topic 下有实质变化的普通 Note 放进同一份梳理议程。默认攒到 8 篇或最早一篇等满 15 分钟就申请一次 `aide:curate`。正文、归属、关联对象、披露范围、nature 变化都值得再看。改名或调整篇幅预算沿用上次梳理结果。工作量、子摘要变化与预算压力也可以触发梳理。
 
@@ -20,7 +20,7 @@ Chief 处理 `aide:curate` 时，对照相关 Input、Work 和其他 Note 核对
 
 ### 从事项结论到长期认识
 
-梳理回执表明 Chief 已核对这篇 Note 的当前内容。事项仍在进行时，普通 Note 也可以准确记录已知事实和未决问题，供后续跟进。需要持续跟进的责任及其收尾结论由 [Ongoing](ongoing.md) 保存。Chief 核对事项结论及其适用范围后，按需将稳定认识提炼到对象摘要。若新证据表明已有 Summary 中的判断失实或适用范围过宽，Chief 在该对象的 aide:summary 复核中修正。
+梳理回执表明 Chief 已核对这篇 Note 的当前内容。事项仍在进行时即可提炼已有依据的知识。需要持续跟进的责任及其收尾结论由 [Ongoing](work.md#ongoing) 保存。Chief 核对事项结论及其适用范围后，按需将稳定认识提炼到对象摘要。若新证据表明已有 Summary 中的判断失实或适用范围过宽，Chief 在该对象的 aide:summary 复核中修正。
 
 ## 模型与查询
 
@@ -33,7 +33,7 @@ Chief 处理 `aide:curate` 时，对照相关 Input、Work 和其他 Note 核对
 | spec.people | 涉及的人物引用，按 UID 去重；默认空数组 |
 | spec.addresses | 涉及的 Address UID 集合，近期记录按此关联分页，不改变 subject |
 | spec.sensitivity / visibility | 整条 Note 统一适用的敏感度与可见范围；定级和拆分规则见 [披露边界](disclosure.md#定级与-note-边界) |
-| spec.nature | 可选：semantic 事实与长期认识、procedural 方法与步骤；按主要内容选择，与 summaryOf 独立，暂缺的普通 Note 由 Secretary 到期安排归类 |
+| spec.nature | semantic 表示事实性知识，procedural 表示方法与步骤。Chief 初记草稿可暂缺，curate 确认保留版本前须归类。Task、Routine 新建及拆分出的每篇普通 Note 均须指定；更新可省略并保留原值，对象摘要可省略 |
 | spec.maxChars | 正文字符数软预算，缺省 4000；普通 Note 与 summary 共用，可按篇覆盖，超额仍能保存 |
 | spec.text | 事项或长期摘要的完整正文，最多 16000 字符；摘要正文可清空 |
 | metadata.creationTimestamp | 创建时间 |
@@ -59,7 +59,7 @@ Prompt 中的 summary 提供紧凑背景，普通 Note 目录只包含 id、name
 
 ## 作为 summary 的 Note
 
-summary 与普通事项使用同一种 Note 载体，共用正文、关联、内容版本、分类与 maxChars 软预算；差别在于认识的视角、内容层级与上下文使用方式。普通 Note 围绕具体事项保存进展、依据、结论和未决问题；summary Note 从特定对象的视角提炼跨事项、长期有效的认识：Topic 面向主题与领域，Person 面向人物，Address 面向沟通场合。summary Note 面向常驻上下文，提供紧凑、稳定的对象认识，具体加载范围由当前任务和上下文预算决定；普通 Note 通过名称目录发现，使用 read_note 按稳定 ID 获取正文及其依据。
+summary 与普通事项使用同一种 Note 载体，共用正文、关联、内容版本、分类与 maxChars 软预算；差别在于认识的视角、内容层级与上下文使用方式。普通 Note 保存有依据的事实或可复用的方法；summary Note 从特定对象的视角提炼跨事项、长期有效的认识：Topic 面向主题与领域，Person 面向人物，Address 面向沟通场合。summary Note 面向常驻上下文，提供紧凑、稳定的对象认识，具体加载范围由当前任务和上下文预算决定；普通 Note 通过名称目录发现，使用 read_note 按稳定 ID 获取正文及其依据。
 
 Chief 复核摘要时，从下一次使用这个对象的场景出发。
 
@@ -107,7 +107,7 @@ curate 核对普通 Note 的证据与分类，organize 调整材料在 Topic 树
 
 ## 数量与篇幅驱动的整理
 
-Input 保留大量短暂、步骤级证据；普通 Note 汇集近期事项；summary Note 沉淀对人、事、场合的长期认识。nature 描述知识性质，不是成熟度或独立的 Skill。整理通过现有 Topic 组织与 Note 工具完成，不引入 Note tree 或知识点实体。
+Input 保留大量短暂、步骤级证据；普通 Note 提炼事实与方法；summary Note 沉淀对人、事、场合的长期认识。nature 描述知识性质，不是成熟度或独立的 Skill。整理通过现有 Topic 组织与 Note 工具完成，不引入 Note tree 或知识点实体。
 
 每个 Topic 用 spec.maxNotes 覆盖全局 topic.maxNotes（默认 10），只统计直属活跃普通 Note，排除 summary、退役和正在删除的记录，子 Topic 独立计算。maxChars 属于 Note，普通 Note 与 summary 使用同一字段和规则。topic.maxChars 为新建 Topic Note 提供默认篇幅预算；其余入口缺省 4000，更新保留原预算。字符计量沿用正文上限的 JavaScript UTF-16 length。预算不自动截断正文，不拒绝超额保存；16000 字符仍是单篇存储上限。读取上下文的总字符预算独立管理。
 
@@ -117,7 +117,7 @@ Topic Reconcile 在 Note 变化时检查压力，周期唤醒兜底。数量查�
 
 upsert_note 负责整合目标信息；prune_note 接受 noteId、version、完整的更短非空正文和 reason，只削减来源正文，保留元数据，也支持 summary 的原子指纹更新；retire_note 接受 noteId、version、reason，让整篇 Note 退出活跃使用。Chief 在 curate、organize 中可削减普通 Note，在 summary 中可削减所选对象的摘要，事务内校验执行身份、当前归属与版本。退役活跃摘要时，同一事务清除对象的 summaryRevision 并记录该摘要 UID。旧摘要保留原正文和内容版本，退出活跃摘要索引，新的摘要单独创建。
 
-split_note 接受 noteId、version、reason、来源保留的更短非空正文 text 和新篇 parts。在同一事务写入来源、所有新篇和摘要对象指纹。来源保留 UID 与角色，新篇均为普通 Note，可以分别提供 name、nature 和 subject，继承来源的披露范围和人物、场合关联。重复相同请求返回已有 ID，复核后再提交梳理版本。
+split_note 接受 noteId、version、reason、来源保留的更短非空正文 text 和新篇 parts。在同一事务写入来源、所有新篇和摘要对象指纹。来源保留 UID 与角色，新篇均为普通 Note，每篇须指定 nature，可分别提供 name 和 subject，继承来源的披露范围和人物、场合关联。重复相同请求返回已有 ID，复核后再提交梳理版本。
 
 合并到已有 Note 时先成功写入目标，再 prune 来源；来源没有独立价值才 retire。中断可以留下重复，不能先删来源再尝试保存目标。Agent 按重要性、稳定性、证据与未决问题决定合并、归位或沉淀，不为达到数量强行删除，也不通过抬高预算逃避整理。
 

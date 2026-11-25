@@ -33,7 +33,7 @@ export async function reconcileTaskIntake(context: PluginContext, execution: Rec
 
 /**
  * @spec deletionTimestamp permanently fences new assignments; idle retirement uses optimistic deletion.
- * @link docs/personal/task.md
+ * @link docs/personal/work.md#task
  * @case tests/task-agent.test.ts
  */
 export async function reconcileTask(context: PluginContext, execution: ReconcileContext, initial: Readonly<TaskResource>) {

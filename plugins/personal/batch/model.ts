@@ -4,7 +4,7 @@ import { InputAttention, type ProcessingReceipt } from "../input/model.ts";
 export const BATCH_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Batch" } as const;
 /** @spec A sealed Batch is one Normal scheduling item containing a fixed set of Deferred Inputs.
  * @spec Input.status.batchId is the sole membership record; Chief owns Batch.assess, not member receipts.
- * @link docs/personal/batch.md
+ * @link docs/personal/input.md#batch
  */
 export interface BatchSpec {
   topic: ResourceRef & { uid: string };

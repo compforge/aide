@@ -108,7 +108,7 @@ test("Topic Notes are bounded independently of long-lived summary and reject sta
   const stale = aide.topics.resource("me")!;
   for (let n = 0; n < 55; n++) {
     const c = aide.topics.resource("me")!;
-    await upsertTopicNote(resources, c, "review", { version: c.metadata.resourceVersion, text: `Review ${n}: ${"e".repeat(2000)}` }, `review-${n}`);
+    await upsertTopicNote(resources, c, "review", { nature: "semantic", version: c.metadata.resourceVersion, text: `Review ${n}: ${"e".repeat(2000)}` }, `review-${n}`);
   }
   const current = aide.topics.resource("me")!;
   assert.equal(summaryText(aide.topics.resources, current), "Durable distinction");

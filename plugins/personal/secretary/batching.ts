@@ -11,7 +11,7 @@ import { prepareBatch } from "../batch/prepare.ts";
 /** @spec Membership assignment and readiness commit atomically. Empty preparing resources never enter Chief queues.
  * @spec Count/age preparation is independent of an idle Chief; original attention and authority remain unchanged.
  * @case tests/input-batch.test.ts
- * @link docs/personal/batch.md
+ * @link docs/personal/input.md#batch
  */
 export async function prepareInputs(context: Pick<PluginContext, "resources" | "logger">, topic: TopicResource, policy: TopicPolicy, now = Date.now()) {
   await reconcileBatches(context, topic);

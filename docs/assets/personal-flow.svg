@@ -50,7 +50,7 @@
   <text class="detail" x="327" y="220">Task　推进一次性目标，达成后结束</text>
   <text class="detail" x="327" y="244">Routine　按时间或事件，反复履行职责</text>
   <rect class="work" x="310" y="275" width="418" height="65" rx="8"/>
-  <text class="node" x="327" y="302">Chief 自己跟进</text>
+  <text class="node" x="327" y="302">事项持续跟进</text>
   <text class="detail" x="327" y="327">Ongoing　等待进展，到期由 Secretary 提醒</text>
 
   <path class="wline" d="M728 214 H778"/>

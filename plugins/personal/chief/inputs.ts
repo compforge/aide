@@ -2,7 +2,7 @@ import { inputPreview } from "../input/prompt.ts";
 import type { Input } from "../input/state.ts";
 
 /** @spec Chief addresses each sealed group once. Original material IDs identify evidence.
- * @link docs/personal/batch.md
+ * @link docs/personal/input.md#batch
  */
 export function chiefInputs(inputs: readonly Input[]) {
   const groups = new Map<string, Input[]>();

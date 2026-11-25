@@ -42,9 +42,7 @@ export function workContextTools(kind: "task" | "routine", resources: ResourceCl
         log.info({ workUid: owner.metadata.uid, executionId: owner.status.execution!.id, kind, version: contentVersion(updated) }, "Work summary updated");
         return result({ version: contentVersion(updated) });
       } }),
-    tool({ name: "upsert_note", label: "Upsert note", description: `${noteDescription} ${kind === "task"
-      ? "Track this task's progress, blockers, attempts and verification results. Distinguish planned, executed and verified actions."
-      : "Track this responsibility's recent checks, anomalies and follow-up. Update one Note for the same continuing anomaly or occurrence; distinct occurrences can have distinct Notes."} The Host binds the target. This does not replace report_work for done/wait/ask outcomes.`,
+    tool({ name: "upsert_note", label: "Upsert note", description: `${noteDescription} Supply nature when creating an ordinary Note. Record knowledge learned during this work when it will help another decision. The Host binds the target. This does not replace report_work for done/wait/ask outcomes.`,
       parameters: Type.Object(noteFields, { additionalProperties: false }),
       async execute(callId, args, signal) {
         signal?.throwIfAborted(); const owner = read();

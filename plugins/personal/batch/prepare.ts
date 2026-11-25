@@ -9,7 +9,7 @@ import { cancelBatch } from "./reconcile.ts";
 
 /** @spec Membership assignment and readiness commit atomically. Empty preparing resources never enter Chief queues.
  * @case tests/input-batch.test.ts
- * @link docs/personal/batch.md
+ * @link docs/personal/input.md#batch
  */
 export async function prepareBatch(context: Pick<PluginContext, "resources" | "logger">, topic: TopicResource, members: readonly Input[], at: string) {
   const name = `batch-${randomUUID()}`;

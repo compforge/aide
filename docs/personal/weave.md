@@ -4,7 +4,7 @@
 
 Weave 将不同来源、不同领域但存在有价值联系的 Topic 组织到共同上下文，让知识相互解释、补充和启发，同时收敛独立处理上下文，控制路由与推理成本。
 
-它作用于 [Personal 主流程](README.md#对象与主流程) 中的 Topic 关系：**Channel / Source → Input → Topic → root Chief → Task / Routine 或 Output**。Input 保留路由记录，由当前归属 Topic 的 root Chief 综合处理。
+归组后，新 Input 仍绑定原来的 Topic，由共同 root 的 Chief 处理。已有 Work、Note 和 Output 保留各自的归属与来源。[Personal 主流程](README.md#对象与主流程)
 
 ### 两个目标
 
@@ -63,7 +63,7 @@ Weave Agent 判断关联价值，Controller 负责有界候选、扫描覆盖和
 
 Weave 的 Reconcile 按周期或 root 数量压力选择有界候选，再触发 Weave Agent。默认 maxRoots=20、reviewIntervalMs=3600000、intervalMs=300000、batchSize=12，压力触发的调用间隔至少为 min(30000, intervalMs)。每轮最多分组一次。
 
-扫描进度按 Topic UID 保存实际展示的名称/summary 与候选视图契约版本和检查时间；Note 单独变化不使已检查的版本失效。未检查的 Topic 优先，已变化的 Topic 按上次检查时间轮转；单个 Topic 的变化不重置其它进度。lastInputAt 只影响静默排序，不使已检查的认识失效。失败不确认覆盖；检查期间发生变化的 Topic 会再次进入候选；离开 root 集合的记录被清理。
+扫描进度按 Topic UID 保存实际展示的名称/summary 与候选视图契约版本和检查时间；Note 单独变化不使已检查的版本失效。未检查的 Topic 优先，已变化的 Topic 按上次检查时间轮转；单个 Topic 的变化不重置其它进度。lastInputAt 只影响静默排序，不使已检查的认识失效。字符预算截掉的候选留给后续扫描。执行失败也保留检查资格。检查期间认识发生变化的 Topic 会再次进入候选，离开 root 集合的记录被清理。
 
 ## Agent
 

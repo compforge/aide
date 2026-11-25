@@ -53,7 +53,7 @@ test("Locators reject legacy fields and round trip as a canonical keyed set", ()
 
 test("Two separately discovered DM Addresses merge without losing admission, mute, current refs or historical identity", async t => {
   const f = await setup(t);
-  const note = await f.addresses.client.create(NOTE_TYPE, { name: "matter", spec: { subject: personRef(f.person), addresses: addressRefs([addressRef(f.contact)]), text: "classified knowledge", sensitivity: "L2", visibility: "people" }, status: { updatedAt: new Date().toISOString() } });
+  const note = await f.addresses.client.create(NOTE_TYPE, { name: "matter", spec: { nature: "semantic", subject: personRef(f.person), addresses: addressRefs([addressRef(f.contact)]), text: "classified knowledge", sensitivity: "L2", visibility: "people" }, status: { updatedAt: new Date().toISOString() } });
   const topics = new TopicStore({ home: f.home, dir: f.home, id: "topic" });
   const topic = await topics.ensure("topic", larkPersonAddress(app, identity.id));
   assert.equal(topic.spec.address!.uid, f.contact.metadata.uid);
@@ -138,7 +138,7 @@ test("Address merge repairs associations on retired Notes without reviving or re
   const topic = await topics.ensure("retired");
   const actor = await f.client.patchStatus(topic, { execution: { id: "curate", startedAt: new Date().toISOString() } });
   const note = await f.client.create<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { name: "retired-matter",
-    spec: { subject: resourceRef(topic) as NoteResource["spec"]["subject"], text: "original evidence", people: personRefs([]), addresses: addressRefs([addressRef(f.contact)]) },
+    spec: { nature: "semantic", subject: resourceRef(topic) as NoteResource["spec"]["subject"], text: "original evidence", people: personRefs([]), addresses: addressRefs([addressRef(f.contact)]) },
     status: { updatedAt: new Date().toISOString() } });
   await retireNote(f.client, actor, { noteId: note.metadata.name, version: noteVersion(note), reason: "consolidated" });
   await f.client.patchStatus(actor, { execution: null });

@@ -76,8 +76,7 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
       }
     }
     for (const name of ["list_topics", "read_topic", "list_notes", "read_note", "list_work", "read_work", "read_input", "append_input"]) assert.ok(names.includes(name), name);
-    assert.ok(!names.includes("assess_input"));
-    for (const name of ["assess_batch", "bash", "write", "edit", "upsert_note", "retire_note"]) assert.ok(!names.includes(name), name);
+    for (const name of ["bash", "write", "edit", "upsert_note", "retire_note"]) assert.ok(!names.includes(name), name);
     if (phase === 0) switch (gateStep++) {
       case 0: return { tool: "list_topics", args: {} };
       case 1: return { tool: "read_topic", args: { uid: firstUid } };
@@ -791,7 +790,7 @@ test("Route exposes only routing, catalog and shared-memory retrieval tools", as
     assert.match(JSON.stringify(request.messages), /You are Route/);
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
     for (const name of ["route_input", "list_topics", "read_input", "memory_search"]) assert.ok(names.includes(name), name);
-    for (const name of ["say", "assess_input", "upsert_work", "bash", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
+    for (const name of ["say", "upsert_work", "bash", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
     return { text: answer };
   }, "route");
   const result = await fixture.run(JSON.stringify({ inputs: [{ id: "one", text: "event" }], topics: [] }), "route-one");
@@ -1012,7 +1011,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
       case 1: return { tool: "read_input", args: { inputId } };
       case 2: return { tool: "read_topic", args: {} };
       case 3: return { tool: "say", args: { text: `Verified phase ${phase}`, inputIds: [inputId] } };
-      case 4: return { tool: "upsert_note", args: { version: notes(aide.topics.resources, currentWork().metadata.uid, "subject")[0]?.version,
+      case 4: return { tool: "upsert_note", args: { nature: "semantic", version: notes(aide.topics.resources, currentWork().metadata.uid, "subject")[0]?.version,
         ...(notes(aide.topics.resources, currentWork().metadata.uid, "subject")[0] ? { noteId: notes(aide.topics.resources, currentWork().metadata.uid, "subject")[0]!.id } : {}), text: `Evidence verification phase ${phase}` } };
       case 5: return { tool: `summarize_${kind}`, args: { version: contentVersion(currentWork()), summary: "Retain verified evidence and actual authorship." } };
       case 6: return { tool: "report_work", args: { inputIds: [inputId], report: `Verified ${phase}`, action: "done" } };

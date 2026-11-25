@@ -1,6 +1,6 @@
 # Aide 文档
 
-Personal 处理持续到来的 Input，按需推进工作、与人沟通，也把局部信息整理成可供下次判断的认识。底座提供资源协调和 Harness 执行能力。
+Personal 处理持续到来的 Input，关联其中的 Person 和 Address，在 Topic 下积累 Note、推进 Work、通过 Output 与人沟通。底座提供资源协调和 Harness 执行能力。
 
 ## 从哪里开始
 
@@ -8,9 +8,9 @@ Personal 处理持续到来的 Input，按需推进工作、与人沟通，也�
 | --- | --- |
 | 配好模型并启动服务 | [配置](configuration.md) → [部署与诊断](deployment.md) |
 | 理解个人助手如何处理 Input | [Personal 主流程](personal/README.md#从-input-到认识与成果) · [Input](personal/input.md) → [Route](personal/route.md) → [领域 Chief](personal/chief.md) |
-| 办理与沟通 | [办理与沟通](personal/README.md#办理与沟通) · 当轮答复或在后续通过 [Task](personal/task.md)、[Routine](personal/routine.md)、[Ongoing](personal/ongoing.md) 继续处理 · [Output](personal/output.md) |
+| 办理与沟通 | [办理与沟通](personal/README.md#办理与沟通) · [Work 的选择与生命周期](personal/work.md) · [Output](personal/output.md) |
 | 认识与沉淀 | [认识与沉淀](personal/README.md#认识与沉淀) → [普通 Note 的梳理](personal/note.md#梳理与提炼) → 按需复核 [Topic](personal/topic.md)、[Person](personal/person.md) 或 [Address](personal/address.md) 的摘要 |
-| 理解待办准备、Deferred 组批与内部维护 | [Secretary](personal/secretary.md) → [Batch](personal/batch.md) |
+| 理解待办准备、Deferred 组批与内部维护 | [Secretary](personal/secretary.md) → [Batch](personal/input.md#batch) |
 | 改进 Chief 的判断与记忆 | [Topic](personal/topic.md) → [Chief](personal/chief.md) → [Person](personal/person.md) |
 | 主题组织、信息收敛与静默回收 | [Topic](personal/topic.md) → [Weave](personal/weave.md) |
 | 理解回复与通知的去向 | [Output](personal/output.md) → [Channel](channel/README.md) |

@@ -291,7 +291,7 @@ test("Ten deferred Inputs activate one bounded business batch before full-quota 
   await prepareInputs(f.context, f.current(root), topicPolicy());
   await reconcileChief(f.context, f.execution("batch"), f.current(root), (await import("../plugins/personal/topic/config.ts")).topicPolicy({ maxUnfiledInput: 1 }));
   assert.equal(f.prompts.length, 1); assert.equal(f.aide.topics.inputStore.list().length, 10);
-  assert.doesNotMatch(f.prompts[0]!.prompt, /aide:organize|assess_batch|batchId/);
+  assert.doesNotMatch(f.prompts[0]!.prompt, /aide:organize|batchId/);
   const activation = JSON.parse(f.prompts[0]!.prompt.split("Activation: ")[1]!.split("\n")[0]!);
   const [group] = await f.resources.list(BATCH_TYPE);
   assert.deepEqual(activation.inputIds, [group!.metadata.uid]);
@@ -338,7 +338,7 @@ for (const outcome of ["accepted", "rejected", "uncertain"] as const) test(`Defe
   assert.equal(deliveries.length, 1); assert.equal(deliveries[0].operation, "followUp");
   const batch = (await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE))[0]!;
   assert.deepEqual(JSON.parse(deliveries[0].prompt.split("\n")[1]).inputIds, [batch.metadata.uid]);
-  assert.doesNotMatch(deliveries[0].prompt, /assess_batch|batchId/);
+  assert.doesNotMatch(deliveries[0].prompt, /batchId/);
   assert.equal(batch.status.phase, outcome === "rejected" ? "ready" : "running");
   assert.equal(batch.status.assess?.executionId, outcome === "rejected" ? undefined : "a");
   if (outcome === "accepted") assert.equal(batch.status.assess?.deliveryId, deliveries[0].messageId);

@@ -2,7 +2,7 @@
 
 Harness 向 Aide 提供 Agent 执行能力。宿主通过统一接口提交输入、观察执行、取消或恢复会话；具体模型、原生协议和工具执行由 Harness 实现提供。插件通过 verb 请求执行，业务目标与结果判断仍由插件拥有。Harness 由应用按需装配，默认 Harness 来自启动配置；纯资源插件不启动执行后端。
 
-[Pi](pi.md) 提供通用 SDK 适配；Codex、Claude 和 DSH 通过各自原生协议接入。Personal 的 [Route](../personal/route.md)、[Chief](../personal/chief.md)、[Task](../personal/task.md) 和 [Routine](../personal/routine.md) 使用独立配置身份，复用 PiAdapter 并注入领域工具。
+[Pi](pi.md) 提供通用 SDK 适配；Codex、Claude 和 DSH 通过各自原生协议接入。Personal 的 [Route](../personal/route.md)、[Chief](../personal/chief.md)、[Task](../personal/work.md#task) 和 [Routine](../personal/work.md#routine) 使用独立配置身份，复用 PiAdapter 并注入领域工具。
 
 ## Agent 的使用方式与持续职责
 

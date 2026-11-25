@@ -15,7 +15,7 @@ export async function seedNotes(resources: ResourceClient, subject: Resource<unk
   const existing = actor.status.execution;
   const live = existing ? actor : await resources.patchStatus(actor, { execution: { id: "fixture", startedAt: new Date().toISOString() } });
   for (const entry of entries) await resources.create(NOTE_TYPE, { name: `${subject.metadata.uid}-${entry.id}`,
-    spec: { subject: SubjectSchema.parse(resourceRef(target)), text: entry.text, ...(subject.kind === "Address" ? { addresses: [addressRef(subject as AddressResource)] } : {}), ...(entry.nature ? { nature: entry.nature } : {}), people: entry.people ?? (subject.kind === "Person" ? [resourceRef(subject) as PersonRef] : []) },
+    spec: { subject: SubjectSchema.parse(resourceRef(target)), text: entry.text, ...(subject.kind === "Address" ? { addresses: [addressRef(subject as AddressResource)] } : {}), nature: entry.nature ?? "semantic", people: entry.people ?? (subject.kind === "Person" ? [resourceRef(subject) as PersonRef] : []) },
     status: { updatedAt: entry.updatedAt ?? new Date().toISOString(), writer: { resource: SubjectSchema.parse(resourceRef(live)), executionId: live.status.execution!.id } } });
   if (!existing) await resources.patch(live, { type: "json", value: [{ op: "remove", path: "/status/execution" }] });
 }

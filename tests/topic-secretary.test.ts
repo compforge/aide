@@ -194,7 +194,7 @@ test("Review renaming a child Note does not create a new maintenance need", asyn
   const child = await f.aide.topics.ensure("child");
   await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(f.root()) }, child.status);
   await f.resources.patchStatus(f.root(), { execution: { id: "write", startedAt: new Date().toISOString() } });
-  const note = await upsertTopicNote(f.resources, f.root(), "write", { subject: resourceRef(child), name: "old", text: "unchanged facts" }, "note");
+  const note = await upsertTopicNote(f.resources, f.root(), "write", { nature: "semantic", subject: resourceRef(child), name: "old", text: "unchanged facts" }, "note");
   await f.resources.patchStatus(f.root(), { execution: null, chiefWorkload: { completed: 1, reviewed: 0, pendingSince: new Date(0).toISOString() } });
   await reconcileSecretary(f.context, f.root(), f.policy);
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;

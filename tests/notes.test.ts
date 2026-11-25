@@ -45,14 +45,15 @@ async function setup(t: TestContext) {
 }
 test("one independent Note follows progress; tool retries preserve newer content and concurrent notes do not conflict", async t => {
   const f = await setup(t), initial = f.read();
-  const first = await f.upsert({ text: "Started X" }, "start");
+  const first = await f.upsert({ nature: "semantic", text: "Started X" }, "start");
   assert.equal(first.uid, (await readNote(f.resources, first.noteId)).uid);
   const at = f.recent()[0]!.createdAt;
   await f.resources.patchStatus(initial, { reviewCheckedAt: new Date().toISOString(), idleReviewCount: 5 });
-  const other = await f.upsert({ text: "Separate matter" }, "other");
+  const other = await f.upsert({ nature: "semantic", text: "Separate matter" }, "other");
   const done = await f.upsert({ noteId: first.noteId, version: first.version, text: "X reported complete; verification pending" }, "done");
   assert.notEqual(other.noteId, done.noteId);
-  const replay = await f.upsert({ text: "Started X" }, "start");
+  assert.equal(done.nature, "semantic");
+  const replay = await f.upsert({ nature: "semantic", text: "Started X" }, "start");
   assert.equal(replay.version, done.version);
   assert.equal(replay.uid, first.uid); assert.equal(done.uid, first.uid);
   assert.equal((await f.upsert({ noteId: done.noteId, version: done.version, text: "X reported complete; verification pending" }, "same")).version, done.version);
@@ -64,7 +65,7 @@ test("one independent Note follows progress; tool retries preserve newer content
 });
 test("Note receipts report stored classification across defaults, partial edits and retries", async t => {
   const f = await setup(t);
-  const first = await f.upsert({ text: "Current finding" }, "classification-default");
+  const first = await f.upsert({ nature: "semantic", text: "Current finding" }, "classification-default");
   assert.equal(first.sensitivity, "L3"); assert.equal(first.visibility, "people");
   const lowered = await f.upsert({ noteId: first.noteId, version: first.version, sensitivity: "L1" }, "lower");
   assert.equal(lowered.sensitivity, "L1"); assert.equal(lowered.visibility, "people");
@@ -73,7 +74,7 @@ test("Note receipts report stored classification across defaults, partial edits 
   assert.equal((await readNote(f.resources, scoped.noteId)).text, "Current finding");
   const unchanged = await f.upsert({ noteId: scoped.noteId, version: scoped.version, text: "Current finding" }, "same-classification");
   assert.deepEqual(unchanged, scoped);
-  const replay = await f.upsert({ text: "Current finding" }, "classification-default");
+  const replay = await f.upsert({ nature: "semantic", text: "Current finding" }, "classification-default");
   assert.deepEqual(replay, scoped);
   const raised = await f.upsert({ noteId: scoped.noteId, version: scoped.version, sensitivity: "L2" }, "raise");
   assert.equal(raised.sensitivity, "L2"); assert.equal(raised.visibility, "any");
@@ -85,7 +86,7 @@ test("Note receipts report stored classification across defaults, partial edits 
 test("summary edits survive scheduling and Note changes, but reject concurrent content changes", async t => {
   const f = await setup(t), original = f.read(), version = contentVersion(original);
   await f.resources.patchStatus(original, { reviewCheckedAt: new Date().toISOString(), idleReviewCount: 2 });
-  await f.upsert({ text: "Recent evidence" }, "evidence");
+  await f.upsert({ nature: "semantic", text: "Recent evidence" }, "evidence");
   const result = await upsertTopicNote(f.resources, original, "live", { summaryOf: resourceRef(original), version, text: "Durable correction" }, "summary", 4000, "aide:summary");
   assert.equal(result.version, f.read().status.summaryRevision); assert.equal(f.read().status.idleReviewCount, 2);
   assert.equal(f.recent().length, 1);
@@ -112,14 +113,14 @@ test("content writes validate execution and intermediate Topic ownership inside 
     await f.resources.patchStatus(f.root, { execution: { id: "new", startedAt: new Date().toISOString() } });
     return f.resources.create(type, init);
   } };
-  await assert.rejects(f.upsert({ text: "old execution" }, "late", switchExecution), /no longer active/);
+  await assert.rejects(f.upsert({ nature: "semantic", text: "old execution" }, "late", switchExecution), /no longer active/);
   assert.equal(f.recent().length, 0);
 });
 test("one Chief tool writes subject and people; Person and Topic queries find the same Note", async t => {
   const f = await setup(t), person = await f.aide.persons.observe({ provider: "test", scope: "team", id: "one" }, "Alice");
   const ref = resourceRef(person) as PersonRef;
   const tool = chiefNoteTools((input, id) => f.upsert(input, id))[0]!;
-  await tool.execute("one", { text: "Alice is investigating X", people: [ref, ref] }, undefined, undefined, {} as never);
+  await tool.execute("one", { nature: "semantic", text: "Alice is investigating X", people: [ref, ref] }, undefined, undefined, {} as never);
   const a = f.recent()[0]!, b = (await f.aide.persons.read(person.metadata.name)).recent[0]!;
   assert.equal(a.id, b.id); assert.deepEqual(a.people, [ref]); assert.equal(a.subject.uid, f.root.metadata.uid);
   await f.upsert({ noteId: a.id, version: a.version, text: "Alice has new evidence" }, "progress");
@@ -133,13 +134,13 @@ test("one Chief tool writes subject and people; Person and Topic queries find th
 test("Notes outlive subjects and capacity evicts old Notes without recreating evicted updates", async t => {
   const f = await setup(t);
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Note": { maxCount: 2 } }, lowWatermark: 0.95, highWatermark: 0.99 }));
-  const first = await f.upsert({ text: "Old" }, "first");
+  const first = await f.upsert({ nature: "semantic", text: "Old" }, "first");
   const old = (await f.resources.get({ ...NOTE_TYPE, namespace: "v1", name: first.noteId }))!;
   await f.resources.patchStatus(old, { updatedAt: "2000-01-01T00:00:00.000Z" });
   await collectResources(f.aide.topics.resources.storage);
-  await f.upsert({ text: "Second" }, "second");
+  await f.upsert({ nature: "semantic", text: "Second" }, "second");
   await collectResources(f.aide.topics.resources.storage);
-  await f.upsert({ text: "Third" }, "third");
+  await f.upsert({ nature: "semantic", text: "Third" }, "third");
   assert.ok((await f.resources.list(NOTE_TYPE)).length <= 2);
   await assert.rejects(f.upsert({ noteId: first.noteId, version: first.version, text: "revive" }, "revive"), /no longer exists/);
   const retained = await f.resources.list(NOTE_TYPE);
@@ -155,14 +156,15 @@ test("Work summary and Notes use content versions and enforce the bound subject"
   const original = await createWithSummary(f.resources, ROUTINE_TYPE, { name: "work", spec: { title: "Monitor", instruction: "Check", paused: false, trigger: { cron: null, event: "tick", timezone: "UTC" } },
     status: { topic: resourceRef(f.root), summary: "", execution: { id: "work-live", startedAt: new Date().toISOString() } } }) as WorkResource;
   const tools = workContextTools("routine", f.resources, () => original, log);
-  const contextNote = await f.upsert({ name: "Root evidence", text: "Relevant domain evidence" }, "root-evidence");
+  const contextNote = await f.upsert({ nature: "semantic", name: "Root evidence", text: "Relevant domain evidence" }, "root-evidence");
   const readResult = await tools.find(t => t.name === "read_note")!.execute("read-root", { noteId: contextNote.noteId }, undefined, undefined, {} as never);
   assert.match(JSON.stringify(readResult), /Relevant domain evidence/);
   await assert.rejects(tools.find(t => t.name === "upsert_note")!.execute("write-root", { noteId: contextNote.noteId, version: contextNote.version, text: "Wrong owner" }, undefined, undefined, {} as never), /another resource|own|scope|subject/i);
   await f.resources.patchStatus(original, { nextTriggerAt: new Date().toISOString() });
   await tools.find(t => t.name === "summarize_routine")!.execute("summary", { version: contentVersion(original), summary: "Stable" }, undefined, undefined, {} as never);
   const tool = tools.find(t => t.name === "upsert_note")!;
-  await tool.execute("note", { text: "Current check" }, undefined, undefined, {} as never);
+  await assert.rejects(tool.execute("missing-nature", { text: "Observed fact" }, undefined, undefined, {} as never), /requires nature/);
+  await tool.execute("note", { nature: "semantic", text: "Current check" }, undefined, undefined, {} as never);
   const current = (await f.resources.get<WorkResource["spec"], WorkResource["status"]>(resourceRef(original)))!;
   assert.equal((await readNotes(f.resources, current.metadata.uid, "subject")).length, 1);
   const race: ResourceClient = { ...f.resources, async commit(writes) {
@@ -173,14 +175,14 @@ test("Work summary and Notes use content versions and enforce the bound subject"
   await assert.rejects(summarize.execute("race", { version: contentVersion(current), summary: "Unseen overwrite" }, undefined, undefined, {} as never),
     /Test operation failed/);
   assert.equal(summaryText(f.aide.topics.resources, (await f.resources.get<WorkResource["spec"], WorkResource["status"]>(resourceRef(original)))!), "Concurrent correction");
-  await assert.rejects(tool.execute("outside", { subject: resourceRef(f.root), text: "Wrong subject" }, undefined, undefined, {} as never), /own content/);
+  await assert.rejects(tool.execute("outside", { nature: "semantic", subject: resourceRef(f.root), text: "Wrong subject" }, undefined, undefined, {} as never), /own content/);
 });
 
 test("read_note returns complete content after recent projection truncates it", async t => {
   const f = await setup(t);
   const text = "Evidence ".repeat(1700);
-  const first = await f.upsert({ text }, "long-first");
-  const second = await f.upsert({ text }, "long-second");
+  const first = await f.upsert({ nature: "semantic", text }, "long-first");
+  const second = await f.upsert({ nature: "semantic", text }, "long-second");
   const window = f.recent();
   assert.ok(window.some(n => n.text.length < text.trim().length));
   for (const id of [first.noteId, second.noteId]) assert.equal((await readNote(f.resources, id)).text, text.trim());
@@ -191,7 +193,7 @@ test("Weave grouping rejects Note-only changes between review and commit", async
   const weave = await f.resources.create(WEAVE_TYPE, { name: "global", spec: {}, status: {} });
   const root = f.read();
   const race: ResourceClient = { ...f.resources, async commit(writes) {
-    await f.upsert({ text: "Evidence arrived after review" }, "weave-race");
+    await f.upsert({ nature: "semantic", text: "Evidence arrived after review" }, "weave-race");
     return f.resources.commit(writes);
   } };
   await assert.rejects(groupTopics(race, weave, {
@@ -222,7 +224,7 @@ test("reordering or repeating Note people does not refresh its content version o
   const f = await setup(t);
   const a: PersonRef = { ...PERSON_TYPE, namespace: "v1", name: "a", uid: "person-a" };
   const b: PersonRef = { ...PERSON_TYPE, namespace: "v1", name: "b", uid: "person-b" };
-  const first = await f.upsert({ text: "Matter", people: [b, a, b] }, "first");
+  const first = await f.upsert({ nature: "semantic", text: "Matter", people: [b, a, b] }, "first");
   const before = await readNote(f.resources, first.noteId);
   assert.deepEqual(before.people, [a, b]);
   const again = await f.upsert({ noteId: first.noteId, version: first.version, people: [b, a, a] }, "reorder");
@@ -236,7 +238,7 @@ test("reordering or repeating Note people does not refresh its content version o
 test("upsert_note receipt supplies an exact citation for a newly submitted Output", async t => {
   const f = await setup(t);
   const tools = chiefNoteTools((input, id) => f.upsert(input, id), undefined, id => readNote(f.resources, id));
-  const result = await tools.find(tool => tool.name === "upsert_note")!.execute("citation-note", { text: "Verified finding", sensitivity: "L1", visibility: "any" }, undefined, undefined, {} as never);
+  const result = await tools.find(tool => tool.name === "upsert_note")!.execute("citation-note", { nature: "semantic", text: "Verified finding", sensitivity: "L1", visibility: "any" }, undefined, undefined, {} as never);
   const receipt = JSON.parse((result.content[0] as { text: string }).text);
   const actual = await readNote(f.resources, receipt.noteId);
   assert.equal(receipt.uid, actual.uid); assert.equal(receipt.version, actual.version);
@@ -252,15 +254,15 @@ test("Chief upsert_note preserves existing placement and accepts topicId only on
   const f = await setup(t);
   const original = await f.aide.topics.ensure("child");
   const child = await f.resources.replace(original, { ...original.spec, parentRef: resourceRef(f.root) }, original.status);
-  const created = await f.upsert({ topicId: "child", text: "Initial child matter" }, "new-child");
+  const created = await f.upsert({ nature: "semantic", topicId: "child", text: "Initial child matter" }, "new-child");
   assert.equal((await readNote(f.resources, created.noteId)).subject.uid, child.metadata.uid);
   const edited = await f.upsert({ noteId: created.noteId, version: created.version, text: "Updated from root business Input" }, "edit-child");
   assert.equal((await readNote(f.resources, edited.noteId)).subject.uid, child.metadata.uid);
-  const root = await f.upsert({ text: "New unfiled matter" }, "new-root");
+  const root = await f.upsert({ nature: "semantic", text: "New unfiled matter" }, "new-root");
   assert.equal((await readNote(f.resources, root.noteId)).subject.uid, f.root.metadata.uid);
   await assert.rejects(f.upsert({ noteId: edited.noteId, version: edited.version, topicId: "notes", text: "Move implicitly" }, "bad-move"), /move_note/);
   await f.aide.topics.ensure("unrelated");
-  await assert.rejects(f.upsert({ topicId: "unrelated", text: "Outside the tree" }, "outside"), /outside this root/);
+  await assert.rejects(f.upsert({ nature: "semantic", topicId: "unrelated", text: "Outside the tree" }, "outside"), /outside this root/);
 });
 
 
@@ -271,7 +273,7 @@ test("mutable Note names preserve identity and body citations; current directori
   const { listNotes } = await import("../plugins/personal/note/query.ts");
   const { retireNote } = await import("../plugins/personal/note/service.ts");
   const directory = () => noteDirectory(f.aide.personal.store.resources.storage, f.root.metadata.uid);
-  const old = await f.upsert({ text: "\nLegacy label\nDetails" }, "legacy-name");
+  const old = await f.upsert({ nature: "semantic", text: "\nLegacy label\nDetails" }, "legacy-name");
   assert.equal((await readNote(f.resources, old.noteId)).name, "Legacy label");
   assert.equal(directory().items.find(n => n.id === old.noteId)!.nameMissing, true);
   const labeled = await f.upsert({ noteId: old.noteId, version: old.version, name: "Legacy matter" }, "label-legacy");
@@ -286,7 +288,7 @@ test("mutable Note names preserve identity and body citations; current directori
   assert.notEqual(renamed.version, first.version);
   assert.equal(noteTextVersion(before!), noteTextVersion(after!));
   assert.equal((await listNotes(f.resources, { q: "Deployment recovery" })).items[0]!.id, first.noteId);
-  const second = await f.upsert({ name: "Separate large note", text: "Other evidence ".repeat(1000) }, "large");
+  const second = await f.upsert({ nature: "semantic", name: "Separate large note", text: "Other evidence ".repeat(1000) }, "large");
   const current = directory();
   assert.equal(current.total, 3); assert.equal(current.items.length, 3);
   assert.equal(current.items.find(n => n.id === first.noteId)!.name, "Deployment recovery");

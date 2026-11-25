@@ -57,7 +57,7 @@ async function setup(t: TestContext) {
 
 test("Note discovery covers retained history beyond recent with bounded search pages", async t => {
   const f = await setup(t), ids = new Set<string>();
-  for (let i = 0; i < 45; i++) ids.add((await f.note({ text: `matter-${i}: ${"x".repeat(1000)}` }, String(i))).noteId);
+  for (let i = 0; i < 45; i++) ids.add((await f.note({ nature: "semantic", text: `matter-${i}: ${"x".repeat(1000)}` }, String(i))).noteId);
   let token = "", scanned = 0, found = 0;
   do {
     const page = await listNotes(f.resources, { subject: f.root.metadata.uid, q: "matter-44:", continue: token, limit: 7 });
@@ -95,7 +95,7 @@ test("organize splits a mixed Note across Topics through its admitted tools", as
   const initial = await f.aide.topics.ensure("metrics");
   const child = await f.resources.replace(initial, { ...initial.spec, parentRef: resourceRef(f.root) }, initial.status);
   const incident = "The oncall review is pending.", method = "Measure acknowledgement time from the first page.";
-  const source = await f.note({ text: incident + " " + method }, "mixed");
+  const source = await f.note({ nature: "semantic", text: incident + " " + method }, "mixed");
   const tools = [...chiefTools(emptyConnectors), ...chiefNoteTools(f.note), ...topicTools(f.aide.personal.store, f.read, log, () => "aide:organize")];
   const available = toolsForInput(tools, "aide:organize");
   for (const name of ["upsert_note", "prune_note", "retire_note", "split_note", "move_note", "move_input", "move_work", "create_topic", "move_topic"])
@@ -110,10 +110,12 @@ test("organize splits a mixed Note across Topics through its admitted tools", as
   const args = { ...source, text: incident, reason: "File the method under metrics", parts: [
     { subject: resourceRef(child), text: method, nature: "procedural" }] };
   const outside = await f.aide.topics.ensure("outside-split");
-  await assert.rejects(execute("split_note", { ...args, parts: [...args.parts, { text: "Another part", subject: resourceRef(outside) }] }), /outside/);
+  await assert.rejects(execute("split_note", { ...args, parts: [{ text: method }] }), /nature/);
+  assert.equal((await f.get(source.noteId)).spec.text, incident + " " + method);
+  await assert.rejects(execute("split_note", { ...args, parts: [...args.parts, { text: "Another part", nature: "semantic", subject: resourceRef(outside) }] }), /outside/);
   assert.equal((await f.get(source.noteId)).spec.text, incident + " " + method);
   assert.equal((await listNotes(f.resources, { subject: child.metadata.uid })).items.length, 0);
-  const scoped = await f.note({ text: incident + " " + method, visibility: "topic" }, "scoped");
+  const scoped = await f.note({ nature: "semantic", text: incident + " " + method, visibility: "topic" }, "scoped");
   await assert.rejects(execute("split_note", { ...args, ...scoped }), /disclosure audience/);
   assert.equal((await f.get(scoped.noteId)).spec.text, incident + " " + method);
   await Promise.all([execute("split_note", args), execute("split_note", args)]);
@@ -162,7 +164,7 @@ test("move_note preserves matter identity and age, rejects stale versions and cr
   const f = await setup(t);
   const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
   const outsider = await f.aide.topics.ensure("outside");
-  const initial = await f.note({ text: "One continuing matter" }, "start"), before = await readNote(f.resources, initial.noteId);
+  const initial = await f.note({ nature: "semantic", text: "One continuing matter" }, "start"), before = await readNote(f.resources, initial.noteId);
   const moved = await moveNote(f.resources, f.read(), { ...initial, subject: resourceRef(child), reason: "Matter belongs to the child" });
   const after = await readNote(f.resources, initial.noteId);
   assert.equal(after.uid, before.uid); assert.equal(after.text, before.text); assert.deepEqual(after.people, before.people);
@@ -179,7 +181,7 @@ test("move_note rechecks ancestor changes in the write transaction and supports 
   const f = await setup(t);
   const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
   const routine = await createWithSummary(f.resources, ROUTINE_TYPE, { name: "work", spec: { title: "Watch", instruction: "Watch", trigger: { cron: null, event: "tick", timezone: "UTC" } }, status: { topic: resourceRef(f.root), summary: "" } });
-  const initial = await f.note({ text: "A continuing matter" }, "start");
+  const initial = await f.note({ nature: "semantic", text: "A continuing matter" }, "start");
   const moved = await moveNote(f.resources, f.read(), { ...initial, subject: resourceRef(routine), reason: "Delegated" });
   const client: ResourceClient = { ...f.resources, async replace(resource, spec, status) {
     await f.resources.replace(child, { id: "child", parentRef: fixtureGateRef(f.aide.topics.resources) }, child.status);
@@ -217,7 +219,7 @@ test("root knowledge needs explicit release; unseen Note changes invalidate appr
   const call = (version: string) => release.execute("release", { version, reason: "Retained elsewhere" }, undefined, undefined, {} as never);
   await call(reclamationVersion(f.read(), f.aide.topics.resources));
   const prior = f.read().status.reclamation!.version;
-  await f.note({ text: "A new unresolved matter" }, "new-evidence");
+  await f.note({ nature: "semantic", text: "A new unresolved matter" }, "new-evidence");
   assert.notEqual(reclamationVersion(f.read(), f.aide.topics.resources), prior);
   await assert.rejects(call(prior), /understanding changed/);
 });
@@ -305,7 +307,7 @@ test(`racing review requests reuse one pending Input (same due: ${sameDue})`, as
 /** @case Recent projection never decodes retained history outside its index page. */
 test("recent Note projection reads at most 40 objects and no full list", async t => {
   const f = await setup(t);
-  for (let i = 0; i < 45; i++) await f.note({ text: `matter ${i}` }, String(i));
+  for (let i = 0; i < 45; i++) await f.note({ nature: "semantic", text: `matter ${i}` }, String(i));
   const storage = f.aide.topics.resources.storage, read = storage.read.bind(storage);
   let reads = 0;
   storage.read = (...args) => { reads++; return read(...args); };
@@ -315,7 +317,7 @@ test("recent Note projection reads at most 40 objects and no full list", async t
   } finally { storage.read = read; }
 });
 
-test("Note nature and maxChars are optional metadata; budgets are soft for ordinary and summary Notes", async t => {
+test("Ordinary and summary Notes retain knowledge nature and soft budgets", async t => {
   const f = await setup(t);
   const { upsertNote } = await import("../plugins/personal/note/service.ts");
   const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
@@ -340,7 +342,7 @@ test("prune and retire enforce versions, active ownership and summary lifetime w
   const { noteTextVersion } = await import("../plugins/personal/note/model.ts");
   const { writeSummary } = await import("../plugins/personal/note/summary.ts");
   const source = await f.note({ text: "Verified long-term fact. Temporary duplicate details.", nature: "semantic" }, "source");
-  const destination = await f.note({ text: "Verified long-term fact." }, "destination");
+  const destination = await f.note({ nature: "semantic", text: "Verified long-term fact." }, "destination");
   await assert.rejects(pruneNote(f.resources, f.read(), { ...source, text: "", reason: "empty" }, "empty"));
   await assert.rejects(pruneNote(f.resources, f.read(), { ...source, text: "x".repeat(100), reason: "grow" }, "grow"), /shorter/);
   const pruned = await pruneNote(f.resources, f.read(), { ...source, text: "Temporary duplicate details.", reason: `Fact retained in ${destination.noteId}` }, "prune");
@@ -372,10 +374,10 @@ test("Note pressure counts direct active Notes and includes oversized summaries"
   const { retireNote } = await import("../plugins/personal/note/service.ts");
   const { writeSummary } = await import("../plugins/personal/note/summary.ts");
   await f.resources.replace(f.read(), { ...f.read().spec, maxNotes: 1 }, f.read().status);
-  await f.note({ text: "first" }, "one");
-  const second = await f.note({ text: "second" }, "two");
+  await f.note({ nature: "semantic", text: "first" }, "one");
+  const second = await f.note({ nature: "semantic", text: "second" }, "two");
   const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "pressure-child", spec: { id: "pressure-child", parentRef: resourceRef(f.root) }, status: {} });
-  await f.note({ subject: resourceRef(child), text: "child" }, "child-note");
+  await f.note({ nature: "semantic", subject: resourceRef(child), text: "child" }, "child-note");
   await refreshNotePressure(f.context, f.read());
   let agenda = await dueNotePressure(f.resources, f.read());
   assert.equal(agenda.length, 1); assert.equal(agenda[0]!.pressure.count, 2);
@@ -399,7 +401,7 @@ test("reducing an older Note outside the count sample continues consolidation wi
   const { retireNote } = await import("../plugins/personal/note/service.ts");
   await f.resources.replace(f.read(), { ...f.read().spec, maxNotes: 1 }, f.read().status);
   const references = [];
-  for (let i = 0; i < 4; i++) references.push(await f.note({ text: `matter ${i}` }, `note-${i}`));
+  for (let i = 0; i < 4; i++) references.push(await f.note({ nature: "semantic", text: `matter ${i}` }, `note-${i}`));
   await refreshNotePressure(f.context, f.read());
   const agenda = await dueNotePressure(f.resources, f.read());
   assert.equal(agenda[0]!.pressure.count, 2); assert.equal(agenda[0]!.pressure.truncated, true);
@@ -415,7 +417,7 @@ test("reducing an older Note outside the count sample continues consolidation wi
 
 
 test("stored per-Note review metadata is discarded without changing content or age", async t => {
-  const f = await setup(t), n = await f.note({ text: "Existing knowledge" }, "legacy");
+  const f = await setup(t), n = await f.note({ nature: "semantic", text: "Existing knowledge" }, "legacy");
   const { NoteStatusSchema } = await import("../plugins/personal/note/model.ts");
   const { TopicDefinition } = await import("../plugins/personal/topic/definition.ts");
   const { noteTools } = await import("../plugins/personal/note/tools.ts");
@@ -445,8 +447,8 @@ test("Note renaming preserves pressure identity and backoff while text changes r
   const f = await setup(t);
   const { refreshNotePressure, dueNotePressure } = await import("../plugins/personal/note/pressure.ts");
   await f.resources.replace(f.read(), { ...f.read().spec, maxNotes: 1 }, f.read().status);
-  const first = await f.note({ name: "before", text: "same content" }, "one");
-  await f.note({ text: "another matter" }, "two");
+  const first = await f.note({ nature: "semantic", name: "before", text: "same content" }, "one");
+  await f.note({ nature: "semantic", text: "another matter" }, "two");
   await refreshNotePressure(f.context, f.read());
   const pressure = f.read().status.notePressure!;
   await completePressure(f, await dueNotePressure(f.resources, f.read()), "live");
@@ -467,7 +469,7 @@ test("Secretary separates curation from one-shot followup and fences stale quest
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
   const f = await setup(t);
   const policy = topicPolicy();
-  const ordinary = await f.note({ text: "An unclassified observation" }, "unclassified");
+  const ordinary = await f.note({ nature: "semantic", text: "A verified observation" }, "observed");
   const original = await f.get(ordinary.noteId);
   assert.ok((await prepareNoteMaintenance(f.context, original, policy))!.requeueAfterMs > 0);
   await prepareNoteMaintenance(f.context, original, policy, Date.now() + policy.curation.maxWaitSeconds * 1000);
@@ -476,7 +478,7 @@ test("Secretary separates curation from one-shot followup and fences stale quest
   assert.match(curate[0]!.spec.text, new RegExp(ordinary.noteId));
 
   await assert.rejects(f.note({ text: "A completed observation", nature: "episodic" }, "old-nature"));
-  await assert.rejects(f.note({ text: "A note cannot schedule", followup: { checkAt: new Date().toISOString() } }, "not-a-plan"));
+  await assert.rejects(f.note({ nature: "semantic", text: "A note cannot schedule", followup: { checkAt: new Date().toISOString() } }, "not-a-plan"));
 });
 
 test("Chief declares all responsibilities through Work tools and keeps Ongoing out of delegation", async t => {
@@ -660,7 +662,7 @@ test("retrospective decisions reuse sourced Work across rounds and retain the No
   const tools = workTools(f.aide.work("knowledge"));
   assert.ok(toolsForInput(tools, "aide:curate").includes("append_input"));
   const upsert = tools.find(tool => tool.name === "upsert_work")!;
-  const note = await f.note({ text: "The handover happened. An audit and recurring checks are authorized; await acknowledgment." }, "handover");
+  const note = await f.note({ nature: "semantic", text: "The handover happened. An audit and recurring checks are authorized; await acknowledgment." }, "handover");
   const source = await f.get(note.noteId);
   const create = async (args: object, callId: string) => {
     const response = await upsert.execute(callId, { ...args, sourceId: note.noteId }, undefined, undefined, {} as never);
@@ -696,7 +698,7 @@ test("two stale-only assessments defer that material behind other pending drafts
   const req = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   await f.resources.patchStatus(req, { assess: { ...req.status.assess, executionId: "live" } });
   await f.note({ ...draft, text: "Receipt arrived" }, "changed");
-  const other = await f.note({ text: "Another handover" }, "another");
+  const other = await f.note({ nature: "semantic", text: "Another handover" }, "another");
   const finish = () => confirmCuratedNotes(f.resources, f.read(), "live", { inputId: req.metadata.name, curatedNotes: [draft] });
   await deliverInput(f.resources, f.read(), "live", req.metadata.name);
   const deferred = await finish();
@@ -752,6 +754,7 @@ test("an unclassified draft stays pending through edits until its classified ver
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
   const f = await setup(t), policy = topicPolicy();
   const draft = await f.note({ text: "Prepare oncall metrics and document the process" }, "draft");
+  assert.equal((await f.get(draft.noteId)).spec.nature, undefined);
   const since = pendingCuration(await f.get(draft.noteId))!;
   const edited = await f.note({ ...draft, text: "Document the oncall metrics process" }, "progress");
   assert.equal(pendingCuration(await f.get(draft.noteId)), since);

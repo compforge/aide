@@ -13,7 +13,7 @@ function validateMatter(matter: OngoingResource, context: ResourceValidationCont
 }
 
 /** @spec The emitted reminder and its scheduling receipt commit together.
- * @link docs/personal/ongoing.md
+ * @link docs/personal/work.md#ongoing
  */
 export const OngoingDefinition: ResourceDefinition<OngoingSpec, OngoingStatus> = {
   type: ONGOING_TYPE, schema: { spec: OngoingSpecSchema, status: OngoingStatusSchema },
