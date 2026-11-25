@@ -54,7 +54,7 @@ export function outputDetail(aide: WebService, id: string, uid?: string) {
   const raw = mailView(store, output), actual = status.delivery?.stream.uid === spec.stream.uid ? raw : mailView(store, output, true);
   return { ...summary(aide, output, actual), text: raw.text, think: raw.think, process: mailProcess(raw), stream: { ref: spec.stream, ...raw }, target: spec.target, disclosureDetail: status.disclosure,
     delivery: status.delivery && { ...status.delivery, text: actual.text, think: actual.think, process: mailProcess(actual), streamStatus: actual, receivers: [...status.delivery.receivers].map(ref => reference(aide, ref)) },
-    receipt: status.receipt, producer: spec.producer ? reference(aide, spec.producer) : spec.executionId || spec.createdBy ? reference(aide, spec.topic) : undefined, executionId: spec.executionId,
+    receipt: status.receipt, work: spec.work && reference(aide, spec.work), purpose: spec.purpose, producer: spec.producer ? reference(aide, spec.producer) : spec.executionId || spec.createdBy ? reference(aide, spec.topic) : undefined, executionId: spec.executionId,
     createdBy: spec.createdBy, notes: raw.references, inputs: (spec.inputIds ?? []).map(id => {
       const uid = spec.inputUids?.[id], store = aide.topics.inputStore;
       const input = store.storage.read(store.key(id))?.object;

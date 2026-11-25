@@ -1,6 +1,5 @@
 import { confirmCuratedNotes, type NoteConfirmation } from "../../note/confirm.ts";
 import { bindInputDelivery } from "../delivery.ts";
-import { followupInputId } from "../../ongoing/model.ts";
 import { readOngoing } from "../../ongoing/service.ts";
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../../batch/model.ts";
 import { chiefPreviews } from "../inputs.ts";
@@ -59,9 +58,13 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
       log.info({ topicId, inputId: input.inputId, noteResults: result.noteResults }, "Chief confirmed reviewed Notes");
       return result;
     };
+    let taskInputs: import("./input-tools.ts").ChiefInputTask["inputs"] = [];
     const tools = chiefTools(connectors, async (id, input) => {
       const c = active();
-      return say(plugins.executionVerbs(c.status.execution!.id, { topicId }), { ...input, idempotencyKey: id });
+      const receipt = await say(plugins.executionVerbs(c.status.execution!.id, { topicId }), { ...input,
+        ...(input.purpose === "question" ? { inputIds: taskInputs.map(i => i.id) } : {}), idempotencyKey: id });
+      if (receipt.state !== "success") throw new Error(receipt.state === "failure" ? receipt.error ?? "Output failed" : receipt.state);
+      return receipt;
     }, (id, offset) => {
       const c = active();
       return readChiefInput(store, c, id, offset, policy.maxChars);
@@ -73,6 +76,7 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
         return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "chief",
           inputs: [...store.topics.inputStore.query("deliveryExecution", c.status.execution!.id).map(i => ({
             id: i.metadata.name, deliveryId: i.status.assess?.deliveryId ?? `input:${i.metadata.uid}`, initial: !i.status.assess?.deliveryId && i.status.assess?.startedAt === c.status.execution!.startedAt,
+            ongoingUid: typeof i.spec.observation?.ongoingUid === "string" ? i.spec.observation.ongoingUid : undefined,
             summaryOwnerUid: i.spec.origin === "aide:summary" ? SummaryOwnerSchema.parse(i.spec.observation?.summaryOwner).uid : undefined,
             origin: i.spec.origin, text: inputPreview(i, Math.floor(policy.contextChars / 8)),
           })), ...store.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "deliveryExecution", value: c.status.execution!.id } }).flatMap(batch => {
@@ -84,10 +88,11 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
             }));
           }) ] };
       },
-      ongoingCheck: async id => followupInputId(await readOngoing(store.client, active(), id)),
+      ongoingUid: async id => (await readOngoing(store.client, active(), id)).metadata.uid,
       noteSummaryOwner: async id => (await readNote(store.client, id)).summaryOf?.uid,
       changed: (task, tools) => {
         inputOrigin = task.origin;
+        taskInputs = task.inputs;
         log.info({ topicId, executionId: task.executionId, inputOrigin: task.origin,
         inputIds: task.inputs.map(i => i.id), tools, toolCount: tools.length }, "Chief Input tools selected");
       },

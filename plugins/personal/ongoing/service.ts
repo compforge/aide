@@ -10,7 +10,7 @@ import { ONGOING_TYPE, OngoingSpecSchema, OngoingStatusSchema, ongoingView, type
 
 const UpdateSchema = z.object({
   ongoingId: z.string().min(1).optional(), version: z.string().min(1).optional(), title: OngoingSpecSchema.shape.title.optional(),
-  question: OngoingSpecSchema.shape.question.nullable(), checkAt: OngoingSpecSchema.shape.checkAt.nullable(),
+  question: OngoingSpecSchema.shape.question.nullable(), checkAt: OngoingStatusSchema.shape.nextCheckAt.nullable(),
   progress: OngoingStatusSchema.shape.progress, outcome: z.string().trim().min(1).max(2000).optional(),
 }).strict();
 
@@ -21,7 +21,7 @@ export async function readOngoing(resources: ResourceClient, actor: TopicResourc
   return matter;
 }
 
-export async function upsertOngoing(resources: ResourceClient, actor: TopicResource, raw: unknown, callId: string, sourceUid?: string) {
+export async function upsertOngoing(resources: ResourceClient, actor: TopicResource, raw: unknown, callId: string, sourceUid?: string, initialInputId?: string) {
   const args = UpdateSchema.parse(raw);
   const executionId = actor.status.execution?.id;
   if (!executionId || !callId) throw new Error("Ongoing requires a Chief execution and tool-call identity");
@@ -32,12 +32,11 @@ export async function upsertOngoing(resources: ResourceClient, actor: TopicResou
     if (!args.title || args.outcome || args.checkAt === null || args.version) throw new Error("Creating an Ongoing requires a title and an open check");
     const id = `ongoing-${digest(sourceUid ? [actor.metadata.uid, sourceUid, args.title] : [actor.metadata.uid, executionId, callId]).slice(0, 32)}`;
     const ref = { ...ONGOING_TYPE, namespace: "v1" as const, name: id };
-    const spec = { topic: writer.resource, ...(sourceUid ? { sourceUid } : {}), title: args.title, ...(args.question ? { question: args.question } : {}),
-      checkAt: args.checkAt ?? new Date(now.getTime() + 86_400_000).toISOString() };
+    const spec = { topic: writer.resource, ...(sourceUid ? { sourceUid } : {}), title: args.title, ...(args.question ? { question: args.question } : {}), ...(initialInputId ? { initialInputId } : {}) };
     const existing = await resources.get<OngoingSpec, OngoingStatus>(ref);
     if (existing) return ongoingView(existing);
     try {
-      return ongoingView(await resources.create(ONGOING_TYPE, { name: id, spec, status: { writer, updatedAt, planRevision: 1, ...(args.progress ? { progress: args.progress } : {}) } }));
+      return ongoingView(await resources.create(ONGOING_TYPE, { name: id, spec, status: { writer, updatedAt, nextCheckAt: args.checkAt ?? new Date(now.getTime() + 86_400_000).toISOString(), ...(args.progress ? { progress: args.progress } : {}) } }));
     } catch (error) {
       if (!(error instanceof ResourceAlreadyExists) && !(error instanceof Error && error.name === "ResourceAlreadyExists")) throw error;
       return ongoingView(await readOngoing(resources, actor, id));
@@ -46,12 +45,13 @@ export async function upsertOngoing(resources: ResourceClient, actor: TopicResou
   const matter = await readOngoing(resources, actor, args.ongoingId);
   if (matter.status.closure || matter.metadata.resourceVersion !== args.version) throw new Error("Ongoing closed or version changed; read it again");
   if (args.outcome && (args.checkAt || args.question)) throw new Error("Close or schedule Ongoing separately");
-  const checkAt = args.outcome || args.checkAt === null ? undefined : args.checkAt ?? matter.spec.checkAt;
-  if (args.question && !checkAt) throw new Error("Set checkAt to schedule this question");
+  const checkAt = args.outcome || args.checkAt === null ? undefined : args.checkAt ?? matter.status.nextCheckAt;
   const question = args.outcome || args.question === null ? undefined : args.question ?? matter.spec.question;
-  const revised = checkAt !== matter.spec.checkAt || question !== matter.spec.question;
-  const spec = { ...(matter.spec.sourceUid ? { sourceUid: matter.spec.sourceUid } : {}), topic: matter.spec.topic, title: args.title ?? matter.spec.title, ...(checkAt ? { checkAt } : {}), ...(question ? { question } : {}) };
-  const status = { ...matter.status, writer, updatedAt, ...(args.progress ? { progress: args.progress } : {}),
-    planRevision: matter.status.planRevision + Number(revised), ...(args.outcome ? { closure: { at: updatedAt, outcome: args.outcome } } : {}) };
+  const revised = checkAt !== matter.status.nextCheckAt || question !== matter.spec.question;
+  const { question: _oldQuestion, ...identity } = matter.spec;
+  const spec = { ...identity, title: args.title ?? matter.spec.title, ...(question ? { question } : {}) };
+  const { nextCheckAt: _oldTime, followupInputId, ...history } = matter.status;
+  const status = { ...history, ...(checkAt ? { nextCheckAt: checkAt } : {}), ...(!revised && followupInputId ? { followupInputId } : {}), writer, updatedAt, ...(args.progress ? { progress: args.progress } : {}),
+    ...(args.outcome ? { closure: { at: updatedAt, outcome: args.outcome } } : {}) };
   return ongoingView(await resources.replace(matter, spec, status));
 }

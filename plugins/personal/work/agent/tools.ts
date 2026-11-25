@@ -34,7 +34,7 @@ export function workTools(work: WorkService): ToolDefinition[] {
       async execute(callId, { text }, signal) { signal?.throwIfAborted(); return result(await work.createInput(text, callId)); },
     }),
     tool({ name: "upsert_work", label: "Maintain work",
-      description: "Create a delegated Task or Routine, or create/update an Ongoing kept by Chief. Look up existing Work first. sourceId identifies the Note, Work or business Input supporting creation. For a Task supply its business inputId or a sourceId supporting a new Chief decision. To update Ongoing supply workId and version from read_work; outcome closes it, checkAt=null clears its timer. Append new material or control requests to delegated Work with append_input.",
+      description: "Create a delegated Task or Routine, or create/update an Ongoing kept by Chief. Look up existing Work first. sourceId identifies the Note, Work or business Input supporting creation. For an Ongoing created from a business Input, supply its inputId. For a Task supply its business inputId or a sourceId supporting a new Chief decision. To update Ongoing supply workId and version from read_work; outcome closes it, checkAt=null clears its timer. Append new material to any Work and control requests to delegated Work with append_input.",
       parameters: Type.Object({ kind: workKindField, title: Type.Optional(definition.title), workId: Type.Optional(id), version: Type.Optional(id),
         instruction: Type.Optional(definition.instruction), trigger: Type.Optional(definition.trigger), inputId: Type.Optional(id), sourceId: Type.Optional(id),
         progress: Type.Optional(id), question: Type.Optional(Type.Union([id, Type.Null()])), outcome: Type.Optional(id),
@@ -46,10 +46,11 @@ export function workTools(work: WorkService): ToolDefinition[] {
           return result(await work.updateOngoing(workId, version, { title, progress, question, outcome, checkAt }, callId));
         }
         if (!title || version || outcome) throw new Error("Creating Work requires a title and a new responsibility");
-        const sourceUid = sourceId ? await work.sourceUid(sourceId) : undefined;
+        const source = sourceId ? await work.resolveSource(sourceId) : undefined;
+        const sourceUid = source?.uid;
         if (kind === "ongoing") {
-          if (instruction !== undefined || trigger !== undefined || inputId || checkAt === null || question === null) throw new Error("Invalid initial Ongoing plan");
-          return result(await work.create({ kind, title, progress, question, checkAt }, undefined, callId, sourceUid));
+          if (instruction !== undefined || trigger !== undefined || checkAt === null || question === null) throw new Error("Invalid initial Ongoing plan");
+          return result(await work.create({ kind, title, progress, question, checkAt }, inputId ?? source?.inputId, callId, sourceUid));
         }
         if (progress !== undefined || question !== undefined || checkAt !== undefined) throw new Error("Only Ongoing accepts progress, question or checkAt");
         if (!instruction || trigger === undefined) throw new Error("Task and Routine require instruction and trigger");
@@ -58,7 +59,7 @@ export function workTools(work: WorkService): ToolDefinition[] {
         return result(await work.create({ kind, title, instruction, trigger }, inputId, callId, sourceUid));
       },
     }),
-    tool({ name: "append_input", label: "Append input", description: "Send material or a decision to an existing Task or Routine. Set input.id to reference original material (a member ID for a batch). For a new Chief decision within existing authority, supply input.text and optionally input.id. Inline creation and attachment commit together. Returns inputId.",
+    tool({ name: "append_input", label: "Append input", description: "Send material or a decision to an existing Task, Routine or Ongoing. Set input.id to reference original material (a member ID for a batch). For a new Chief decision within existing authority, supply input.text and optionally input.id. Inline creation and attachment commit together. Returns inputId.",
       parameters: Type.Object({ workId: id, input: Type.Object({ id: Type.Optional(id), text: Type.Optional(Type.String({ minLength: 1, maxLength: 32000 })) }, { minProperties: 1, additionalProperties: false }), note: Type.Optional(id),
         action: Type.Optional(Type.Union([Type.Literal("context"), Type.Literal("update"), Type.Literal("answer"), Type.Literal("resume"), Type.Literal("pause")])),
         changes: Type.Optional(Type.Partial(Type.Object({ title: definition.title, instruction: definition.instruction, trigger: definition.trigger }, { additionalProperties: false }))),

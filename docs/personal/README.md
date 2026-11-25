@@ -4,7 +4,9 @@ Personal 是 Aide 的内置个人助手插件。Me 与 Aide 单聊时，[Gate](g
 
 ## 从 Input 到认识与成果
 
-从本轮到下轮，Chief 可以围绕同一条 Input 继续办事，也可以留下供以后判断的认识。Input 保留当时收到的内容和来源，Route 为领域输入确定 Topic 归属，Secretary 按需将 Deferred 待办整理成批。当前领域 root 的 Chief 结合新材料、已有 Note 和相关工作，判断当下要办什么，以及哪些认识值得留给以后。
+Aide 持续处理 Input，从中识别并推进三类 Work，形成并整理两类 Note。三类 Work 是 Task、Routine 和 Ongoing，两类 Note 按 nature 分为 semantic 和 procedural。
+
+Input 保留当时收到的内容和来源，Route 为领域输入确定 Topic 归属，Secretary 按需将 Deferred 待办整理成批。当前领域 root 的 Chief 结合新材料、已有 Note 和相关工作，判断当下要办什么，以及哪些认识值得留给以后。
 
 ![从本轮研判到下轮研判的两条泳道。办理线上，Chief 可当轮办妥、委托 Agent 或自己跟进，按需对外沟通。认识线上，普通 Note 供下次按需查证，对象的 Summary Note 提供默认背景。](../assets/personal-flow.svg)
 
@@ -25,7 +27,7 @@ Chief 处理一条 Input 后仍要承接的责任统称 Work。先判断由谁�
 | [Routine](routine.md) | Chief 将循环职责委托给 Routine Agent | 当轮完成后等待下一次时间或事件触发 | 每周五汇总本周的审批结果 |
 | [Ongoing](ongoing.md) | 领域 Chief 留下事项，自己跟进 | 有下文就更新进展，有结论就收尾 | 材料已提交，周五核实这次审批结果 |
 
-Chief 用 `list_work` 查找已有责任。需要新增时，`upsert_work` 在当前 Topic 下创建对应资源并返回。Task 和 Routine 各自的 Reconcile 根据资源状态调度专门的 Agent。后来收到与已有委托相关的材料，Chief 可用 `append_input` 转交原始 Input。Ongoing 的新进展由 Chief 直接记录。约定时间到了，Secretary 递交 `aide:followup`，仍由 Chief 查证、回应并决定是否收尾。需要沟通时，Chief 或受托 Agent 创建 Output。见[输出](output.md)。
+Chief 用 `list_work` 查找已有责任。需要新增时，`upsert_work` 在当前 Topic 下创建对应资源并返回。Task 和 Routine 各自的 Reconcile 根据资源状态调度专门的 Agent。后来收到与已有 Work 相关的材料，Chief 可用 `append_input` 关联原始 Input。Task、Routine 由受托 Agent 办理，Ongoing 的新材料交回领域 Chief 研判。约定时间到了，Secretary 递交 `aide:followup`，仍由 Chief 查证、回应并决定是否收尾。需要沟通时，Chief 或受托 Agent 创建 Output。见[输出](output.md)。
 
 ### 认识与沉淀
 
@@ -78,7 +80,7 @@ Weave 作用于 Topic 之间的关系：把值得共同理解的主题组织到�
 
 Route 的确定性规则直接分派，其余交给持续 Route Agent。各 Agent 通过工具明确确认业务进展，通过 say 创建 Output，投递器负责发送和回执。
 
-Personal 采用 [工具驱动与持续接纳](../harness/README.md#agent-的使用方式与持续职责) 的 Agent 使用方式：Chief 服务于 root Topic 的综合理解与研判，Task Agent 服务于有限目标，Routine Agent 服务于持续职责。Reconcile 负责确定性协调，Agent 负责非确定性判断；新动向通过 followUp / steer 加入运行中的会话，运行时记录输入投递，Agent 通过 report_task / report_routine 和 say 记录办理进展与沟通。业务完成以这些回执为准，最终文本用于内部执行摘要。
+Personal 采用 [工具驱动与持续接纳](../harness/README.md#agent-的使用方式与持续职责) 的 Agent 使用方式：Chief 服务于 root Topic 的综合理解与研判，Task Agent 服务于有限目标，Routine Agent 服务于持续职责。Reconcile 负责确定性协调，Agent 负责非确定性判断；新动向通过 followUp / steer 加入运行中的会话，运行时记录输入投递，Agent 通过 `report_work` 和 say 记录办理进展与沟通。业务完成以这些回执为准，最终文本用于内部执行摘要。
 
 ## 角色与协作
 

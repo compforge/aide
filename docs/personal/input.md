@@ -73,7 +73,7 @@ Normal、Immediate、内部维护和显式 handoff 保持独立 Input。Batch �
 | --- | --- |
 | route | Route 的规则或 route_input 保存完整去向与理由；内置 Input 在创建时直接写入待处理 Topic |
 | assess | Topic Reconcile 接纳材料。运行时确认材料进入 Chief 上下文后持久化投递时间和 executionId |
-| handle[Work UID] | Work 应用请求，再用 report_task / report_routine 确认办理 |
+| handle[Work UID] | Task、Routine 由受托 Agent 用 `report_work` 确认办理。Ongoing 的关联材料由 Secretary 递交领域 Chief |
 
 ### 投递与办理
 
@@ -87,7 +87,7 @@ request 支持 context、update、pause、resume、answer；交接说明 note �
 
 Chief 用 `append_input({ workId, input: { id } })` 向已有 Task 或 Routine 追加材料，保留原始 Input 的身份、来源与权限。同一 Input 可以追加给多个委托，每个委托独立确认一次。Chief 在已有授权内形成新决定时，可直接调用 `append_input({ workId, input: { id, text } })`。创建 Chief 来源的 Input 和建立办理关系在同一事务提交。id 可省略，由工具调用身份生成，两种形式都返回实际 inputId。
 
-Task / Routine Watch Input.handle 并按自身 UID 索引读取未完成记录。Reconcile 原子应用确定性请求并记录 appliedAt；暂停或拒绝请求可直接完成，其余材料必须由执行确认。Task / Routine 的后续输入通过原生 followUp / steer 进入当前 invocation，分别经 report_task / report_routine 独立确认。原始 Input 不复制到 spec。
+Task / Routine Watch Input.handle 并按自身 UID 索引读取未完成记录。Reconcile 原子应用确定性请求并记录 appliedAt；暂停或拒绝请求可直接完成，其余材料必须由执行确认。Task / Routine 的后续输入通过原生 followUp / steer 进入当前 invocation，经 `report_work` 独立确认。原始 Input 不复制到 spec。
 
 暂停、结果未知的工作可吸收事实但不因此恢复。显式更新可为已完成目标提出新的要求；失败请求保存 rejected 原因而不阻塞后续输入。目标删除会把剩余 handle 标为 cancelled。
 

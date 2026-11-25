@@ -52,7 +52,7 @@ export async function reconcileRoutine(context: PluginContext, execution: Reconc
     const prompt = `Use the current resource context for your entrusted work; read_routine, read_input and read_topic supply missing or truncated evidence. Verify existing effects before handling failed inputs.
 Activation: ${JSON.stringify({ routineId: routine.metadata.name, topicId: await assignedTopicId(context.resources, routine.status.topic), inputId: input?.metadata.name, kind: input ? "input" : "timer" })}
 ${input ? inputPreview(input) : ""}
-Report handled inputs and progress using report_routine; use say for useful user communication.`;
+Report handled inputs and progress using report_work; use say for useful user communication.`;
     await runInput(context, execution.withContext({ topicId: await assignedTopicId(context.resources, routine.status.topic), routineId: routine.metadata.name }), routine, "routine", prompt, input?.metadata.name);
     return { requeueAfterMs: 1 };
   }

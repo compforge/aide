@@ -8,7 +8,7 @@ Task 是同一 Topic 下、围绕稳定工作范围持续办理的载体。`plug
 
 ### 目标与完成依据
 
-Task 有明确的完成条件，没有周期职责的 trigger；执行和等待可以跨越多次调用。done 应有工具结果、产物或外部状态支撑，不能只凭模型说“完成”。report_task 提交结论与依据，say 在有必要沟通时单独表达结果。
+Task 有明确的完成条件，没有周期职责的 trigger；执行和等待可以跨越多次调用。done 应有工具结果、产物或外部状态支撑，不能只凭模型说“完成”。report_work 提交结论与依据，say 在有必要沟通时单独表达结果。
 
 Task 与 Routine 的区别由目标是否终结决定，执行次数与时长不决定类型。需要转换时，Chief 读取原目标和进展，创建新类型的独立资源，再按用户意图暂停或删除原资源。各步分别持久化，中断后核对当前状态；暂停或删除不撤销已发起的外部动作。
 
@@ -57,7 +57,7 @@ Chief 的列表过滤 deleting Task，分派事务也校验 UID、版本和 dele
 
 ### 执行与恢复
 
-`task.status.agent = { harness: "task", sessionId }`。Reconcile 先 create、保存 ID，再提交业务输入；恢复和持久化使用 [Pi 的原生 SDK](../harness/pi.md)。`status.execution` 表达当前执行，`lastExecutionId` 保留最近执行关联。模型 final text 不会完成 Input，也不会发送给用户；必须分别调用 report_task 和 say。中断或未确认输入保留痕迹并进入 uncertain，明确核对已有副作用后才能继续，不能自动重放。
+`task.status.agent = { harness: "task", sessionId }`。Reconcile 先 create、保存 ID，再提交业务输入；恢复和持久化使用 [Pi 的原生 SDK](../harness/pi.md)。`status.execution` 表达当前执行，`lastExecutionId` 保留最近执行关联。模型 final text 不会完成 Input，也不会发送给用户；必须分别调用 report_work 和 say。中断或未确认输入保留痕迹并进入 uncertain，明确核对已有副作用后才能继续，不能自动重放。
 
 ## Agent
 
@@ -72,11 +72,11 @@ Chief 的列表过滤 deleting Task，分派事务也校验 UID、版本和 dele
 | say | 通过 Topic 创建用户可见 Output，关联 Task UID、execution 与可选 Input |
 | summarize_task | 独立修订本资源的长期认识 |
 | upsert_note | 按同一事项创建或更新近期 Note，目标由 Host 绑定 |
-| report_task | 原子更新进展、done/wait/ask 状态及明确列出的 Input 办理回执 |
+| report_work | 原子更新进展、done/wait/ask 状态及明确列出的 Input 办理回执 |
 
 工具由 Host 根据 Task UID 和当前 execution 装配，模型不能自选其它 Task 或 Topic。文件和 CLI 操作沿用 Pi 原生能力及现有凭证。Topic 背景和外部材料不是新增授权。
 
-report_task 的 report 保存本次办理说明并更新 lastReport，不改写 summary 或 Note。done 表示本次目标已完成；若还有未确认 Input 则继续 ready。ask 保存问题并等待回答，wait 保存 waiting.until。用户沟通与办理确认分别持久化，消息投递失败不会重跑工作。
+report_work 的 report 保存本次办理说明并更新 lastReport，不改写 summary 或 Note。done 表示本次目标已完成；若还有未确认 Input 则继续 ready。ask 保存问题并等待回答，wait 保存 waiting.until。用户沟通与办理确认分别持久化，消息投递失败不会重跑工作。
 
 执行开始记录目标或职责版本。spec 在执行途中改变时，旧报告不能确认新版本；Agent 需用 read_task 重新读取资源、核对结果，并显式报告当前 observedGeneration。暂停期间可以保存旧执行针对原版本的结果，但不能据此确认新版本目标。
 
@@ -97,7 +97,7 @@ custom → user：Background.text()，当前业务背景 v1
   topic：所属话题背景
   work：同一 Topic 的相关 Task / Routine 概况
 user：Input 1
-assistant / tool：执行、按需 say、report_task 提交进展与办理回执
+assistant / tool：执行、按需 say、report_work 提交进展与办理回执
 后续请求的 custom → user 前缀：objective 进展 v2     # 由已提交的资源状态刷新
 user：Input 2
 assistant / tool：结合已有进展继续办理

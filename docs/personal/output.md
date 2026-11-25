@@ -6,6 +6,8 @@
 
 Aide 基于已有的近期、长期 Note 与最新 Input 判断是否需要沟通；更新 Note 可以静默完成，私下答复 Me 不以先持久化 Note 为前提，对外正文须引用可分类的 Note。Aide 会把多条观察合成一条通知，也会围绕同一个请求先报告进展，再交付结果。Input 表达收到的事实，Output 表达已经决定执行的投递，两者没有一对一约束。主动提醒可以没有 Input，`inputIds` 仅在需要追溯时保存相关输入，不承担消费回执或回复义务。
 
+Output 可以用 `spec.work` 关联所谈事项的 UID。Task 和 Routine 的 Agent 发言时自动关联自己的 Work。Chief 可以用 `say(workId=…)` 报告相关工作，用 `ask_me({ workId, text })` 就开放的 Ongoing 私下询问 Me。询问带有 `purpose=question`，发送者、相关事项和最终投递结果可分别查询。
+
 ## 流式生成与投递
 
 需要直接回复的 Immediate Channel Input 在 Chief 调用模型前建立 Output 与原始 Stream。

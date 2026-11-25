@@ -61,7 +61,7 @@ test("Task creation assigns the original Input atomically and distinguishes mult
   assert.deepEqual(aide.topics.inputStore.get("original"), fact);
 });
 
-/** @case report_task alone acknowledges business handling, and rejects unrelated or unadmitted inputs atomically. */
+/** @case report_work alone acknowledges business handling, and rejects unrelated or unadmitted inputs atomically. */
 test("Task report commits progress with exact receipts; end of inference without report stays uncertain", async t => {
   const { aide, resources, context, get, active } = setup(t);
   const work = await aide.work("me").create(definition);

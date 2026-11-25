@@ -2,7 +2,7 @@ import { retryOnConflict, type PluginContext } from "@compforge/aide-plugin";
 import { assignInput } from "../input/assignment.ts";
 import { inputStatus } from "../input/conditions.ts";
 import { INPUT_TYPE, InputAttention, deliveryFinished, type InputSpec, type InputStatus } from "../input/model.ts";
-import { inputRef, resourceRef } from "../input/state.ts";
+import { inputRef, resourceRef, type Input } from "../input/state.ts";
 import { TOPIC_TYPE, type TopicResource, type TopicStatus } from "../topic/model.ts";
 import type { TopicPolicy } from "../topic/config.ts";
 import type { maintenanceAgenda } from "./maintenance.ts";
@@ -25,8 +25,8 @@ const maintenanceTask: Record<MaintenanceOrigin, string> = {
  * @link docs/personal/secretary.md#容量与维护请求
  */
 export async function createMaintenanceInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" | "ongoing_check_due" = "idle", preparation?: { notes?: { noteId: string; version: string }[]; ongoing?: OngoingResource; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
-  if (origin === "aide:followup" && (!preparation?.ongoing || !followupInputId(preparation.ongoing))) throw new ObsoleteOngoingCheck();
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" | "ongoing_check_due" | "work_input" = "idle", preparation?: { notes?: { noteId: string; version: string }[]; ongoing?: OngoingResource; materials?: readonly Input[]; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
+  if (origin === "aide:followup" && (!preparation?.ongoing || !preparation.materials?.length && !followupInputId(preparation.ongoing))) throw new ObsoleteOngoingCheck();
   const target = resourceRef(topic);
   const maintenance = preparation?.plan, instructions = preparation?.instructions ?? "";
   const input = await retryOnConflict(async () => {
@@ -40,12 +40,14 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
       matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
     if (pending.items[0]) return pending.items[0];
     const scheduledMatter = origin === "aide:followup" ? preparation?.ongoing : undefined;
-    const inputId = scheduledMatter ? followupInputId(scheduledMatter)! : `${origin.slice(5)}-${digest([topic.metadata.uid, dueAt])}`;
+    const materials = preparation?.materials ?? [];
+    const consumesCheck = scheduledMatter && !scheduledMatter.status.followupInputId && dueAt === scheduledMatter.status.nextCheckAt;
+    const inputId = scheduledMatter ? (consumesCheck ? followupInputId(scheduledMatter)! : fingerprint) : `${origin.slice(5)}-${digest([topic.metadata.uid, dueAt])}`;
     const at = new Date().toISOString();
     const spec: InputSpec = {
       origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
       text: `${maintenanceTask[origin]} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; ${origin === "aide:followup" ? "Ask Me privately if a consequential fact is still missing." : origin === "aide:curate" ? "Maintain existing mandates. Base new Work on the original business Input or source Note or Work. Keep this review silent." : "Do not communicate or hand off business Work."} Work on at most 8 materials or 8 direct children this round.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
-      observation: { ...(preparation?.notes ? { notes: preparation.notes } : {}), ...(scheduledMatter ? { ongoingId: scheduledMatter.metadata.name, ongoingUid: scheduledMatter.metadata.uid } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
+      observation: { ...(preparation?.notes ? { notes: preparation.notes } : {}), ...(scheduledMatter ? { ongoingId: scheduledMatter.metadata.name, ongoingUid: scheduledMatter.metadata.uid, question: scheduledMatter.spec.question ?? null, ...(materials.length ? { inputIds: materials.map(i => i.metadata.name) } : {}) } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
         completed: chiefWorkload(current).completed, weaveRevision: maintenance?.weaveRevision ?? 0,
         pressure: (maintenance?.notePressure ?? []).map(({ uid, pressure }) => ({ uid, version: pressure.version })),
       } } : {}) },
@@ -69,7 +71,11 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
     }
     try { await context.resources.commit([
       { operation: "create", type: INPUT_TYPE, name: inputId, spec, status: inputStatus(status) },
-      ...(scheduledMatter ? [{ operation: "patchStatus" as const, resource: scheduledMatter, patch: { followupInputId: inputId },
+      ...materials.map(material => ({ operation: "patchStatus" as const, resource: material, options: { resourceVersion: material.metadata.resourceVersion },
+        patch: { ...inputStatus({ ...material.status, handle: { ...material.status.handle, [scheduledMatter!.metadata.uid]: {
+          ...material.status.handle![scheduledMatter!.metadata.uid]!, completedAt: at, result: { summary: "Attached material submitted to Chief", disposition: "completed" },
+        } } }) } })),
+      ...(scheduledMatter ? [{ operation: "patchStatus" as const, resource: scheduledMatter, patch: consumesCheck ? { followupInputId: inputId } : {},
         options: { resourceVersion: scheduledMatter.metadata.resourceVersion } }] : []),
       ...pressureWrites,
       { operation: "patchStatus", resource: current, options: { resourceVersion: current.metadata.resourceVersion }, patch: {

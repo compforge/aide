@@ -1,3 +1,4 @@
+import { OUTPUT_TYPE, type OutputSpec, type OutputStatus } from "../output/model.ts";
 import { ongoingView, ONGOING_TYPE, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
 import { ResourceAlreadyExists } from "@compforge/aide-plugin";
 import { NOTE_TYPE, type NoteSpec, type NoteStatus } from "../note/model.ts";
@@ -81,7 +82,10 @@ export class WorkService {
     const actor = this.store.topics.resource(this.topicId);
     if (!actor || matter.metadata.deletionTimestamp || !await readTopicInScope(this.store.client, actor, matter.spec.topic.uid))
       throw new Error("Ongoing is unavailable in this Topic");
-    return ongoingView(matter);
+    return { ...ongoingView(matter),
+      inputs: this.store.resources.page(INPUT_TYPE, { matchIndex: { name: "handle", value: matter.metadata.uid }, limit: 32 }).items.map(i => i.metadata.name),
+      outputs: this.store.resources.page<OutputSpec, OutputStatus>(OUTPUT_TYPE, { matchIndex: { name: "work", value: matter.metadata.uid }, limit: 32 })
+        .items.map(o => ({ outputId: o.metadata.name, purpose: o.spec.purpose, phase: o.status.phase, deliveredAt: o.status.deliveredAt })) };
   }
 
   read(id: string): Work {
@@ -99,22 +103,22 @@ export class WorkService {
     return { inputId };
   }
 
-  async sourceUid(id: string): Promise<string> {
+  async resolveSource(id: string): Promise<{ uid: string; inputId?: string }> {
     const input = this.store.topics.inputStore.get(id);
     if (input) {
       if (isInternalInput(input.spec) || input.metadata.deletionTimestamp || !input.status.topic || !this.scope().includes(input.status.topic.uid))
         throw new Error("Work requires a business Input in this Topic");
-      return input.metadata.uid;
+      return { uid: input.metadata.uid, inputId: input.metadata.name };
     }
     const note = this.store.resources.find<NoteSpec, NoteStatus>(NOTE_TYPE, id);
     if (note) {
       const root = await noteRoot({ resources: this.store.client }, note);
       if (note.metadata.deletionTimestamp || !root || !this.scope().includes(root.metadata.uid)) throw new Error("Source Note unavailable in this Topic");
-      return note.metadata.uid;
+      return { uid: note.metadata.uid };
     }
     const work = await this.readItem(id);
     if (!work.uid) throw new Error("Source Work unavailable");
-    return work.uid;
+    return { uid: work.uid };
   }
 
   async updateOngoing(id: string, version: string, changes: { title?: string; progress?: string; outcome?: string; question?: string | null; checkAt?: string | null }, key: string) {
@@ -126,13 +130,13 @@ export class WorkService {
   }
 
   async create(definition: WorkDefinition, inputId?: string, key?: string, sourceUid?: string): Promise<Work>;
-  async create(definition: OngoingDefinition, inputId?: undefined, key?: string, sourceUid?: string): Promise<ReturnType<typeof ongoingView>>;
+  async create(definition: OngoingDefinition, inputId?: string, key?: string, sourceUid?: string): Promise<ReturnType<typeof ongoingView>>;
   async create(definition: WorkDefinition | OngoingDefinition, inputId?: string, key: string = randomUUID(), sourceUid?: string) {
     const topic = await this.store.topics.ensure(this.topicId);
     if (definition.kind === "ongoing") {
-      if (inputId) throw new Error("Ongoing stays with Chief and cannot take an Input handle");
+      if (inputId) sourceUid ??= this.store.topics.inputStore.get(inputId)?.metadata.uid;
       const { kind, ...plan } = definition;
-      const matter = await upsertOngoing(this.store.client, topic, plan, key, sourceUid);
+      const matter = await upsertOngoing(this.store.client, topic, plan, key, sourceUid, inputId);
       this.log.info({ workId: matter.id, topicId: this.topicId, kind }, "Work tool created work");
       return matter;
     }
@@ -158,7 +162,7 @@ export class WorkService {
     return this.read(work.id);
   }
 
-  /** @spec A Task or Routine receives an original Input once. Concurrent appends retain each recipient's receipt.
+  /** @spec Each Work receives an original Input once. Concurrent appends retain each recipient's receipt.
    * @link docs/personal/input.md#投递与办理
    */
   async appendInput(id: string, material: z.input<typeof appendMaterial>, raw: z.input<typeof WorkInputRequestSchema> = {}, key: string = randomUUID()) {
@@ -170,8 +174,12 @@ export class WorkService {
     const at = new Date().toISOString();
     const draft = text === undefined ? undefined : chiefDecision(actor, text, at);
     for (let attempt = 0; ; attempt++) {
-      const work = this.read(id);
-      const target = this.store.resources.get(workType(work.kind), id);
+      const matter = this.store.resources.find<OngoingSpec, OngoingStatus>(ONGOING_TYPE, id);
+      if (matter && (matter.metadata.deletionTimestamp || !this.scope().includes(matter.spec.topic.uid))) throw new Error("Ongoing is outside this Topic");
+      const work = matter ? ongoingView(matter) : this.read(id);
+      const ongoing = work.kind === "ongoing";
+      const target = work.kind === "ongoing" ? matter! : this.store.resources.get(workType(work.kind), id);
+      if (ongoing && (work.closure || !["answer", "context"].includes(request.action))) throw new Error("Only open Ongoing accepts material or answers");
       const input = this.store.topics.inputStore.get(inputId);
       if (input) {
         if (input.metadata.deletionTimestamp || !input.status.topic || !this.scope().includes(input.status.topic.uid))
@@ -190,7 +198,7 @@ export class WorkService {
       const handle = { ...input?.status.handle, [target.metadata.uid]: { resource: resourceRef(target), assignedAt: at, request } };
       try {
         const [, saved] = await commitStatus(this.store.client, [
-          { operation: "patchStatus", resource: target, patch: { idleSince: null, agentStoppedAt: null } },
+          { operation: "patchStatus", resource: target, patch: ongoing ? {} : { idleSince: null, agentStoppedAt: null } },
           input ? { operation: "patchStatus", resource: input, patch: { handle } }
             : { operation: "create", type: INPUT_TYPE, name: inputId, spec: draft!.spec, status: { ...draft!.status, handle } },
         ]);
@@ -204,7 +212,7 @@ export class WorkService {
         continue;
       }
       this.log.info({ inputId, workId: id, topicId: this.topicId, action: request.action }, "Input appended to Work");
-      return { ...this.read(id), inputId };
+      return { ...(matter ? ongoingView(matter) : this.read(id)), inputId };
     }
   }
 

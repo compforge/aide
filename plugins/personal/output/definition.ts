@@ -23,7 +23,7 @@ export const OutputSpecSchema = z.object({
   receivers: PersonRefsSchema(100).optional(),
   topic: ref.extend({ uid: z.string().min(1) }), topicId: z.string().min(1),
   inputUids: z.record(z.string(), z.string().min(1)).optional(), createdBy: AgentCallSchema.optional(),
-  executionId: z.string().optional(), producer: ref.optional(), inputIds: z.array(z.string().min(1)).max(1001).optional(),
+  executionId: z.string().optional(), producer: ref.optional(), work: ref.extend({ kind: z.enum(["Task", "Routine", "Ongoing"]), uid: z.string().min(1) }).optional(), purpose: z.literal("question").optional(), inputIds: z.array(z.string().min(1)).max(1001).optional(),
 }).strict();
 export const OutputStatusSchema = z.object({
   disclosure: z.object({ decision: z.enum(["allowed", "denied"]), reason: z.string(), checkedAt: z.iso.datetime(), fingerprint: z.string(), policy: z.object({ sensitivity: SensitivitySchema, visibility: VisibilitySchema, people: z.array(z.string()) }).strict().optional() }).strict().optional(),
@@ -36,8 +36,8 @@ export const OutputStatusSchema = z.object({
 
 
 export const OutputDefinition: ResourceDefinition<OutputSpec, OutputStatus> = {
-  indexVersion: 2,
-  indexes: { followup: r => r.spec.inputIds?.includes(r.metadata.name) ? [r.metadata.name] : [], activeAddress: r => ["pending", "sending", "uncertain"].includes(r.status.phase) ? [...new Set([r.spec.target.uid, r.status.delivery?.address.uid, r.status.waitingAddress?.uid].filter((uid): uid is string => !!uid))] : [], reply: r => r.spec.replyTo ? [r.spec.replyTo.key] : [], address: r => [r.spec.target.uid], pendingAddress: r => ["pending", "sending"].includes(r.status.phase) ? [...new Set([r.spec.target.uid, r.status.delivery?.address.uid, r.status.waitingAddress?.uid].filter((uid): uid is string => !!uid))] : [], pendingReceiver: r => ["pending", "sending"].includes(r.status.phase) ? [...r.status.delivery?.receivers ?? []].map(p => p.uid) : [], topic: r => [r.spec.topic.uid], webEndpoint: r => r.status.delivery && r.status.phase === "delivered" && isChannelAddress(r.status.delivery.target) && r.status.delivery.target.channelId === "web" ? [r.status.delivery.target.endpoint] : [] },
+  indexVersion: 3,
+  indexes: { work: r => r.spec.work ? [r.spec.work.uid] : [], activeAddress: r => ["pending", "sending", "uncertain"].includes(r.status.phase) ? [...new Set([r.spec.target.uid, r.status.delivery?.address.uid, r.status.waitingAddress?.uid].filter((uid): uid is string => !!uid))] : [], reply: r => r.spec.replyTo ? [r.spec.replyTo.key] : [], address: r => [r.spec.target.uid], pendingAddress: r => ["pending", "sending"].includes(r.status.phase) ? [...new Set([r.spec.target.uid, r.status.delivery?.address.uid, r.status.waitingAddress?.uid].filter((uid): uid is string => !!uid))] : [], pendingReceiver: r => ["pending", "sending"].includes(r.status.phase) ? [...r.status.delivery?.receivers ?? []].map(p => p.uid) : [], topic: r => [r.spec.topic.uid], webEndpoint: r => r.status.delivery && r.status.phase === "delivered" && isChannelAddress(r.status.delivery.target) && r.status.delivery.target.channelId === "web" ? [r.status.delivery.target.endpoint] : [] },
   orderedIndexes: {
     topicActivity: r => !r.metadata.deletionTimestamp ? [{ value: r.spec.topic.uid, order: r.metadata.creationTimestamp }] : [],
     webActivity: r => !r.metadata.deletionTimestamp && r.status.phase === "delivered" && r.status.delivery && isChannelAddress(r.status.delivery.target) && r.status.delivery.target.channelId === "web"
@@ -46,6 +46,7 @@ export const OutputDefinition: ResourceDefinition<OutputSpec, OutputStatus> = {
     ? [...r.status.delivery?.receivers ?? []].map(p => ({ value: p.uid, order: r.status.deliveredAt! })) : [] },
   type: OUTPUT_TYPE, schema: { spec: OutputSpecSchema, status: OutputStatusSchema }, printer: outputPrinter,
   validator: { create(current, context) {
+    if (current.spec.purpose === "question" && current.spec.work?.kind !== "Ongoing") throw new Error("Question Output requires an Ongoing");
     const address = context.get<unknown, { retiring?: boolean }>(current.spec.target, current.spec.target.uid);
     if (address?.metadata.deletionTimestamp || address?.status.retiring) throw new Error("Output Address is merging; resolve current contact Addresses");
     if (current.spec.replyTo && context.page(OUTPUT_TYPE, { limit: 2, matchIndex: { name: "reply", value: current.spec.replyTo.key } }).items.some(o => o.metadata.uid !== current.metadata.uid)) throw new Error("Message already has a reply Output");

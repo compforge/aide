@@ -58,7 +58,7 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
   const currentInput = () => aide.topics.inputStore.query("deliveryExecution", aide.topics.resource("gate")!.status.execution!.id)[0]!.metadata.name;
   const fixture = await setup(t, request => {
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
-    if (names.includes("report_task")) {
+    if (names.includes("report_work")) {
       const work = aide.work("first").list()[0]!;
       const ids = aide.topics.inputStore.query("handlePending", work.uid!).map(i => i.metadata.name);
       switch (taskStep++) {
@@ -66,7 +66,7 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
         case 1: return { tool: "read_handoff", args: { id: aide.topics.inputStore.get(ids[0]!)!.spec.handoff!.id } };
         case 2: return { tool: "say", args: { text: "跨领域分析结论", respondToHandoffId: aide.topics.inputStore.get(ids[0]!)!.spec.handoff!.id, notes: [{ uid: evidence.uid, version: evidence.version }] } };
         case 3: return { tool: "report_handoff", args: { id: aide.topics.inputStore.get(ids[0]!)!.spec.handoff!.id, inputId: ids[0], phase: "completed", report: "Compared domain evidence" } };
-        case 4: return { tool: "report_task", args: { inputIds: ids, report: "Compared domain evidence", action: "done" } };
+        case 4: return { tool: "report_work", args: { inputIds: ids, report: "Compared domain evidence", action: "done" } };
         default: return { text: "Analysis reported" };
       }
     }
@@ -716,7 +716,7 @@ export default function (pi) {
 test("Routine uses its dedicated Pi agent and independently configured package skills", { timeout: 30_000 }, async t => {
   let inputId = "";
   const fixture = await setup(t, (_request, index) => index === 0
-    ? { tool: "report_routine", args: { inputIds: [inputId], action: "done", report: "checked" } }
+    ? { tool: "report_work", args: { inputIds: [inputId], action: "done", report: "checked" } }
     : { text: "Recorded" });
   const home = join(fixture.config.cwd, "work-home");
   const skill = join(fixture.config.cwd, "capabilities", "as-ops"); mkdirSync(skill, { recursive: true });
@@ -735,8 +735,8 @@ test("Routine uses its dedicated Pi agent and independently configured package s
   assert.equal(requests.length, 2);
   for (const request of requests) {
     assert.match(JSON.stringify(request.messages), /fixture-as-ops/);
-    assert.match(JSON.stringify(request.tools), /report_routine/);
-    assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|upsert_work|report_task/);
+    assert.match(JSON.stringify(request.tools), /report_work/);
+    assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|upsert_work/);
   }
 });
 
@@ -1008,7 +1008,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
   let currentWork: () => import("../plugins/personal/work/resources.ts").WorkResource;
   const fixture = await setup(t, (request, index) => {
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
-    for (const tool of [`read_${kind}`, "read_input", "read_topic", "list_addresses", "read_address", "say", `report_${kind}`, "upsert_note", `summarize_${kind}`]) assert.ok(names.includes(tool));
+    for (const tool of [`read_${kind}`, "read_input", "read_topic", "list_addresses", "read_address", "say", "report_work", "upsert_note", `summarize_${kind}`]) assert.ok(names.includes(tool));
     assert.equal(names.includes("upsert_work"), false);
     assert.equal(names.includes("release_topic"), false);
     switch (index % 8) {
@@ -1019,7 +1019,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
       case 4: return { tool: "upsert_note", args: { version: notes(aide.topics.resources, currentWork().metadata.uid, "subject")[0]?.version,
         ...(notes(aide.topics.resources, currentWork().metadata.uid, "subject")[0] ? { noteId: notes(aide.topics.resources, currentWork().metadata.uid, "subject")[0]!.id } : {}), text: `Evidence verification phase ${phase}` } };
       case 5: return { tool: `summarize_${kind}`, args: { version: contentVersion(currentWork()), summary: "Retain verified evidence and actual authorship." } };
-      case 6: return { tool: `report_${kind}`, args: { inputIds: [inputId], report: `Verified ${phase}`, action: "done" } };
+      case 6: return { tool: "report_work", args: { inputIds: [inputId], report: `Verified ${phase}`, action: "done" } };
       default: return { text: "Task progress recorded" };
     }
   });
@@ -1084,7 +1084,7 @@ test(`${kind} ${attention} Input joins the active native invocation`, { timeout:
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   let firstId = "", laterId = "";
   const fixture = await setup(t, (_request, index) => index === 0 ? { text: "Inspecting", pause }
-    : index === 1 ? { tool: `report_${kind}`, args: { inputIds: [firstId, laterId], action: "done", report: "Both inspected" } }
+    : index === 1 ? { tool: "report_work", args: { inputIds: [firstId, laterId], action: "done", report: "Both inspected" } }
     : { text: "Recorded" });
   const home = join(fixture.config.cwd, "task-active-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
@@ -1407,13 +1407,13 @@ test("followup cannot create Work or revise another Ongoing", async t => {
   }, "chief");
   const session = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding: {
     read: () => ({ executionId: "check", origin: "aide:followup", inputs: [{ id: "assigned", origin: "aide:followup", text: "Verify receipt" }] }),
-    ongoingCheck: async () => "unrelated-check", changed() {},
+    ongoingUid: async () => "unrelated-check", changed() {},
   } });
   try {
     await session.prompt("Verify receipt");
     assert.equal(fixture.requests.length, 3);
     const transcript = JSON.stringify(fixture.requests[2]!.messages);
-    assert.equal(transcript.match(/Update only the Ongoing and check plan admitted/g)?.length, 2);
+    assert.equal(transcript.match(/Use only the Ongoing referenced by the admitted followup/g)?.length, 2);
     assert.deepEqual(fixture.work.listItems(), []);
   } finally { session.dispose(); }
 });
