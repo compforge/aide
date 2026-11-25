@@ -1,8 +1,8 @@
-import type { Resource } from "@compforge/harness-toolbox/kubernetes/resources";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,6 +28,7 @@ test("Environment observations use native toolbox HTTP, normalize ownership, and
   let data = fixture(); let fail = false; let paginate = false;
   const paths: string[] = [];
   const server = createServer((request, response) => {
+    if (request.url!.includes("?")) { response.writeHead(403).end(); return; }
     paths.push(request.url!);
     if (fail && request.url!.endsWith("/pods")) { response.writeHead(403).end(); return; }
     const name = request.url!.split("/").at(-1)! as keyof typeof data;
@@ -35,13 +36,17 @@ test("Environment observations use native toolbox HTTP, normalize ownership, and
     response.end(JSON.stringify({ metadata: { continue: paginate ? "more" : "" }, items: data[name] }));
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
-  t.after(() => { server.closeAllConnections(); server.close(); rmSync(root, { recursive: true, force: true }); });
   const kubeconfig = join(root, "kubeconfig");
   writeFileSync(kubeconfig, JSON.stringify({ apiVersion: "v1", kind: "Config", "current-context": "dev",
     clusters: [{ name: "cluster", cluster: { server: `http://127.0.0.1:${(server.address() as { port: number }).port}` } }],
     contexts: [{ name: "dev", context: { cluster: "cluster", user: "reader" } }], users: [{ name: "reader", user: {} }],
   }));
   const environments = new Environments([{ name: "dev", kind: "kubernetes", kubeconfig, namespace: "app", aliases: ["开发"] }]);
+  t.after(async () => {
+    await environments.close();
+    server.closeAllConnections(); server.close();
+    rmSync(root, { recursive: true, force: true });
+  });
   const first = await environments.workloads("开发");
   assert.equal(first.environment, "dev"); assert.equal(first.workloads.length, 1);
   assert.equal(first.workloads[0]!.pods[0]!.uid, "pod1");
@@ -59,14 +64,14 @@ test("Environment observations use native toolbox HTTP, normalize ownership, and
   data.pods[0]!.status.containerStatuses[0]!.restartCount++;
   data.pods[0]!.status.containerStatuses[0]!.ready = false;
   assert.equal(workloadChanges(replacement, await environments.workloads("dev")).length, 1);
-  fail = true; await assert.rejects(environments.workloads("dev"), /Read pods/);
+  fail = true; await assert.rejects(environments.workloads("dev"), /Read Kubernetes resource .*pods/);
   fail = false; paginate = true; await assert.rejects(environments.workloads("dev"), /Incomplete/);
 });
 
 test("Missing ownership, malformed and partial lists fail rather than erasing the baseline", async () => {
   const data = fixture(); data.replicasets = [];
-  await assert.rejects(collectWorkloads({ async get(_namespace, kind) { return { items: data[kind as keyof typeof data] } as Resource; } }, "dev", "app"), /Incomplete controller ownership/);
-  await assert.rejects(collectWorkloads({ async get() { return {}; } }, "dev", "app"));
+  await assert.rejects(collectWorkloads({ async list({ resource }) { return { items: data[resource as keyof typeof data] }; } }, "dev", "app"), /Incomplete controller ownership/);
+  await assert.rejects(collectWorkloads({ async list() { return { items: [{}] }; } }, "dev", "app"));
   assert.throws(() => observationNamespace({ name: "dev", kind: "kubernetes", kubeconfig: "unused" }), /explicit namespace/);
   assert.throws(() => observationNamespace({ name: "dev", kind: "host" }, "app"), /not Kubernetes/);
   assert.throws(() => observationNamespace({ name: "dev", kind: "kubernetes", kubeconfig: "unused", host: { name: "vm", transport: "ssh", address: "invalid" } }, "app"), /SSH Host/);
@@ -74,7 +79,7 @@ test("Missing ownership, malformed and partial lists fail rather than erasing th
 
 test("Replica counts, images, scale-to-zero, additions and removals are workload changes", async () => {
   const data = fixture();
-  const read = () => collectWorkloads({ async get(_namespace, kind) { return { items: data[kind as keyof typeof data] } as Resource; } }, "dev", "app");
+  const read = () => collectWorkloads({ async list({ resource }) { return { items: data[resource as keyof typeof data] }; } }, "dev", "app");
   const baseline = await read();
   data.deployments[0]!.spec.template.spec.containers[0]!.image = "api:v2";
   assert.equal(workloadChanges(baseline, await read()).length, 1);
@@ -92,11 +97,65 @@ test("Workload ownership stops at supported carriers even when an operator owns 
   data.deployments[0]!.metadata.ownerReferences = [{ kind: "Application", uid: "operator-resource", controller: true }];
   const second = structuredClone(data.pods[0]!); second.metadata.name = "second"; second.metadata.uid = "pod2";
   data.pods.push(second);
-  const read = () => collectWorkloads({ async get(_namespace, kind) { return { items: data[kind as keyof typeof data] } as Resource; } }, "dev", "app");
+  const read = () => collectWorkloads({ async list({ resource }) { return { items: data[resource as keyof typeof data] }; } }, "dev", "app");
   const before = await read();
   assert.equal(before.workloads[0]!.pods.length, 2);
   data.pods.reverse();
   assert.deepEqual(workloadChanges(before, await read()), []);
   Object.assign(data.pods[0]!.status.containerStatuses[0]!, { lastState: { terminated: { reason: "OOMKilled", exitCode: 137 } } });
   assert.ok((await read()).workloads[0]!.pods.some((pod) => pod.containers[0]!.lastExitReason === "OOMKilled"));
+});
+
+test("Environment queries share Toolbox watches and recover to Kubernetes direct reads on disconnect", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-kube-watch-"));
+  const data = fixture();
+  const watches: ServerResponse[] = [];
+  let allowReconnect = true;
+  let directReads = 0;
+  const server = createServer((request, response) => {
+    const url = new URL(request.url!, "http://fixture");
+    const resource = url.pathname.split("/").at(-1)! as keyof typeof data;
+    const expected = resource === "pods" ? "/api/v1" : "/apis/apps/v1";
+    if (url.pathname !== `${expected}/namespaces/app/${resource}`) { response.writeHead(404).end(); return; }
+    if (url.searchParams.has("watch")) {
+      if (!allowReconnect) { response.writeHead(503).end(); return; }
+      response.writeHead(200).flushHeaders();
+      watches.push(response);
+      return;
+    }
+    if (!url.searchParams.has("limit")) directReads++;
+    response.end(JSON.stringify({ metadata: { resourceVersion: "10" }, items: data[resource] }));
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const kubeconfig = join(root, "kubeconfig");
+  writeFileSync(kubeconfig, JSON.stringify({ apiVersion: "v1", kind: "Config", "current-context": "dev",
+    clusters: [{ name: "cluster", cluster: { server: `http://127.0.0.1:${(server.address() as { port: number }).port}` } }],
+    contexts: [{ name: "dev", context: { cluster: "cluster", user: "reader" } }], users: [{ name: "reader", user: {} }],
+  }));
+  const environments = new Environments([{ name: "dev", kind: "kubernetes", kubeconfig, aliases: ["开发"] }]);
+  t.after(async () => {
+    await environments.close();
+    server.closeAllConnections(); server.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const until = async (check: () => Promise<boolean>) => {
+    const deadline = Date.now() + 3000;
+    while (!(await check())) {
+      assert.ok(Date.now() < deadline, "Kubernetes client did not switch list paths");
+      await delay(10);
+    }
+  };
+  const baseline = await environments.workloads("开发", "app");
+  await until(async () => {
+    const before = directReads;
+    await environments.workloads("dev", "app");
+    return watches.length === 5 && directReads === before;
+  });
+  data.deployments[0]!.spec.template.spec.containers[0]!.image = "api:v2";
+  assert.deepEqual(workloadChanges(baseline, await environments.workloads("dev", "app")), []);
+  allowReconnect = false;
+  for (const watch of watches) watch.end();
+  await until(async () => (await environments.workloads("dev", "app")).workloads[0]?.images[0]?.image === "api:v2");
+  await environments.close();
+  await assert.rejects(environments.workloads("dev", "app"), /closed/);
 });

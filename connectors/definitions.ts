@@ -15,7 +15,11 @@ export function builtinDefinitions(): readonly ConnectorDefinition[] {
     config: { parse: value => resolveEnvironmentConfig(z.record(z.string(), z.unknown()).parse(value)) },
     create(_context, config) {
       const directory = new Environments(config);
-      return { handlers: { list: () => directory.list(), get: (_call, name) => directory.get(name), workloads: (_call, name, namespace) => directory.workloads(name, namespace) } };
+      return {
+        close: () => directory.close(),
+        handlers: { list: () => directory.list(), get: (_call, name) => directory.get(name),
+          workloads: (_call, name, namespace) => directory.workloads(name, namespace) },
+      };
     },
   };
   const messages: ConnectorDefinition<z.infer<typeof LarkMessagesConfigSchema>, MessageConnector> = {
