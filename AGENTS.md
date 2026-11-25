@@ -114,7 +114,6 @@ plugins/personal/
   person/                  # 人物身份、资料与认识；合并、联系人及消息事实协调
   address/                 # 沟通场合、定位与参与者
   output/                  # Output CRD、披露、投递与展示
-  handoff/                 # Gate 与领域的委托及回报
   observation/             # Input JobView、原生调用引用与业务证据关联
   source/                  # environment / message / repository / pull-request / requirement 观察
   config.ts                # Personal 配置组装、严格校验与默认值

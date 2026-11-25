@@ -1,5 +1,5 @@
 import { INPUT_ORIGINS } from "../../plugins/personal/input/model.ts";
-import { HANDOFF_TYPE, handoffSummary, type HandoffSpec, type HandoffStatus } from "../../plugins/personal/handoff/model.ts";
+import { browseOpenOngoings } from "../../plugins/personal/ongoing/browse.ts";
 import { AddressRefSchema } from "../../plugins/personal/address/model.ts";
 import { browseAddressNotes } from "../../plugins/personal/address/notes.ts";
 import { browseAddresses } from "../../plugins/personal/address/browse.ts";
@@ -152,16 +152,11 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         const gate = await aide.topics.ensure(GATE_TOPIC_ID);
         json(response, 200, { topicId: gate.spec.id, uid: gate.metadata.uid }); return;
       }
-      if (request.method === "GET" && url.pathname === "/gate/handoffs") {
-        const query = z.object({ continue: z.string().max(8000).optional() }).strict().parse(Object.fromEntries(url.searchParams));
+      if (request.method === "GET" && url.pathname === "/gate/ongoings") {
+        const query = PageSchema.strict().parse(Object.fromEntries(url.searchParams));
         await aide.start();
-        const gate = await aide.topics.ensure(GATE_TOPIC_ID);
-        const page = await aide.topics.resources.page<HandoffSpec, HandoffStatus>(HANDOFF_TYPE,
-          { limit: 20, direction: "desc", consistency: "live", continue: query.continue, matchIndex: { name: "gateActivity", value: gate.metadata.uid } });
-        json(response, 200, { items: page.items.map(item => {
-          const topic = item.status.topic && aide.topics.byRef(item.status.topic);
-          return { ...handoffSummary(item), ...(topic ? { topicUrl: "/?topic=" + encodeURIComponent(topic.spec.id) } : {}) };
-        }), continue: page.metadata.continue }); return;
+        const started = performance.now();
+        listJson(response, browseOpenOngoings(aide.topics.resources.storage, query), "gate-ongoings", started); return;
       }
       if (request.method === "GET" && url.pathname === "/gate/note") {
         const { id } = z.object({ id: z.string().min(1).max(250) }).strict().parse(Object.fromEntries(url.searchParams));

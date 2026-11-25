@@ -2,7 +2,6 @@ import { DELEGATED_WORK_TYPES, type WorkResource } from "../work/resources.ts";
 import { BATCH_TYPE, type BatchStatus } from "../batch/model.ts";
 import { ONGOING_TYPE, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
 import { isGateTopic } from "./boundary.ts";
-import { HANDOFF_TYPE, type HandoffSpec, type HandoffStatus } from "../handoff/model.ts";
 import { AddressRefSchema, type AddressRef } from "../address/model.ts";
 import { OUTPUT_TYPE } from "../output/model.ts";
 import { Addresses, type AddressTarget } from "../address/service.ts";
@@ -15,7 +14,7 @@ import { topicSubtree } from "./tree.ts";
 import { resourceRef, belongsToTopic } from "../input/state.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
-import { InputAttention, inputAttention, type InputSpec, type InputSubmission } from "../input/model.ts";
+import { InputAttention, isInternalInput, inputAttention, type InputSpec, type InputSubmission } from "../input/model.ts";
 import { isDeepStrictEqual } from "node:util";
 import { receiverIdentity, type SayInput, type SayReceipt } from "../output/model.ts";
 import { InputStore } from "../input/store.ts";
@@ -163,12 +162,12 @@ export class TopicStore {
     const asking = options.purpose === "question";
     if (reminders.length && !asking) throw new Error("Use ask_me to ask about an Ongoing");
     if (asking && (!options.workId || owner || !executionId || initial.status.execution?.id !== executionId || !evidence.length
-      || !options.to?.me || options.target || options.receivers || options.respondToInputId || options.respondToHandoffId))
+      || !options.to?.me || options.target || options.receivers || options.respondToInputId))
       throw new Error("Only the active Chief may ask Me privately about an Ongoing");
     if (asking) {
       const batches = new Set(this.resources.list<unknown, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "deliveryExecution", value: executionId! } }).map(b => b.metadata.uid));
       if (evidence.some(i => i.status.assess?.executionId !== executionId && !batches.has(i.status.batchId ?? "")
-        || i.spec.origin.startsWith("aide:") && i.spec.origin !== "aide:followup"))
+        || isInternalInput(i.spec) && i.spec.origin !== "aide:followup"))
         throw new Error("Question requires an admitted business Input or Ongoing followup");
     }
     const readSubject = () => {
@@ -191,8 +190,7 @@ export class TopicStore {
       : options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID());
     const previous = this.outputStore.get(id);
     if (options.respondToInputId && options.to) throw new Error("say cannot combine respondToInputId with to");
-    if (options.respondToHandoffId && (options.respondToInputId || options.to || options.target)) throw new Error("Choose a single reply destination");
-    const inputIds = [...new Set([...(options.inputIds ?? (inputId && !options.respondToHandoffId ? [inputId] : [])), ...(options.respondToInputId ? [options.respondToInputId] : [])])];
+    const inputIds = [...new Set([...(options.inputIds ?? (inputId ? [inputId] : [])), ...(options.respondToInputId ? [options.respondToInputId] : [])])];
     const attached = (id: string) => {
       const input = this.inputStore.get(id);
       const members = new Set(this.scope(initial.metadata.uid).map(t => t.metadata.uid));
@@ -206,7 +204,6 @@ export class TopicStore {
     let replyToMessageId: string | undefined;
     let replyTo: import("../output/model.ts").OutputSpec["replyTo"];
     let conversation = isGateTopic(initial) ? resourceRef(initial) : undefined;
-    let handoffId: string | undefined;
     let receivers = options.receivers === undefined ? undefined : [...options.receivers];
     if (options.to) {
       if (target || options.receivers !== undefined) throw new Error("say must choose contact Me or an explicit destination");
@@ -214,25 +211,12 @@ export class TopicStore {
       const destination = previous ? { target: previous.spec.target, receivers: previous.spec.receivers?.toJSON() } : await this.resolveContact();
       target = destination.target; receivers = destination.receivers;
     }
-    if (options.respondToHandoffId) {
-      const handoff = this.resources.find<HandoffSpec, HandoffStatus>(HANDOFF_TYPE, options.respondToHandoffId);
-      const delegated = handoff && this.inputStore.get(handoff.status.latestInputId);
-      const domainRef = delegated?.status.topic ?? handoff?.status.topic;
-      const domain = domainRef && this.byRef(domainRef);
-      const allowed = handoff && (owner ? delegated ? !!delegated.status.handle?.[owner.metadata.uid] : handoff.status.works.some(w => w.uid === owner?.metadata.uid)
-        : isGateTopic(initial) ? handoff.spec.gate.uid === initial.metadata.uid
-        : domain && this.scope(initial.metadata.uid).some(t => t.metadata.uid === domain.metadata.uid));
-      if (!handoff || handoff.metadata.deletionTimestamp || !allowed) throw new Error("Handoff reply is outside this owner's scope");
-      target = handoff.status.reply.address; replyToMessageId = handoff.status.reply.messageId;
-      receivers ??= handoff.status.reply.sender ? [handoff.status.reply.sender] : undefined;
-      conversation = handoff.spec.gate; handoffId = handoff.metadata.name;
-    }
     if (options.respondToInputId) {
       const replyInput = attached(options.respondToInputId), reply = replyInput.spec;
       const identity = replyIdentity(replyInput);
       if (!reply.handoff && reply.origin !== "channel" && !(reply.origin === "source" && identity?.mentionMe))
         throw new Error("Source reply requires an original group mention of Me within existing authority");
-      if (reply.handoff) { conversation = reply.handoff.gate; handoffId = reply.handoff.id; }
+      if (reply.handoff) conversation = reply.handoff.gate;
       replyTo = reply.handoff ? undefined : { input: resourceRef(replyInput), key: identity?.key ?? replyInput.metadata.uid, ...(identity ? { messageId: identity.messageId } : {}) };
       const priorReply = replyTo && this.resources.page<import("../output/model.ts").OutputSpec, import("../output/model.ts").OutputStatus>(OUTPUT_TYPE, { limit: 1, matchIndex: { name: "reply", value: replyTo.key } }).items[0];
       if (priorReply && priorReply.metadata.name !== id) return { outputId: priorReply.metadata.name, accepted: true };
@@ -257,7 +241,7 @@ export class TopicStore {
         if (first && candidates.every(i => i.spec.source && first.uid === i.spec.source.uid)) {
           target = first;
           const delegated = candidates.map(i => i.spec.handoff).filter(h => !!h);
-          if (delegated.length && delegated.every(h => h.id === delegated[0]!.id)) { conversation = delegated[0]!.gate; handoffId = delegated[0]!.id; }
+          if (delegated.length === candidates.length && delegated.every(h => h.gate.uid === delegated[0]!.gate.uid)) conversation = delegated[0]!.gate;
           if (receivers === undefined && candidates.every(i => i.spec.sender?.uid === candidates[0]!.spec.sender?.uid) && candidates[0]!.spec.sender) receivers = [candidates[0]!.spec.sender];
           const coordinates = new Set(candidates.map(i => i.spec.replyToMessageId));
           if (coordinates.size === 1) replyToMessageId = candidates[0]!.spec.replyToMessageId;
@@ -297,7 +281,7 @@ export class TopicStore {
       const accepted = this.outputStore.get(id);
       const createdBy = accepted ? accepted.spec.createdBy
         : executionId ? agentCall((owner ?? c).status, options.idempotencyKey) : undefined;
-      const association = { ...(matter ? { work: resourceRef(matter), purpose: options.purpose } : {}), ...(conversation ? { conversation } : {}), ...(handoffId ? { handoffId } : {}), ...(options.contentKind ? { contentKind: options.contentKind } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
+      const association = { ...(matter ? { work: resourceRef(matter), purpose: options.purpose } : {}), ...(conversation ? { conversation } : {}), ...(options.contentKind ? { contentKind: options.contentKind } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
       try {
         await commitStatus(this.client, [
           { operation: "patchStatus", resource: c, patch: {} },

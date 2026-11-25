@@ -1,3 +1,5 @@
+import { browseOpenOngoings } from "../plugins/personal/ongoing/browse.ts";
+import { upsertOngoing } from "../plugins/personal/ongoing/service.ts";
 import { isGateTopic } from "../plugins/personal/topic/boundary.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -73,6 +75,11 @@ test("Gate Web requests bypass semantic Route, stream replies, deduplicate and r
   for (const asset of ["/gate", "/gate.js", "/gate.css"]) assert.equal((await fetch(base + asset)).status, 200);
   const state = await (await fetch(base + "/gate/state")).json() as { topicId: string; uid: string };
   assert.equal(state.topicId, "gate");
+  const gateHtml = await (await fetch(base + "/gate")).text();
+  assert.deepEqual([...gateHtml.matchAll(/role="tab"[^>]*>([^<]+)/g)].map(match => match[1]), ["对话", "跟进"]);
+  const pending = await fetch(base + "/gate/ongoings?page=3");
+  assert.equal(pending.status, 200);
+  assert.deepEqual(await pending.json(), { total: 0, pageSize: 20, pages: 1, page: 1, items: [] });
   const send = (value: unknown) => fetch(base + "/gate/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
   assert.equal((await send({ id: "bad", text: "hello", topicId: "domain" })).status, 400);
   const message = { id: "hello", text: "跨 Topic 问题" };
@@ -136,4 +143,29 @@ test("Gate read tools discover multiple roots and enforce the active owner on ev
   await assert.rejects(aide.work("gate").appendInput(work.id, { text: "change domain" }), /Unknown work/);
   assert.ok(!tools.some(t => /^(move|upsert|prune|retire|summarize|delete|create)_/.test(t.name)));
   active = false; await assert.rejects(call("read_topic", { uid: first.metadata.uid }), /Inactive owner/);
+});
+
+test("Gate pages open Ongoings across domains by check time and clamps a disappearing last page", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-gate-ongoings-"));
+  const aide = new Aide(home, fakeOptions({ async execute() { throw new Error("Unexpected work"); } }, home), log);
+  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  const resources = aide.personal.store.client;
+  async function actor(id: string) {
+    const root = await aide.topics.ensure(id);
+    await resources.patchStatus(root, { execution: { id, startedAt: new Date().toISOString() } });
+    return aide.topics.resource(id)!;
+  }
+  const a = await actor("first"), b = await actor("second");
+  const plan = { question: null, checkAt: "2099-02-01T00:00:00.000Z" };
+  const late = await upsertOngoing(resources, a, { ...plan, title: "Later" }, "a");
+  const early = await upsertOngoing(resources, b, { ...plan, title: "Earlier", checkAt: "2099-01-01T00:00:00.000Z" }, "b");
+  const unscheduled = await upsertOngoing(resources, a, { ...plan, title: "Unscheduled" }, "c");
+  const open = await upsertOngoing(resources, a, { ongoingId: unscheduled.id, version: unscheduled.version, checkAt: null, question: null }, "clear");
+  const read = (page: number) => browseOpenOngoings(aide.topics.resources.storage, { pageSize: 2, page });
+  assert.deepEqual(read(1).items.map(i => [i.uid, i.topicId]), [[early.uid, "second"], [late.uid, "first"]]);
+  assert.deepEqual(read(2).items.map(i => i.uid), [open.uid]);
+  await upsertOngoing(resources, a, { ongoingId: open.id, version: open.version, outcome: "Done", checkAt: null, question: null }, "close");
+  const refreshed = read(2);
+  assert.equal(refreshed.page, 1);
+  assert.equal(refreshed.total, 2);
 });

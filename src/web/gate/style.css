@@ -7,3 +7,7 @@ main.gate-main { display: flex; max-width: 1440px; }
 #evidence summary { cursor: pointer; }
 #evidence-body { padding-top: 12px; color: #20342b; font-size: 14px; }
 @media (max-width: 760px) { main.gate-main { height: calc(100dvh - 140px); } }
+
+#ongoings .work > a { display: block; width: fit-content; margin-top: 4px; }
+#ongoing-pages { margin-top: 12px; }
+#ongoing-page { margin-inline: 8px; }

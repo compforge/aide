@@ -14,10 +14,12 @@ export enum InputAttention {
   Deferred = "deferred",
 }
 
-export const INPUT_ORIGINS = ["channel", "source", "chief", "aide:curate", "aide:followup", "aide:organize", "aide:summary"] as const;
+export const BUSINESS_INPUT_ORIGINS = ["channel", "source", "chief", "aide:handoff"] as const;
+const maintenanceOrigins = ["aide:curate", "aide:followup", "aide:organize", "aide:summary"] as const;
+export const INPUT_ORIGINS = [...BUSINESS_INPUT_ORIGINS, ...maintenanceOrigins] as const;
 export type InputOrigin = typeof INPUT_ORIGINS[number];
 export const isInternalInput = (input: Pick<InputSpec, "origin">): boolean =>
-  input.origin.startsWith("aide:");
+  maintenanceOrigins.some(origin => origin === input.origin);
 export const inputQueue = (input: InputSpec): string => isInternalInput(input) ? input.origin : inputAttention(input);
 
 export type InputRelation = "sent" | "received" | "observed";
@@ -27,7 +29,7 @@ export interface InputSpec extends MaterialDisclosure {
   /** Producer-owned event key, stable across retries and intake paths; opaque to Personal. */
   inputKey?: string;
   /** Explicit delegated request; communication address and original user evidence stay independent of domain ownership. */
-  handoff?: { id: string; gate: ResourceRef & { uid: string }; sourceInput: import("@compforge/aide-plugin").ResourceRef & { uid: string }; replyTo: import("../address/model.ts").AddressRef };
+  handoff?: { gate: ResourceRef & { uid: string }; sourceInput: ResourceRef & { uid: string } };
   /** Where the input was received; independent of its producer, sender and topic. */
   source?: import("../address/model.ts").AddressRef;
   /** Transport reply coordinates belong to this message, not the Address place. */

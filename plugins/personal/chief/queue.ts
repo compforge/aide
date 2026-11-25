@@ -1,5 +1,5 @@
 import type { ResourceReader } from "@compforge/aide-plugin";
-import { INPUT_TYPE, InputAttention, deliveryFinished, deliveryRetryDue, type InputSpec, type InputStatus } from "../input/model.ts";
+import { INPUT_TYPE, isInternalInput, InputAttention, deliveryFinished, deliveryRetryDue, type InputSpec, type InputStatus } from "../input/model.ts";
 import { inputExpired } from "../input/retention.ts";
 import type { Input } from "../input/state.ts";
 import type { TopicResource } from "../topic/model.ts";
@@ -17,7 +17,7 @@ export async function preparedInputs(resources: ResourceReader, owner: Readonly<
     for (const input of page.items) {
       if (!deliveryRetryDue(input.status.assess, retryDelayMs) || input.metadata.deletionTimestamp || input.status.batchId || inputExpired(input) || deliveryFinished(input.status.assess)
         || input.status.assess?.executionId || result.some(i => i.metadata.uid === input.metadata.uid)) continue;
-      const internal = input.spec.origin.startsWith("aide:");
+      const internal = isInternalInput(input.spec);
       if (businessOnly && internal) return result;
       if (internal) return result.length ? result : [input];
       if (result.length && result[0]!.spec.origin !== input.spec.origin) return result;

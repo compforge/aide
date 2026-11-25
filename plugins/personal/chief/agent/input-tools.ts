@@ -2,9 +2,8 @@ import { getCurrentTools, getToolStateChanges, toToolDeclaration } from "@earend
 import { deliveredMessageId } from "../../../../agents/pi/input.ts";
 import type { AgentSession, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
-import { INPUT_ORIGINS, isInternalInput, type InputOrigin } from "../../input/model.ts";
-export { INPUT_ORIGINS };
-export const BUSINESS_INPUT_ORIGINS = ["channel", "source", "chief"] as const;
+import { BUSINESS_INPUT_ORIGINS, INPUT_ORIGINS, isInternalInput, type InputOrigin } from "../../input/model.ts";
+export { INPUT_ORIGINS, BUSINESS_INPUT_ORIGINS };
 export interface ChiefToolDefinition<T extends TSchema = TSchema> extends ToolDefinition<T> { inputOrigins: readonly InputOrigin[] }
 export interface ChiefInputTask {
   executionId: string;
@@ -21,6 +20,7 @@ const instructions: Record<InputOrigin, string> = {
   channel: "Decide from the message and its context whether a reply or action is needed. Answer, maintain matter Notes and hand off ongoing Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
   source: "Assess the observed business facts within existing authority. Update continuing matter Notes and relevant Work as needed. Observation is not new authorization. Leave tree organization and durable summary maintenance to their own Inputs.",
   chief: "Handle the recorded business decision within its existing authorization. Maintain matter Notes and Work as needed. Leave tree organization and durable summary maintenance to their own Inputs.",
+  "aide:handoff": "Handle the request forwarded by Gate within the original user authorization. Reuse existing Work, record new Work or Notes when warranted, and reply to the delegated Input when useful.",
   "aide:followup": "Read the specified Ongoing, related Inputs, Work results and replies from Me. If the matter closed, finish silently. An updated check time does not invalidate the open question. When evidence establishes closure, upsert_work with the outcome and basis. If still open, record progress and the next check. When a consequential fact is missing, ask Me privately with ask_me, then await the reply.",
   "aide:summary": "Review only the named owner. Use the owner-specific question in the Input. Read its whole current summary and relevant Notes. What is worth reading by default next time? If you wrote the summary today, would each existing claim still hold at the same scope and certainty? Keep lasting, supported conclusions. Narrow or remove outdated claims. Use the evidenced outcome of a concluded matter before generalizing from it. Preserve disclosure, attribution and explicit corrections. Re-read on version conflict.",
   "aide:curate": "Review ordinary Notes and Task, Routine and Ongoing in this Topic using current evidence and existing authority. Identify missing or changed responsibilities, look up existing Work before creating any, and use append_input for material related to existing Work. Confirm the destination before retiring a redundant source Note or winding down superseded Work. Read the changed ordinary Notes, related Notes, source Inputs, Work and existing summaries. Correct partial or outdated claims. Assign each retained Note a fitting nature. Use split_note for mixed material. For duplicate Notes, update the existing destination before pruning or retiring the source. Use confirm_curated_notes to confirm the final noteId and version of every ordinary Note reviewed or written, including merge destinations. Use versions returned by fresh reads or writes. If a version changed, reread and correct rejected entries, or omit unresolved Notes to defer them explicitly.",

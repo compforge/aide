@@ -1,6 +1,5 @@
 import { ONGOING_TYPE } from "../ongoing/model.ts";
 import { ChiefWorkloadSchema } from "./workload.ts";
-import { HANDOFF_TYPE } from "../handoff/model.ts";
 import { isGateTopic, isRootTopic, isProcessingRoot } from "./boundary.ts";
 import { NotePressureSchema } from "../note/pressure.ts";
 import { PersonRefsSchema } from "../person/model.ts";
@@ -105,7 +104,6 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     // @link docs/personal/topic.md#回收资格
     if (isGateTopic(resource)) throw new TopicDeletionBlocked("gate", "Gate Topic cannot be deleted");
     if (resource.spec.default) throw new TopicDeletionBlocked("default", "Default Topic cannot be deleted");
-    if (context.page(HANDOFF_TYPE, { limit: 1, matchIndex: { name: "activeTopic", value: resource.metadata.uid } }).items.length) throw new TopicDeletionBlocked("busy", "Topic has active handoffs");
     if (context.page(ONGOING_TYPE, { limit: 1, matchIndex: { name: "openTopic", value: resource.metadata.uid } }).items.length) throw new TopicDeletionBlocked("busy", "Topic has open ongoing matters");
     if (context.page(BATCH_TYPE, { limit: 1, matchIndex: { name: "open", value: resource.metadata.uid } }).items.length) throw new TopicDeletionBlocked("busy", "Topic has pending Batch");
     if (resource.status.execution) throw new TopicDeletionBlocked("busy", "Topic is busy");

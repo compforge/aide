@@ -16,6 +16,7 @@ const LarkParticipants = z.object({ provider: z.literal("lark"), accountId: z.st
  */
 function communication(input: InputSpec): string {
   if (isInternalInput(input)) return "System-scheduled reflection within existing authority, not a new user request or external observation.\n";
+  if (input.origin === "aide:handoff") return "Gate forwarded a request from Me. The original user Input defines its authorization.\n";
   if (input.origin === "chief") return "Originating actor: Aide. This is an assistant decision within existing authority, not a new statement by Me.\n";
   if (input.origin !== "channel") return "External observation. Identify its speakers and addressees; relation is relative to Me, not Aide.\n";
   if (input.originId === "web") return "Direct conversation: Me → Aide through the local Web channel.\n";

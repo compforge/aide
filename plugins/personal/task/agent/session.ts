@@ -1,8 +1,6 @@
 import { noteDirectory } from "../../note/directory.ts";
 import { isGateTopic } from "../../topic/boundary.ts";
 import { gateReadTools } from "../../gate/read-tools.ts";
-import { domainHandoffTools } from "../../handoff/tools.ts";
-import { Handoffs } from "../../handoff/service.ts";
 import { Addresses } from "../../address/service.ts";
 import { addressReadTools } from "../../address/tools.ts";
 import { summaryText, summaryReference } from "../../note/summary.ts";
@@ -68,7 +66,6 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
       const reads = gateReadTools(store, current), names = new Set(reads.map(t => t.name));
       tools.splice(0, tools.length, ...tools.filter(t => !names.has(t.name)), ...reads);
     }
-    tools.push(...domainHandoffTools(new Handoffs(store, log), current));
     return createTaskAgent({ ...options, config, scope: `task:${ref.uid}`, tools, background: identityBackground(persons, () => {
       const background = new Background(store, current());
       return { text: () => background.text() };

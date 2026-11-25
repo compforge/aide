@@ -11,14 +11,11 @@ import { mailReader } from "./stream-fixture.ts";
 import { topicView } from "../src/channel/view.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { fixtureMe } from "./address-fixture.ts";
-import { Handoffs } from "../plugins/personal/handoff/service.ts";
-import { reconcileHandoff } from "../plugins/personal/handoff/reconcile.ts";
+import { appendGateInput } from "../plugins/personal/gate/handoff.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { routeByRules } from "../plugins/personal/route/rules.ts";
 import { larkAddress, webAddress } from "../src/channel/address.ts";
 import { topicHistory } from "../plugins/personal/topic/history.ts";
-import { TOPIC_TYPE } from "../plugins/personal/topic/model.ts";
-import { digest } from "../plugins/personal/identity.ts";
 
 const log = pino({ level: "silent" });
 
@@ -57,7 +54,7 @@ test("only Me bot DM enters Gate; Me group mention and other senders remain doma
 
 });
 
-test("durable handoff deduplicates, replies on original DM, tracks followups and fences stale or foreign reports", async t => {
+test("Gate forwards each user Input once per root and domain replies return to its original conversation", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-handoff-"));
   const aide = new Aide(home, fakeOptions({ async execute() { throw new Error("No inference"); } }, home, [], home, "cli_test"), log);
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
@@ -69,24 +66,16 @@ test("durable handoff deduplicates, replies on original DM, tracks followups and
   const source = await aide.topics.submit("dm", { origin: "channel", originId: "lark", relation: "sent", observation: { chatType: "p2p" },
     source: larkAddress("cli_test", "oc_me"), sender: me, replyToMessageId: "om_request", text: "Investigate the domain" });
   await routeByRules(context, source);
-  const service = new Handoffs(aide.personal.store, log), activeGate = () => aide.topics.resource("gate")!;
-  const args = { inputId: "dm", topicUid: domain.metadata.uid, title: "Investigation", request: "Investigate this domain" };
-  const handoff = await service.delegate(activeGate(), args);
-  assert.equal((await service.delegate(activeGate(), args)).metadata.uid, handoff.metadata.uid);
-  assert.equal(aide.topics.inputStore.list().filter(i => i.spec.handoff).length, 1);
-  const inputId = handoff.status.latestInputId;
+  const forward = async (inputId: string, text: string) => appendGateInput(aide.personal.store, aide.topics.resource("gate")!, { inputId, topicUid: domain.metadata.uid, text });
+  const { inputId } = await forward("dm", "Investigate this domain");
+  assert.equal((await forward("dm", "Investigate this domain")).inputId, inputId);
+  assert.equal(aide.topics.inputStore.get(inputId)!.spec.origin, "aide:handoff");
   assert.equal(aide.topics.inputStore.get(inputId)!.status.topic?.uid, domain.metadata.uid);
   await resources.patchStatus(domain, { execution: { id: "chief-execution", startedAt: new Date().toISOString() } });
   await resources.patchStatus(foreign, { execution: { id: "foreign-execution", startedAt: new Date().toISOString() } });
   await resources.patchStatus(aide.topics.inputStore.get(inputId)!, { assess: { topic: resourceRef(domain), executionId: "chief-execution", startedAt: new Date().toISOString() } });
-  await reconcileHandoff({ resources }, service.read(handoff.metadata.name));
-  const accepted = service.read(handoff.metadata.name);
-  assert.equal(accepted.status.phase, "accepted");
-  await reconcileHandoff({ resources }, accepted);
-  assert.equal(service.read(handoff.metadata.name).metadata.resourceVersion, accepted.metadata.resourceVersion,
-    "unchanged admission receipts must not rewrite Handoff status");
-  const report = { id: handoff.metadata.name, inputId, phase: "completed", report: "Verified" };
-  await assert.rejects(service.report(aide.topics.resource("foreign")!, report, "bad"), /outside/);
+  await assert.rejects(forward(inputId, "forward again"), /original user Input/);
+  await assert.rejects(aide.topics.say("foreign", undefined, "foreign reply", "foreign-execution", { respondToInputId: inputId }), /not attached/);
   await aide.topics.say("domain", inputId, "Verified result", "chief-execution", { respondToInputId: inputId, idempotencyKey: "answer" });
   const output = aide.topics.outputStore.list()[0]!;
   assert.equal(output.spec.target.uid, source.spec.source!.uid);
@@ -94,26 +83,11 @@ test("durable handoff deduplicates, replies on original DM, tracks followups and
   assert.deepEqual([...output.spec.receivers!].map(p => p.uid), [me.uid]);
   assert.equal(output.spec.conversation?.uid, gate.metadata.uid);
   assert.equal(topicHistory(aide.topics, gate, [gate]).outputs.length, 1);
-  await service.report(aide.topics.resource("domain")!, report, "report");
-  assert.equal(service.read(handoff.metadata.name).status.phase, "completed");
-  assert.equal(aide.topics.inputStore.query("topic", gate.metadata.uid).length, 1, "normal reply/report never wakes Gate");
   const next = await aide.topics.submit("followup", { origin: "channel", originId: "web", source: webAddress("gate"), sender: me, text: "Also check the new event" });
   await routeByRules(context, next);
-  await service.followup(activeGate(), { id: handoff.metadata.name, inputId: "followup", request: next.spec.text });
-  await service.followup(activeGate(), { id: handoff.metadata.name, inputId: "followup", request: next.spec.text });
-  const latest = service.read(handoff.metadata.name);
-  assert.equal(latest.status.sequence, 2);
-  await assert.rejects(service.report(aide.topics.resource("domain")!, report, "late"), /newer follow-up/);
-  const waiting = { id: latest.metadata.name, inputId: latest.status.latestInputId, phase: "waiting", report: "Need user's choice", coordinate: true };
-  await service.report(aide.topics.resource("domain")!, waiting, "coordinate");
-  await service.report(aide.topics.resource("domain")!, waiting, "coordinate");
-  const notices = aide.topics.inputStore.list().filter(i => i.spec.originId === "personal.handoff");
-  assert.equal(notices.length, 1);
-  await assert.rejects(service.delegate(activeGate(), { ...args, inputId: notices[0]!.metadata.name }), /original user Input/);
-  await assert.rejects(resources.delete(TOPIC_TYPE, domain.metadata.name), /active handoffs/);
-  aide.topics.inputStore.storage.remove(aide.topics.inputStore.key(latest.status.latestInputId));
-  await assert.rejects(aide.topics.say("foreign", undefined, "wrong owner", "foreign-execution", { respondToHandoffId: latest.metadata.name }), /outside/);
-  const lateReply = await aide.topics.say("domain", latest.status.latestInputId, "Result after Input expiry", "chief-execution", { respondToHandoffId: latest.metadata.name });
+  const followup = await forward("followup", next.spec.text);
+  assert.notEqual(followup.inputId, inputId);
+  const lateReply = await aide.topics.say("domain", followup.inputId, "New reply", "chief-execution", { respondToInputId: followup.inputId });
   const lateOutput = aide.topics.outputStore.get(lateReply.outputId)!;
   assert.equal(lateOutput.spec.target.uid, next.spec.source!.uid, "the latest followup selects its current direct channel");
   assert.equal(lateOutput.spec.conversation?.uid, gate.metadata.uid);
@@ -122,6 +96,9 @@ test("durable handoff deduplicates, replies on original DM, tracks followups and
   assert.doesNotThrow(() => parseUIModel(history));
   assert.equal(history.blocks.find(block => block.id === "input:followup")!.group_id, "followup");
   assert.equal(history.blocks.find(block => block.id === `message:${lateReply.outputId}`)!.group_id, "chief-execution");
+  aide.topics.inputStore.storage.remove(aide.topics.inputStore.key(followup.inputId));
+  assert.equal((await forward("followup", "Retry the same request")).inputId, followup.inputId);
+  assert.equal(aide.topics.inputStore.get(followup.inputId), undefined);
   const originalInvocations = aide.invocations.bind(aide), originalView = aide.runtime.executions.view.bind(aide.runtime.executions);
   const queries: string[][] = [];
   aide.invocations = () => [{ invocationId: "domain-turn", pluginInstanceId: "personal", executionId: "chief-execution", verb: "harness", phase: "running", harnessName: "chief", topicId: "domain", resourceRef: resourceRef(domain) },
@@ -139,8 +116,5 @@ test("durable handoff deduplicates, replies on original DM, tracks followups and
     assert.equal(topicView(aide, "gate", undefined, { executionId: "foreign-execution" }).blocks.length, 0);
   } finally { aide.invocations = originalInvocations; aide.runtime.executions.view = originalView; }
 
-  await service.report(aide.topics.resource("domain")!, { ...waiting, phase: "completed", coordinate: false }, "finished-after-expiry");
-  await service.followup(activeGate(), { id: latest.metadata.name, inputId: "followup", request: next.spec.text });
-  assert.equal(service.read(latest.metadata.name).status.sequence, 2, "expired delegated Inputs retain replay receipts");
-  assert.ok(!("sourceText" in (await service.list(gate.metadata.uid)).items[0]!.spec), "background listings do not copy original user evidence");
+
 });

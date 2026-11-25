@@ -74,7 +74,7 @@ export class Aide {
   ]);
   inputDefinition(origin: Pick<InputSpec, "origin" | "originId">) {
     if (["aide:curate", "aide:followup", "aide:organize", "aide:summary"].includes(origin.origin)) return { id: origin.origin, label: ({ "aide:curate": "梳理", "aide:followup": "跟进", "aide:organize": "组织", "aide:summary": "摘要复核" } as Record<string, string>)[origin.origin]!, icon: iconFor("harness:chief") };
-    if (origin.origin === "chief" && ["personal.gate", "personal.handoff"].includes(origin.originId)) return { id: origin.originId, label: "Gate 请求", icon: iconFor("harness:chief") };
+    if (origin.origin === "aide:handoff") return { id: origin.originId, label: "Gate 请求", icon: iconFor("harness:chief") };
     if (origin.origin === "chief" && origin.originId === "personal.chief") return { id: origin.originId, label: "Chief 请求", icon: iconFor("harness:chief") };
     const definition = this.inputDefinitions.get(`${origin.origin}:${origin.originId}`);
     if (!definition) throw new Error(`Unknown input definition: ${origin.origin}:${origin.originId}`);

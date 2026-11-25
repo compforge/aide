@@ -63,22 +63,19 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
       const ids = aide.topics.inputStore.query("handlePending", work.uid!).map(i => i.metadata.name);
       switch (taskStep++) {
         case 0: return { tool: "read_topic", args: {} };
-        case 1: return { tool: "read_handoff", args: { id: aide.topics.inputStore.get(ids[0]!)!.spec.handoff!.id } };
-        case 2: return { tool: "say", args: { text: "跨领域分析结论", respondToHandoffId: aide.topics.inputStore.get(ids[0]!)!.spec.handoff!.id, notes: [{ uid: evidence.uid, version: evidence.version }] } };
-        case 3: return { tool: "report_handoff", args: { id: aide.topics.inputStore.get(ids[0]!)!.spec.handoff!.id, inputId: ids[0], phase: "completed", report: "Compared domain evidence" } };
-        case 4: return { tool: "report_work", args: { inputIds: ids, report: "Compared domain evidence", action: "done" } };
+        case 1: return { tool: "say", args: { text: "跨领域分析结论", respondToInputId: ids[0], notes: [{ uid: evidence.uid, version: evidence.version }] } };
+        case 2: return { tool: "report_work", args: { inputIds: ids, report: "Compared domain evidence", action: "done" } };
         default: return { text: "Analysis reported" };
       }
     }
     if (names.includes("upsert_work")) {
       const input = aide.topics.inputStore.list().find(i => i.spec.handoff)!;
       switch (chiefStep++) {
-        case 0: return { tool: "report_handoff", args: { id: input.spec.handoff!.id, inputId: input.metadata.name, phase: "working", report: "Domain accepted analysis" } };
-        case 1: return { tool: "upsert_work", args: { kind: "task", title: "Domain analysis", instruction: "Analyze domain evidence and reply to the handoff", trigger: null, inputId: input.metadata.name } };
+        case 0: return { tool: "upsert_work", args: { kind: "task", title: "Domain analysis", instruction: "Analyze domain evidence and reply to the handoff", trigger: null, inputId: input.metadata.name } };
         default: return { text: "Domain task assigned" };
       }
     }
-    for (const name of ["list_topics", "read_topic", "list_notes", "read_note", "list_work", "read_work", "read_input", "delegate_request"]) assert.ok(names.includes(name), name);
+    for (const name of ["list_topics", "read_topic", "list_notes", "read_note", "list_work", "read_work", "read_input", "append_input"]) assert.ok(names.includes(name), name);
     assert.ok(!names.includes("assess_input"));
     for (const name of ["assess_batch", "bash", "write", "edit", "upsert_note", "retire_note"]) assert.ok(!names.includes(name), name);
     if (phase === 0) switch (gateStep++) {
@@ -91,7 +88,7 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
     }
     if (phase === 1) switch (gateStep++) {
       case 0: return { tool: "list_work", args: { kind: "task" } };
-      case 1: return { tool: "delegate_request", args: { topicUid: firstUid, title: "Domain analysis", request: "Analyze current domain evidence", inputId: currentInput() } };
+      case 1: return { tool: "append_input", args: { topicUid: firstUid, text: "Analyze current domain evidence", inputId: currentInput() } };
       default: return { text: "已创建分析事项，结果会回到 Gate。" };
     }
     assert.match(JSON.stringify(request.messages), /两个领域的进展有共同点/);
@@ -131,7 +128,6 @@ test("Gate native loop reads across roots, delegates analysis and resumes after 
     assert.equal(summaryText(aide.topics.resources, aide.topics.resource("first")!), "Domain A verified facts");
     assert.equal(aide.topics.resource("first")!.status.agent?.harness, "chief");
     assert.equal(aide.work("gate").list().length, 0);
-    assert.equal((await new (await import("../plugins/personal/handoff/service.ts")).Handoffs(aide.personal.store, pino({ level: "silent" })).list(gate.metadata.uid)).items[0]!.status.phase, "completed");
     const session = aide.topics.resource("gate")!.status.agent;
     await aide.close(); aide = open(); phase = 2; gateStep = 0;
     await aide.receive(fixtureIncoming({ channelId: "web", topicId: "gate", id: "followup", text: "接着刚才说" }));

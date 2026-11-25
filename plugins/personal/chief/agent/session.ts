@@ -22,9 +22,7 @@ import type { Manager } from "../../../../src/host/plugin/manager.ts";
 import { WorkService } from "../../work/service.ts";
 import type { Store } from "../../work/store.ts";
 import { TOPIC_TYPE } from "../../topic/model.ts";
-import { domainHandoffTools } from "../../handoff/tools.ts";
-import { Handoffs } from "../../handoff/service.ts";
-import { BUSINESS_INPUT_ORIGINS, INPUT_ORIGINS } from "./input-tools.ts";
+import { INPUT_ORIGINS } from "./input-tools.ts";
 import { chiefTools } from "./chief-tools.ts";
 import { createChiefAgent } from "./agent.ts";
 import type { PiSessionFactory } from "../../../../src/host/harness/pi/adapter.ts";
@@ -96,7 +94,7 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
         log.info({ topicId, executionId: task.executionId, inputOrigin: task.origin,
         inputIds: task.inputs.map(i => i.id), tools, toolCount: tools.length }, "Chief Input tools selected");
       },
-    }, work: new WorkService(store, topicId, log), persons: persons, tools: [...tools, ...domainHandoffTools(new Handoffs(store, log), active).map(t => ({ ...t, inputOrigins: BUSINESS_INPUT_ORIGINS })), ...addressReadTools(new Addresses(store.resources.storage.home), active, ref => store.topics.outputStore.deliveryCapability(ref)).map(tool => ({ ...tool, inputOrigins: INPUT_ORIGINS })), ...topicTools(store, active, log, () => inputOrigin)], background: () => new TopicBackground(store, active(), topicId), readNote: id => readNote(plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
+    }, work: new WorkService(store, topicId, log), persons: persons, tools: [...tools, ...addressReadTools(new Addresses(store.resources.storage.home), active, ref => store.topics.outputStore.deliveryCapability(ref)).map(tool => ({ ...tool, inputOrigins: INPUT_ORIGINS })), ...topicTools(store, active, log, () => inputOrigin)], background: () => new TopicBackground(store, active(), topicId), readNote: id => readNote(plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
       const c = active();
       const result = await upsertTopicNote(plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId, policy.maxChars, inputOrigin);
       log.info({ topicId, targetTopicId: input.topicId, noteId: result.noteId, version: result.version, sensitivity: result.sensitivity, visibility: result.visibility }, "Topic Note updated");
