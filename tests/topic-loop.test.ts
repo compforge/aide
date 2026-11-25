@@ -1,3 +1,5 @@
+import { readNoteDirectory } from "../plugins/personal/note/directory.ts";
+import { relatedWork } from "../plugins/personal/background.ts";
 import { upsertOngoing, readOngoing } from "../plugins/personal/ongoing/service.ts";
 import { readNote } from "../plugins/personal/note/service.ts";
 import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
@@ -16,17 +18,17 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import { Aide } from "../src/app.ts";
+import { Aide, type AideOptions } from "../src/app.ts";
 import { fakeOptions, type Agent } from "./fake-harness.ts";
 import { deliverInput } from "./input-state-fixture.ts";
 import { routeTo } from "./input-state-fixture.ts";
 import { admit } from "./input-state-fixture.ts";
 import type { LoopStatus } from "../plugins/personal/execution/loop.ts";
 
-function setup(t: { after(fn: () => Promise<void>): void }, agent: Partial<Agent> = {}) {
+function setup(t: { after(fn: () => Promise<void>): void }, agent: Partial<Agent> = {}, startup: Pick<AideOptions, "agentSession" | "readSession"> = {}) {
   const root = mkdtempSync(join(tmpdir(), "aide-continuous-"));
   const options = fakeOptions({ notify: false, async execute() { throw new Error("No work"); }, ...agent }, root);
-  const aide = new Aide(root, options, pino({ level: "silent" }));
+  const aide = new Aide(root, { ...options, ...startup }, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const submit = (id: string, attention: InputAttention = InputAttention.Normal) => aide.topics.submit(id,
     { topicId: "me", origin: "source", originId: "personal.environments", text: `fact ${id}`, attention });
@@ -179,23 +181,65 @@ test("startup resumes existing Topic inputs without Topic or Work display projec
   assert.equal(aide.topics.inputStore.get("before-start")!.status.assess?.completedAt !== undefined, true);
 });
 
-test("startup followup closes a verified ongoing matter without asking Me", async t => {
+test("new mode recovers the previous session delivery before admitting new work", async t => {
+  const previous = { harness: "chief", sessionId: "old-chief" };
+  const startedAt = new Date().toISOString();
+  const observed: string[] = [];
+  const prompts: string[] = [];
+  const { aide, submit } = setup(t, { async chief(prompt) { prompts.push(prompt); return "Handled"; } }, {
+    agentSession: "new",
+    async readSession(agent) {
+      observed.push(agent.sessionId);
+      return { schema_version: "agent-ledger/session@1", session: { source: "pi", id: agent.sessionId },
+        nodes: [{ id: "user", kind: "input", started_at: startedAt,
+          content: { role: "user", content: [{ type: "text", text: "[aide-input:interrupted]\nalready received" }] } }] };
+    },
+  });
+  const resources = aide.runtime.plugins.resourceClient("personal");
+  const topic = await aide.topics.ensure("me");
+  for (const id of ["already-received", "next-input"]) await routeTo(resources, topic.metadata, await submit(id));
+  await resources.patchStatus(aide.topics.resource("me")!, { agent: previous, execution: { id: "interrupted", startedAt } });
+  const claim = await admit(resources, "already-received", "interrupted");
+  await resources.patchStatus(claim, { assess: { ...claim.status.assess, agent: previous } });
+  await aide.start();
+  await aide.settled();
+  const recovered = aide.topics.inputStore.get("already-received")!.status.assess;
+  assert.deepEqual(observed, [previous.sessionId]);
+  assert.ok(recovered?.completedAt);
+  assert.deepEqual(recovered.agent, previous);
+  const next = aide.topics.inputStore.get("next-input")!.status.assess;
+  assert.ok(next?.completedAt && next.agent?.sessionId);
+  assert.notEqual(next.agent.sessionId, previous.sessionId);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0]!, /next-input/);
+  assert.doesNotMatch(prompts[0]!, /already-received/);
+});
+
+test("a new Chief session takes over an Ongoing from CRD progress, question and recorded evidence", async t => {
   const { aide } = setup(t, { async chief() {
     const current = aide.topics.resource("me")!;
-    const signoff = await readNote(resources, evidence.noteId);
-    const matter = await readOngoing(resources, current, receipt.id);
+    assert.notEqual(current.status.agent?.sessionId, "previous-chief");
+    const ongoing = relatedWork(aide.personal.store, current.spec.id).find(work => work.kind === "ongoing");
+    assert.ok(ongoing && "progress" in ongoing);
+    assert.equal(ongoing.progress, "Metrics submitted for review");
+    assert.equal(ongoing.question, "Has the owner signed off?");
+    const directory = await readNoteDirectory(resources, current.metadata.uid, "subject");
+    const decision = directory.items.find(note => note.name === "Metrics sign-off");
+    assert.ok(decision);
+    const signoff = await readNote(resources, decision.id);
+    const matter = await readOngoing(resources, current, ongoing.id);
     await upsertOngoing(resources, current, {
-      ongoingId: receipt.id, version: matter.metadata.resourceVersion, outcome: signoff.text,
+      ongoingId: matter.metadata.name, version: matter.metadata.resourceVersion, outcome: signoff.text,
     }, "close-from-signoff");
     return "Confirmed sign-off from the recorded decision";
-  } });
+  } }, { agentSession: "new" });
   const resources = aide.runtime.plugins.resourceClient("personal");
   const root = await aide.topics.ensure("me");
   const startedAt = new Date().toISOString();
-  const writer = await resources.patchStatus(root, { execution: { id: "seed", startedAt } });
-  const evidence = await upsertTopicNote(resources, writer, "seed", { text: "Owner signed off on the final metrics" }, "decision");
+  const writer = await resources.patchStatus(root, { agent: { harness: "chief", sessionId: "previous-chief" }, execution: { id: "seed", startedAt } });
+  await upsertTopicNote(resources, writer, "seed", { name: "Metrics sign-off", text: "Owner signed off on the final metrics" }, "decision");
   const receipt = await upsertOngoing(resources, writer, { title: "Metrics await sign-off",
-    question: "Has the owner signed off?", checkAt: startedAt }, "metrics");
+    progress: "Metrics submitted for review", question: "Has the owner signed off?", checkAt: startedAt }, "metrics");
   await resources.patch(aide.topics.resource("me")!, { type: "json", value: [{ op: "remove", path: "/status/execution" }] });
   await aide.start();
   const requests = () => aide.topics.inputStore.list().filter(input => input.spec.origin === "aide:followup");

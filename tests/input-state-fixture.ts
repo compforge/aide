@@ -18,3 +18,8 @@ export async function admit(resources: ResourceClient, inputId: string, executio
   if (input.status.assess?.completedAt || input.status.assess?.executionId) return input;
   return resources.patchStatus(input, { assess: { ...input.status.assess, executionId, startedAt: new Date().toISOString() } });
 }
+
+export async function continueTopicSession(name: string) {
+  if (name !== "topic_session_policy") throw new Error(`Unexpected Topic action: ${name}`);
+  return { state: "success", value: { startNew: false } };
+}

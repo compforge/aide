@@ -1,3 +1,4 @@
+import { TopicSessionPolicy, type AgentSessionMode } from "../plugins/personal/execution/session.ts";
 import { isMe } from "../plugins/personal/person/model.ts";
 import { addressRef, type AddressRef } from "../plugins/personal/address/model.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
@@ -51,6 +52,7 @@ import { PluginSupervisor } from "./host/plugin/runner/index.ts";
 import { IncomingSchema, type Incoming } from "./channel/message.ts";
 
 export interface AideOptions {
+  agentSession?: AgentSessionMode;
   connectorCatalog?: readonly import("@compforge/aide-connector").ConnectorDescription[];
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
   defaultHarnessConfig: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
@@ -160,6 +162,7 @@ export class Aide {
       if (saved.defaultAddress?.uid === from.uid) settings.change({ operation: "default", revision: saved.revision, address: to });
       else if (config?.defaultAddress?.uid === from.uid) throw new Error("Default Address changed on disk; refresh configuration before merging");
     });
+    const sessions = new TopicSessionPolicy(options.agentSession ?? "continue");
     let personal: Personal | undefined;
     this.runtime = new ApplicationRuntime(home, {
       cwd: options.cwd,
@@ -169,7 +172,12 @@ export class Aide {
         defaultHarness: this.defaultHarnessConfig.id, createAdapter: options.createAdapter },
       plugins: { maxTotalConcurrency: config?.reconcile?.maxTotalConcurrency, connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.topics.changed(change); this.notify(); },
-        actions: { "personal/reconcile_address": async (context, raw) => {
+        actions: { "personal/topic_session_policy": async (context, raw) => {
+          const ref = context.resourceRef;
+          if (ref?.kind !== "Topic" || !ref.uid || context.controllerName !== "agent") throw new Error("Session selection requires the owning Topic agent");
+          const { sessionId } = raw as { sessionId?: string };
+          return { startNew: sessions.startNew(ref.uid, sessionId) };
+        }, "personal/reconcile_address": async (context, raw) => {
           const { address } = raw as { address: AddressRef };
           if (context.resourceRef?.kind !== "Address" || context.resourceRef.uid !== address.uid) throw new Error("Address coordination requires its own resource context");
           return addressCoordinator.reconcile(address);

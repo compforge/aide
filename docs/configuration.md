@@ -4,6 +4,12 @@ Host 在启动时加载一份配置快照，验证后按职责装配 Connector�
 `config.yaml` 是 Aide 声明的事实来源。启动时完成模块校验后才恢复业务资源 和启动 Channel；连接和运行参数修改后重启服务；Web 保存默认通知地址可立即生效。
 新建、恢复和重建 Harness 都复用启动配置，运行期间修改 Aide 或 Pi 的 models/settings 文件不会改变它。
 
+## Agent Session
+
+`npm start` 默认以 `--agent-session=continue` 启动。Chief 和 Gate 接到 Input 时复用该 Topic 保存的 Session，没有绑定时创建。如果本次发布修改了 agent 指令或工具，可以单次运行 `npm start -- --agent-session=new`。每个 Topic 首次接活时创建并保存新的 Session，随后继续复用。仅重启 Personal Runner 也沿用这个决定。在这次运行中始终空闲的 Topic，下次以 `continue` 启动时仍可接续原 Session。systemd 常驻启动命令使用默认值。
+
+Input 的投递回执、Note 和 Work 的进展保存在 CRD。启动恢复先按旧回执核对中断的投递。新 Session 从当前 Input 和 CRD 取得业务背景，原 Session 可用于查证。此参数只作用于 Chief 和 Gate。
+
 ## 沟通渠道
 
 ```yaml

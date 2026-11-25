@@ -60,6 +60,9 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   let error = "Agent ended without confirming input completion";
   try {
     agent = await prepareAgent(context.resources, execution, current, target);
+    if (current.kind === "Topic" && current.status.agent?.sessionId !== agent.sessionId)
+      context.logger.info("Topic agent session bound", { attributes: { topicUid: current.metadata.uid, harness: target,
+        executionId: execution.executionId, previousSessionId: current.status.agent?.sessionId ?? null, sessionId: agent.sessionId! } });
     for (const input of current.kind === "Topic" && !batch ? inputs as Input[] : []) await changeDelivery(context.resources, input, execution.executionId, { agent });
     if (batch) {
       const admitted = await context.resources.get<BatchSpec, BatchStatus>(resourceRef(batch));
