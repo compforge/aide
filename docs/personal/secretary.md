@@ -20,7 +20,7 @@ Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为
 
 ## Note 维护
 
-Secretary 合并领域内的梳理需求，并在开放 Ongoing 到期或收到新关联材料时递交 followup。Chief 创建 Ongoing 时保存核实时间，缺省为 24 小时后，之后可以通过 upsert_work 调整。curate 结合普通 Note、已有 Work 和后续证据复盘该领域的认识与责任。followup 围绕指定 Ongoing 核实未决问题，必要时私下询问 Me。[Note 梳理](note.md#梳理与提炼)、[Ongoing 核实与收尾](ongoing.md#核实与收尾)
+Secretary 合并领域内的梳理需求，并在开放 Ongoing 到期或收到新关联材料时递交 followup。Chief 创建 Ongoing 时保存核实时间，缺省为 24 小时后，之后可以通过 upsert_work 调整。curate 结合普通 Note、已有 Work 和后续证据复盘该领域的认识与责任。followup 围绕指定 Ongoing 核实未决问题，必要时私下询问 Me。[Note 梳理](note.md#梳理与提炼)、[Ongoing 核实与收尾](work.md#核实与收尾)
 
 ### 摘要复核
 
@@ -36,7 +36,7 @@ Summary 请求投递时记录对象的轮转时间 `summaryReviewedAt`；正文�
 
 当前 Batch 仅用于 Deferred Input。Secretary 按 `topic.deferred.count` 与 `maxWaitSeconds` 判断是否归组，保留各成员的来源、原 attention 和权限依据；Batch 按 Normal 优先级交给 Chief。Immediate、Normal、内部维护及显式 handoff 保持独立 Input。
 
-成员归组与 Batch 就绪在同一事务中提交。`Input.status.batchId` 是成员关系的唯一记录，`batchAt` 记录归组时间；Batch 创建并完成归组后，后到材料留待下一批。成员兼容性、准备中断、容量不足与保留规则由 [Batch](batch.md) 定义。
+成员归组与 Batch 就绪在同一事务中提交。`Input.status.batchId` 是成员关系的唯一记录，`batchAt` 记录归组时间；Batch 创建并完成归组后，后到材料留待下一批。成员兼容性、准备中断、容量不足与保留规则由 [Batch](input.md#batch) 定义。
 
 ### 容量与维护请求
 

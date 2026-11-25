@@ -103,7 +103,7 @@ test("Topic Note counts follow direct live subjects after paging", async t => {
   const client = aide.runtime.plugins.resourceClient("personal");
   for (const [topic, count] of [[root, 25], [leaf, 2], [pinned, 1]] as const) {
     for (let i = 0; i < count; i++) await client.create(NOTE_TYPE, { name: `${topic.spec.id}-${i}`,
-      spec: { subject: resourceRef(topic), text: "Matter" }, status: { updatedAt: new Date().toISOString() } });
+      spec: { nature: "semantic", subject: resourceRef(topic), text: "Matter" }, status: { updatedAt: new Date().toISOString() } });
   }
   await patchSummary(client, root, { summary: "Long-lived understanding" });
   store.resources.requestDeletion(NOTE_TYPE, "root-0");

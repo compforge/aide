@@ -560,7 +560,7 @@ test(`ordinary Note creation and edits do not request review (idle review enable
   const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
   await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled } }, f.read().status);
   await f.resources.patchStatus(f.read(), { execution: { id: "write", startedAt: new Date().toISOString() } });
-  const note = await upsertTopicNote(f.resources, f.read(), "write", { text: "A recent matter" }, "one");
+  const note = await upsertTopicNote(f.resources, f.read(), "write", { nature: "semantic", text: "A recent matter" }, "one");
   await f.resources.patchStatus(f.read(), { execution: null });
   await reconcileNote(f.context, (await f.resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: note.noteId }))!);
   await f.run();
@@ -593,7 +593,7 @@ test("note pressure runs with idle review disabled, aggregates pending requests 
   }));
   await f.resources.patchStatus(f.read(), { execution: { id: "write", startedAt: new Date().toISOString() } });
   for (const [index, child] of children.entries()) {
-    for (let n = 0; n < 2; n++) await upsertTopicNote(f.resources, f.read(), "write", { subject: resourceRef(child), text: `matter-${index}-${n}` }, `${index}-${n}`);
+    for (let n = 0; n < 2; n++) await upsertTopicNote(f.resources, f.read(), "write", { nature: "semantic", subject: resourceRef(child), text: `matter-${index}-${n}` }, `${index}-${n}`);
     await refreshNotePressure(f.context, child);
   }
   await f.resources.patchStatus(f.read(), { execution: null });
@@ -605,7 +605,7 @@ test("note pressure runs with idle review disabled, aggregates pending requests 
   assert.equal(f.calls.length, 1, "acknowledged unchanged pressure does not cause repeated inference");
   const child = (await f.resources.get<TopicSpec, TopicStatus>(resourceRef(children[0]!)))!;
   await f.resources.patchStatus(f.read(), { execution: { id: "write-again", startedAt: new Date().toISOString() } });
-  await upsertTopicNote(f.resources, f.read(), "write-again", { subject: resourceRef(child), text: "new evidence" }, "new");
+  await upsertTopicNote(f.resources, f.read(), "write-again", { nature: "semantic", subject: resourceRef(child), text: "new evidence" }, "new");
   await refreshNotePressure(f.context, child);
   const refreshed = (await f.resources.get<TopicSpec, TopicStatus>(resourceRef(child)))!;
   await f.resources.patchStatus(refreshed, { notePressure: { ...refreshed.status.notePressure!, nextAt: new Date(0).toISOString() } });
@@ -622,7 +622,7 @@ test("business inputs run ahead of Note pressure and resolved pressure requests 
   await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false }, maxNotes: 1 }, f.read().status);
   await f.resources.patchStatus(f.read(), { execution: { id: "write", startedAt: new Date().toISOString() } });
   const references = [];
-  for (let i = 0; i < 2; i++) references.push(await upsertTopicNote(f.resources, f.read(), "write", { text: `n-${i}` }, String(i)));
+  for (let i = 0; i < 2; i++) references.push(await upsertTopicNote(f.resources, f.read(), "write", { nature: "semantic", text: `n-${i}` }, String(i)));
   await f.resources.patchStatus(f.read(), { execution: null });
   await f.input("business", InputAttention.Immediate);
   await f.run();
@@ -642,7 +642,7 @@ test("curation can revise child Notes and summaries without scheduling another r
   const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
   f.hooks.beforeAssess = async () => {
     await upsertTopicNote(f.resources, f.read(), f.read().status.execution!.id,
-      { subject: resourceRef(child), text: "Recent matter refined during review" }, "review-note");
+      { nature: "semantic", subject: resourceRef(child), text: "Recent matter refined during review" }, "review-note");
   };
   await f.due(); await f.run();
   assert.equal(f.calls.length, 1);

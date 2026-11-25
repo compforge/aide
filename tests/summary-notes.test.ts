@@ -98,7 +98,7 @@ test("capacity evicts a Topic with cleared understanding, then its unreferenced 
   assert.ok(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: note.metadata.name }));
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, highWatermark: 0.99, kinds: { "aide.dev/Note": { maxCount: 1 } } }));
   await collectResources(f.aide.topics.resources.storage);
-  await f.client.create(NOTE_TYPE, { name: "new-note", spec: { subject: resourceRef(arrival), people: [], text: "New evidence" }, status: { updatedAt: new Date().toISOString() } });
+  await f.client.create(NOTE_TYPE, { name: "new-note", spec: { nature: "semantic", subject: resourceRef(arrival), people: [], text: "New evidence" }, status: { updatedAt: new Date().toISOString() } });
   assert.equal(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: note.metadata.name }), undefined);
 });
 
@@ -109,7 +109,7 @@ test("an existing Note can be selected as summary and edited through the shared 
   const a = await f.aide.persons.observe({ provider: "test", scope: "summary", id: "a" });
   const b = await f.aide.persons.observe({ provider: "test", scope: "summary", id: "b" });
   const people = personRefs([personRef(a), personRef(b)]).toJSON();
-  const entry = await upsertNote(f.client, actor, { text: "Stable verified understanding", people: [people[0]] }, "existing");
+  const entry = await upsertNote(f.client, actor, { nature: "semantic", text: "Stable verified understanding", people: [people[0]] }, "existing");
   const note = await readNote(f.client, entry.noteId);
   const existing = (await f.client.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: note.id }))!;
   const spec = NoteSpecSchema.parse({ ...existing.spec, summaryOf: resourceRef(actor) });
@@ -156,12 +156,12 @@ test("Note capacity preserves every referenced summary and evicts an older ordin
   const f = await fixture(t);
   const summary = await writeSummary(f.client, f.topic, { text: "Long-lived knowledge" });
   const subject = resourceRef(summary);
-  await f.client.create(NOTE_TYPE, { name: "ordinary", spec: { subject, people: [], text: "Temporary detail" },
+  await f.client.create(NOTE_TYPE, { name: "ordinary", spec: { nature: "semantic", subject, people: [], text: "Temporary detail" },
     status: { updatedAt: "2000-01-01T00:00:00.000Z" } });
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, highWatermark: 0.99,
     kinds: { "aide.dev/Note": { maxCount: 2 } } }));
   await collectResources(f.aide.topics.resources.storage);
-  await f.client.create(NOTE_TYPE, { name: "arrival", spec: { subject, people: [], text: "New detail" },
+  await f.client.create(NOTE_TYPE, { name: "arrival", spec: { nature: "semantic", subject, people: [], text: "New detail" },
     status: { updatedAt: new Date().toISOString() } });
   assert.equal(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: "ordinary" }), undefined);
   assert.equal((await readSummary(f.client, summary))!.spec.text, "Long-lived knowledge");
@@ -177,7 +177,7 @@ test("terminating subjects protect summaries but a same-name replacement does no
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, highWatermark: 0.99,
     kinds: { "aide.dev/Note": { maxCount: 1 } } }));
   const other = await f.aide.topics.ensure("other");
-  const create = () => f.client.create(NOTE_TYPE, { name: "arrival", spec: { subject: resourceRef(other), people: [], text: "Fresh evidence" },
+  const create = () => f.client.create(NOTE_TYPE, { name: "arrival", spec: { nature: "semantic", subject: resourceRef(other), people: [], text: "Fresh evidence" },
     status: { updatedAt: new Date().toISOString() } });
   await assert.rejects(create());
   // Keep the terminating Topic under Controller ownership while GC evaluates its summary.
@@ -228,7 +228,7 @@ test("Note classification-only writes preserve body, associations and the summar
   const actor = await f.client.patchStatus(f.topic, { execution: { id: "classify", startedAt: new Date().toISOString() } });
   const person = await f.aide.persons.observe({ provider: "test", scope: "classification", id: "a" });
   const people = [personRef(person) as PersonRef];
-  const ordinary = await upsertNote(f.client, actor, { text: "Recent finding", people, sensitivity: "L1" }, "recent");
+  const ordinary = await upsertNote(f.client, actor, { nature: "semantic", text: "Recent finding", people, sensitivity: "L1" }, "recent");
   const classified = await upsertNote(f.client, actor, { noteId: ordinary.noteId, version: ordinary.version, sensitivity: "L2", visibility: "topic" }, "classification");
   const recent = await readNote(f.client, ordinary.noteId);
   assert.equal(recent.text, "Recent finding"); assert.deepEqual(recent.people, people);

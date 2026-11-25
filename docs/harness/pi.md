@@ -1,6 +1,6 @@
 # Pi Harness
 
-Pi 是通用 Harness，使用 `agents/pi/` 中的 Pi Agent 和 `PiAdapter` 提供模型对话、文件与 CLI 操作。它不依赖 Personal，也不预装 Work、问答或 Connector 业务工具。共同执行契约见 [Harness](README.md)，Personal 的专属 Agent 见 [Chief](../personal/chief.md)、[Task](../personal/task.md) 和 [Routine](../personal/routine.md)。
+Pi 是通用 Harness，使用 `agents/pi/` 中的 Pi Agent 和 `PiAdapter` 提供模型对话、文件与 CLI 操作。它不依赖 Personal，也不预装 Work、问答或 Connector 业务工具。共同执行契约见 [Harness](README.md)，Personal 的专属 Agent 见 [Chief](../personal/chief.md)、[Task](../personal/work.md#task) 和 [Routine](../personal/work.md#routine)。
 
 ## 会话与能力
 

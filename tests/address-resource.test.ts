@@ -78,7 +78,7 @@ test("Address summary uses a protected Note and recent address association prese
   assert.equal(view.summaryNote!.summaryOf!.kind, "Address");
   const summary = f.addresses.resources.get<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, view.summaryNote!.id);
   assert.equal(f.addresses.resources.storage.definition("personal", NOTE_TYPE).retention!.canEvict!(summary, { get: () => place } as never), false);
-  const note = await upsertNote(f.addresses.client, actor, { text: "今天等待验证结论", addresses: [ref], sensitivity: "L1", visibility: "any" }, "matter");
+  const note = await upsertNote(f.addresses.client, actor, { nature: "semantic", text: "今天等待验证结论", addresses: [ref], sensitivity: "L1", visibility: "any" }, "matter");
   const matter = f.addresses.resources.get<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, note.noteId);
   assert.equal(matter.spec.subject.uid, actor.metadata.uid);
   assert.equal((await f.addresses.recent(ref)).items[0]!.id, note.noteId);
@@ -88,7 +88,7 @@ test("Address summary uses a protected Note and recent address association prese
 test("Unmuted group checks all known people; late mute privately redirects the unsent Output", async t => {
   const f = await setup(t), place = f.addresses.observe(group, [personRef(f.a)]), ref = addressRef(place);
   f.addresses.setMuted(ref, false, true);
-  const note = await f.addresses.client.create(NOTE_TYPE, { name: "evidence", spec: { subject: resourceRef(f.topic), text: "公开进展", people: personRefs([personRef(f.a)]), addresses: addressRefs([]), sensitivity: "L1", visibility: "people" }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
+  const note = await f.addresses.client.create(NOTE_TYPE, { name: "evidence", spec: { nature: "semantic", subject: resourceRef(f.topic), text: "公开进展", people: personRefs([personRef(f.a)]), addresses: addressRefs([]), sensitivity: "L1", visibility: "people" }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
   const create = (id: string) => composeMail(f.store, "test", id, mailDraft(f.topic, { topicId: "test", text: "公开进展", target: group }, { notes: [{ uid: note.metadata.uid, version: noteVersion(note) }] }));
   create("one"); await f.checker.reconcile("one"); assert.equal(f.store.get("one")!.status.disclosure!.decision, "allowed");
   f.addresses.observe(group, [personRef(f.b)]);
@@ -224,7 +224,7 @@ test("Address Web API edits muted and summary independently and exposes known pa
   assert.throws(() => aide.addresses.page(cursorPage.continue), /expir|chang/i);
   const query = new URLSearchParams({ name: address.metadata.name, uid: address.metadata.uid });
   for (let i = 0; i < 21; i++) await aide.addresses.client.create(NOTE_TYPE, {
-    name: `address-note-${i}`, spec: { subject: addressRef(address), text: `事项 ${i}`, addresses: addressRefs([addressRef(address)]), people: personRefs([]) },
+    name: `address-note-${i}`, spec: { nature: "semantic", subject: addressRef(address), text: `事项 ${i}`, addresses: addressRefs([addressRef(address)]), people: personRefs([]) },
     status: { updatedAt: new Date().toISOString() },
   });
   const notes = await (await fetch(base + "/addresses/notes?" + query)).json(); assert.ok(notes.continue);

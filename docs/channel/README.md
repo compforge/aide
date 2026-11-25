@@ -1,6 +1,6 @@
 # Channel
 
-Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、提供地址与话题线索、提交输入并投递回复。当前支持 Web 和 Lark 两种 Channel；Web 内置，Lark 可以配置多个命名实例。它们接入同一套 Personal 业务，Chief 负责理解与判断，Task / Routine 负责持续工作。
+Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、提供地址与话题线索、提交输入并投递回复。当前支持 Web 和 Lark 两种 Channel；Web 内置，Lark 可以配置多个命名实例。两者接入同一套 Personal 业务。
 
 | Channel | 输入与会话划分 | 输出与交互 |
 | --- | --- | --- |
@@ -17,11 +17,9 @@ Channel 只负责接收、平台位置标准化和实际发送；它消费应用
 
 ## 输入、会话与回复
 
-Channel 提交用户消息时提供 source 地址、稳定 sessionId 与消息去重身份，不需要理解 Personal 的 Topic。Lark 使用应用与聊天身份，Web 使用所选 Topic 的话题标识。Channel 通过绑定 Definition 的入口提交消息，Core 保存 Input 并返回持久化回执；Personal 经 Route 决定归属。输入直接投影为输入卡片，Output 独立承载回复与通知；接收成功不代表模型已经回答或目标已经完成。
+Channel 提交消息正文、原始地址、去重身份及可用的话题线索。Lark 按应用和聊天提供稳定 topicKey，群内 thread 可独立定位。Web 可显式选择已有 Topic。Source 也可以携带 topicKey 与来源地址。Route 决定 Input 归属，Web 的 Topic 视图可以查看来自不同渠道的材料。[Topic 定位](../personal/topic.md#topiclocator-能力) · [Input](../personal/input.md)
 
-Personal 决定输入进入哪个 Topic、是否创建 Work。普通回答直接进入消息流，需要持续跟进时才操作 Task / Routine。同一话题的后续消息可以回答问题或补充已有工作。Web 的 Topic 列表是 Personal 的业务视图，可以查看 Lark 或 Source 会话。
-
-Source 是外部观察入口，可以提交带话题 sessionId 或没有话题线索的 Input，也可以携带观察所在的 source 地址。Route 分派后，Chief决定是否及向哪里沟通；Lark transport 使用 Reconciler 传入的实际目标，不从话题身份推导聊天目标。地址与收件处选择见 [Output](../personal/output.md)。
+收到消息后，界面可立即展示已保存的 Input。答复与通知通过独立的 Output 发送。Lark 使用 Output 投递时确定的实际目标；回复地址与主动通知的选路见 [Output](../personal/output.md)。
 
 ## 投递与进度
 

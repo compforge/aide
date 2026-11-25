@@ -1,3 +1,4 @@
+import { summaryName, type SummaryResource } from "./summary.ts";
 import { INPUT_TYPE } from "../input/model.ts";
 import type { InputSpec, InputStatus } from "../input/model.ts";
 import { isGateTopic } from "../topic/boundary.ts";
@@ -8,7 +9,8 @@ import { requireContentWriter } from "../context-write.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { NOTE_TYPE, WriterResourceSchema, NoteSpecSchema, NoteStatusSchema, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
 
-/** @spec Note is independent knowledge. summaryOf identifies the subject whose long-lived understanding it holds.
+/** @spec Chief may capture an unclassified draft; delegated Work and split parts declare their knowledge nature on creation.
+ * @spec Note is independent knowledge. summaryOf identifies the subject whose long-lived understanding it holds.
  * @case tests/notes.test.ts
  * @link docs/personal/note.md
  */
@@ -22,7 +24,7 @@ function validate(note: NoteResource, context: ResourceValidationContext) {
   if (note.metadata.deletionTimestamp) throw new Error("Note is being deleted");
   if (note.metadata.namespace !== "v1" || note.metadata.owner) throw new Error("Note requires the shared namespace and an independent lifecycle");
   const writer = note.status.writer;
-  const subject = context.get(note.spec.subject, note.spec.subject.uid);
+  const subject = context.get<unknown, SummaryResource["status"]>(note.spec.subject, note.spec.subject.uid);
   if (!subject || subject.metadata.deletionTimestamp || subject.metadata.name !== note.spec.subject.name || subject.metadata.namespace !== note.spec.subject.namespace) throw new Error("Note subject no longer exists");
   if (subject.kind === "Topic" && isGateTopic(subject as import("../topic/model.ts").TopicResource)) throw new Error("Gate keeps dialogue continuity, not domain Notes");
   if (note.spec.summaryOf && !note.status.retired) {
@@ -32,6 +34,7 @@ function validate(note: NoteResource, context: ResourceValidationContext) {
     if (summaries.some(n => n.metadata.uid !== note.metadata.uid)) throw new Error("Subject already has a summary Note");
   }
   if (writer) requireContentWriter(subject, writer, context);
+  return subject;
 }
 /** Scope-relative visibility must still describe the same audience after extraction. */
 function validateSplitPart(part: NoteResource, context: ResourceValidationContext) {
@@ -56,7 +59,19 @@ function validateSplitPart(part: NoteResource, context: ResourceValidationContex
 }
 export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
   type: NOTE_TYPE, indexVersion: 8, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
-  validator: { create: (note, context) => { if (note.status.curationRetry || note.status.curated || note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts"); validateAddresses(note, context); validate(note, context); validateSplitPart(note, context); }, update: (before, after, context) => {
+  validator: { create: (note, context) => {
+    const owner = validate(note, context);
+    const chiefDraft = note.status.writer?.resource.kind === "Topic" && !note.status.splitFrom && !!note.spec.text;
+    if (!note.spec.summaryOf && !note.spec.nature && !chiefDraft) {
+      // prepareSummary reserves the empty Note before publishing its summaryOf and owner revision together.
+      if (note.spec.text !== "" || note.metadata.name !== summaryName(owner))
+        throw new Error("Creating an ordinary Note requires nature (semantic or procedural)");
+    }
+    if (note.status.curationRetry || note.status.curated || note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts");
+    validateAddresses(note, context); validateSplitPart(note, context);
+  }, update: (before, after, context) => {
+    if (!after.spec.summaryOf && !after.spec.nature && (before.spec.nature || (!before.spec.text && after.spec.text)))
+      throw new Error("An ordinary Note must retain its nature");
     if (!equalResourceValue(before.status.splitFrom, after.status.splitFrom)) throw new Error("Split provenance is immutable");
     if (!equalResourceValue(before.status.curationRetry, after.status.curationRetry)) {
       const retry = after.status.curationRetry;

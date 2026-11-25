@@ -53,7 +53,7 @@ test("Notes keep optional UID-pinned people through updates, clearing, retention
   const update = (args: Record<string, unknown>, call: string) => upsertTopicNote(f.resources, read(), "chief", {
     version: args.noteId ? notes(f.store.resources, read().metadata.uid, "subject").find(n => n.id === args.noteId)?.version : undefined, text: "Discuss release", ...args,
   } as never, call);
-  const created = await update({}, "create");
+  const created = await update({ nature: "semantic" }, "create");
   assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject")[0]!.people, []);
   await update({ noteId: created.noteId, people: [one, two, one] }, "people");
   assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject")[0]!.people, expectedPeople, "Same text can gain people; UID deduplicates, names do not");
@@ -71,7 +71,7 @@ test("Notes keep optional UID-pinned people through updates, clearing, retention
   const historical = view.items.find(item => item.ref.uid === one.uid)!;
   assert.ok("unavailable" in historical && historical.unavailable);
   assert.doesNotMatch(JSON.stringify(view), /Replacement|private-profile-marker/);
-  const copied = await update({ people: [one] }, "copy-historical");
+  const copied = await update({ nature: "semantic", people: [one] }, "copy-historical");
   assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject").find(n => n.id === copied.noteId)!.people, [one]);
   await update({ noteId: copied.noteId, people: [] }, "clear-copy");
   await update({ noteId: created.noteId, people: [] }, "clear");

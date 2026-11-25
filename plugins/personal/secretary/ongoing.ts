@@ -11,7 +11,7 @@ import { maintenanceAgenda } from "./maintenance.ts";
 import { tryCreateMaintenanceInput } from "./input.ts";
 
 /** @spec One durable Input per Ongoing check plan. A competing pending Input leaves this check due.
- * @link docs/personal/ongoing.md
+ * @link docs/personal/work.md#ongoing
  */
 export async function prepareOngoingCheck(context: PluginContext, matter: OngoingResource, policy: TopicPolicy, now = Date.now()) {
   if (matter.metadata.deletionTimestamp) return;

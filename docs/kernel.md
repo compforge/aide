@@ -132,6 +132,6 @@ Weave 归并与记忆压缩可以精简内容，但必须保留重要信息的�
 
 ## 应用方式
 
-[Personal](personal/README.md) 将 Channel / Source 的内容保存为 Input，经 Route 归入 Topic，由 Chief 研判并按需交给 Task / Routine。Input.status 保存 route / assess / handle 痕迹；Output 独立记录表达与投递；Person 保存身份和认识。
+[Personal](personal/README.md) 将 Channel / Source 的内容保存为 Input，经 Route 归入 Topic，由 Chief 研判，按需创建或更新 [Work](personal/work.md)。Input.status 保存 route / assess / handle 痕迹；Output 独立记录表达与投递；Person 保存身份和认识。
 
 应用装配在 src/app.ts 完成。配置在启动时解析，详见 [配置](configuration.md)；运行目录、备份和诊断见 [部署](deployment.md)，真实依赖验收见 [E2E](e2e.md)。

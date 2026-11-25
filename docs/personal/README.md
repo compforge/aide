@@ -4,11 +4,11 @@ Personal 是 Aide 的内置个人助手插件。Me 与 Aide 单聊时，[Gate](g
 
 ## 从 Input 到认识与成果
 
-Aide 持续处理 Input，从中识别并推进三类 Work，形成并整理两类 Note。三类 Work 是 Task、Routine 和 Ongoing，两类 Note 按 nature 分为 semantic 和 procedural。
+外部发生了什么、涉及谁、发生在哪里，分别由 [Input](input.md)、[Person](person.md) 和 [Address](address.md) 记录。Aide 处理这些材料后，值得复用的事实与方法沉淀为 [Note](note.md)，还要继续推进的事项记为 [Work](work.md)，决定对外表达的内容记为 [Output](output.md)。一条输入可以带来多种结果，也可以读过即止。
 
-Input 保留当时收到的内容和来源，Route 为领域输入确定 Topic 归属，Secretary 按需将 Deferred 待办整理成批。当前领域 root 的 Chief 结合新材料、已有 Note 和相关工作，判断当下要办什么，以及哪些认识值得留给以后。
+[Topic](topic.md) 把相关材料和处理结果串在一起。同一个人或场合可以参与多个主题。外部来源可随 Input 提供稳定的 `topicKey`，Route 据此找到或建立 Topic。Aide 也可以为新事项创建主题，或把相关主题组织到同一个领域。领域 root 的 Chief 结合整个子树里的材料判断下一步。
 
-![从本轮研判到下轮研判的两条泳道。办理线上，Chief 可当轮办妥、委托 Agent 或自己跟进，按需对外沟通。认识线上，普通 Note 供下次按需查证，对象的 Summary Note 提供默认背景。](../assets/personal-flow.svg)
+![从本轮研判到下轮研判的两条泳道。办理线上，Chief 可当轮办妥、委托 Agent 或记录待跟进事项，按需对外沟通。认识线上，普通 Note 供下次按需查证，对象的 Summary Note 提供默认背景。](../assets/personal-flow.svg)
 
 ### 办理与沟通
 
@@ -19,19 +19,11 @@ Input 保留当时收到的内容和来源，Route 为领域输入确定 Topic �
 
 #### 后续处理的三种责任
 
-Chief 处理一条 Input 后仍要承接的责任统称 Work。先判断由谁推进，再选择种类。
-
-| Work | 谁推进 | 何时收尾 | 例子 |
-| --- | --- | --- | --- |
-| [Task](task.md) | Chief 将有限目标委托给 Task Agent | 目标达成即结束，可以跨多轮执行和等待 | 补齐并提交材料，以提交回执确认完成 |
-| [Routine](routine.md) | Chief 将循环职责委托给 Routine Agent | 当轮完成后等待下一次时间或事件触发 | 每周五汇总本周的审批结果 |
-| [Ongoing](ongoing.md) | 领域 Chief 留下事项，自己跟进 | 有下文就更新进展，有结论就收尾 | 材料已提交，周五核实这次审批结果 |
-
-Chief 用 `list_work` 查找已有责任。需要新增时，`upsert_work` 在当前 Topic 下创建对应资源并返回。Task 和 Routine 各自的 Reconcile 根据资源状态调度专门的 Agent。后来收到与已有 Work 相关的材料，Chief 可用 `append_input` 关联原始 Input。Task、Routine 由受托 Agent 办理，Ongoing 的新材料交回领域 Chief 研判。约定时间到了，Secretary 递交 `aide:followup`，仍由 Chief 查证、回应并决定是否收尾。需要沟通时，Chief 或受托 Agent 创建 Output。见[输出](output.md)。
+以审批为例，补齐材料并提交是 Task，每周汇总审批是 Routine，持续跟进这一次审批直至有结论是 Ongoing。Chief 先查现有工作，再决定追加材料或创建 Work。三者的查询工具、执行者和收尾条件见 [Work](work.md)。
 
 ### 认识与沉淀
 
-Chief 在处理 Input 时按需留下普通 Note，记录对具体事项的初步认识、依据和待核实之处。后续材料可以修订同一篇 Note。事后复盘也会重新核对 Work；例如 Note 同时记录了已知事实和待兑现的承诺，Chief 可以保留事实，把承诺交给已有 Work 或明确由谁继续办理。处理 `aide:curate` 时，Chief 对照来源和相关 Note 核实事实、归类、合并重复内容，并复核披露范围。整理过的普通 Note 可以就是这件事的完整记录。具体生命周期见[梳理与提炼](note.md#梳理与提炼)，分类与投递契约见[披露边界](disclosure.md)。
+Chief 优先处理 Input，遇到值得留存的事实或方法时可顺手记为普通 Note 草稿，保留证据、适用范围与不确定性。拿不准 nature 时留待 curate 核对归类。需要持续跟进的承诺由 Work 承接。事后复盘时，Chief 对照来源和已有 Work 检查历史 Note 中的承诺是否仍然有效，再按需补齐责任。不同知识可以拆分，重复内容可以合并，披露范围随证据复核。具体契约见[梳理与提炼](note.md#梳理与提炼)和[披露边界](disclosure.md)。
 
 #### 有界认识与近期依据
 
@@ -41,63 +33,34 @@ Chief 空闲时，Secretary 安排 `aide:summary` 复核一个 Topic、Person �
 
 ### 跟进未完结的事项
 
-`aide:followup` 把办理进展带回对事情的认识。收到「材料已提交，预计周五有答复」时，Chief 可以创建 Ongoing 并安排周五核实。到时先查新 Input 和相关 Work 的结果。有结论就把结果和依据记回同一 Ongoing 并收尾，审批仍在进行就按进展安排下一次核实。缺少影响判断的事实时，Chief 私下问 Me，答复作为新 Input 回到同一事项。
-
-即使连着几个周五都要查询，这些核实仍属于同一次审批。审批一旦有了结论，这项跟进就结束。
+收到「材料已提交，预计周五有答复」时，Chief 可创建 Ongoing。Secretary 到期递交提醒，领域 Chief 查证后更新同一事项。后续可以多次核实，直到有明确结论。[核实与收尾](work.md#核实与收尾)
 
 ## 主动性与上下文
 
-Aide 的主动性围绕一个动作展开：把发生的事放入合适的上下文（place it in context），结合那里已有的关注、委托、历史和进展，决定推进、更新、沟通、等待或忽略。归位让一次新变化接上此前的工作。
-
-| 上下文 | 承载什么 | 协调与判断的职责 |
-| --- | --- | --- |
-| Topic | 一个话题的交流、近期关注与相关委托 | 理解新输入或定时回顾，直接处理简单事情，将持续工作交给 Work |
-| Task | 有限目标、完成条件、相关事实、执行历史与当前阻塞 | 持续推进目标直至完成 |
-| Routine | 持续职责、历史基线与当前轮次的目标和进展 | 推进当前轮次直至完成，再等待下一轮触发 |
-
-归位可以涉及零个、一个或多个上下文，也可以止于 Topic。Input 保留原始事实与来源；关联上下文时，保存引用或将相关事实、用户决定承接到对应资源。需要独立办理时优先关联已有 Work，再按需要创建 Task / Routine。目标与进展由这些资源持有，Harness 的会话和记忆帮助理解它们。
-
-例如 executor 的 Pod 发生变化，Route 先把输入归入关注该服务的话题，Chief 再判断后续处理。若话题下已有“跟进 OOM 修复”的 Task，就将变化作为新证据交给它继续核实；若属于稳定性巡检，则进入 Routine 当前轮次的观察；只有近期关注时，Chief 可以核实后直接提醒。没有改变判断的新信息可以静默处理。
+同一条 Pod 重启通知可能值得不同处理。Route 先把它归入对应服务的 Topic。若已有排查 OOM 的 Task，Chief 将这条 Input 作为新证据追加给它；若只是已知的例行重启，读过即可。原始 Input 保留来源，Work 保存推进目标所需的材料与进展。
 
 ## 对象与主流程
 
-Weave 作用于 Topic 之间的关系：把值得共同理解的主题组织到新父 Topic 下，使后续输入由共同 root 的 Chief 综合处理。Input、Task、Routine 的当前归属由 status.topic 保存；Chief 可在树内调整，实际处理位置随主题树解析到当前 root；主题组织、人物身份、通信目的地和授权分别表达各自的事实。
-
-| 对象 | 承担的职责 | 详细设计 |
-| --- | --- | --- |
-| Input | 收到的内容、来源证据与处理痕迹 | [输入](input.md) |
-| Secretary | 确定性整理待办，准备业务批次与内部维护请求 | [秘书](secretary.md) |
-| Batch | Secretary 安排的一组待办及其接纳、完成生命周期 | [批次](batch.md) |
-| Note | 近期事项认识与长期稳定认识的统一载体，以稳定 ID 承接后续变化 | [认识笔记](note.md) |
-| Weave | 组织相关主题，促进跨来源知识融合，收敛独立处理上下文 | [Weave](weave.md)、[主题树](topic.md) |
-| Route | 为输入选择一个话题，无合适归属时使用 Default | [路由](route.md) |
-| Topic / Chief | Topic 保存长期认识和主题组织关系，Chief 在 root 综合研判子树输入，直接处理或委托工作 | [主题](topic.md)、[Chief](chief.md) |
-| Task / Routine | 有限目标与持续职责的独立生命周期 | [Task](task.md)、[Routine](routine.md) |
-| Ongoing | 同一未决事项的进展、下次核实和收尾依据 | [事项跟进](ongoing.md) |
-| Person | 人物身份、可选 Me 标记和持续积累的认识 | [人物](person.md) |
-| Address | 沟通场合、已知参与者、场合认识与投递目的地 | [场合](address.md) |
-| Output | 已决定表达的内容、对象、地址与投递状态 | [输出](output.md) |
-
-Route 的确定性规则直接分派，其余交给持续 Route Agent。各 Agent 通过工具明确确认业务进展，通过 say 创建 Output，投递器负责发送和回执。
-
-Personal 采用 [工具驱动与持续接纳](../harness/README.md#agent-的使用方式与持续职责) 的 Agent 使用方式：Chief 服务于 root Topic 的综合理解与研判，Task Agent 服务于有限目标，Routine Agent 服务于持续职责。Reconcile 负责确定性协调，Agent 负责非确定性判断；新动向通过 followUp / steer 加入运行中的会话，运行时记录输入投递，Agent 通过 `report_work` 和 say 记录办理进展与沟通。业务完成以这些回执为准，最终文本用于内部执行摘要。
+| 流程 | 负责的角色与对象 |
+| --- | --- |
+| 接收与归位 | [Route](route.md) 确定 Input 的 Topic。[Secretary](secretary.md) 将适合一起处理的 Deferred Input 组成 [Batch](input.md#batch)。 |
+| 处理与沟通 | [Gate](gate.md) 承接 Me 的跨领域请求。[Chief](chief.md) 处理领域输入，按需沟通、安排 Work 或留下 Note 草稿。 |
+| 主题整理 | [Weave](weave.md) 组织相关领域。[Topic](topic.md) 保存父子关系，每个领域 root 的 Chief 处理其子树。 |
 
 ## 角色与协作
 
-Aide 是一个多角色并行系统。Input 经多个角色转换、加工和处理，贡献到 Output 或 Note 中；这些贡献可以是内容的一部分，并不要求一条 Input 对应一个产物。
-
-角色的本质是 Reconciler，通过资源事实协作。Agent 为角色提供智能化执行能力，对外属于 Reconciler 的内部细节。[Secretary](secretary.md) 确定性地准备输入，Chief Reconciler 借助 Agent 完成判断并提交结果。Chief 写入 Input／Batch 的终态结果后，该项处理完成；没有写成终态的条目由后续 Chief 重新处理。后续周期任务新建 Input，Batch 成员同步属于结果投影。
+各角色通过持久资源协作。运行时确认单条 Input 或 Batch 进入 Chief 上下文后保存投递回执。Task 和 Routine 的受托 Agent 通过 `report_work` 确认实际办理的材料。需要对外沟通时，`say` 创建 Output，投递器保存发送结果。[输入回执](input.md#路由投递与办理) · [执行机制](../harness/README.md#agent-的使用方式与持续职责)
 
 ## 资源状态与组件协作
 
-各组件围绕持久资源协作，将负责环节的处理时间、去向、结论及异常写入状态。Input 的 route、assess、handle 分别记录路由、研判和办理；详细执行轨迹、工作目标与进展、输出正文分别由执行记录、Work 和 Output 承载。每个对象的字段、版本、维护者与生命周期在其专属文档中展开；通用并发、Conditions 和版本演进见 [Resource](../plugin/resource.md)。
+各组件围绕持久资源协作，将负责环节的处理时间、去向、结论及异常写入状态。Input 的 route、assess、handle 分别记录路由、投递和办理；详细执行轨迹、工作目标与进展、输出正文分别由执行记录、Work 和 Output 承载。每个对象的字段、版本、维护者与生命周期在其专属文档中展开；通用并发、Conditions 和版本演进见 [Resource](../plugin/resource.md)。
 
-Input 保存原始事实，Task 承担有限目标，Routine 承担持续职责，Topic 保存主题认识和组织关系。Route、Chief、Weave 围绕对象工作；原生执行结束、Input 研判完成、目标达成和 Output 送达分别记录。
+Ongoing 的主题直接记在 `spec.topic`。其它资源共享的字段如下。
 
 | 共享片段 | 适用对象与边界 |
 | --- | --- |
 | status.topic | Input、Task、Routine 的唯一当前 Topic UID 引用；Topic 使用 spec.parentRef 表达父子关系 |
-| summary / Note | 各资源的长期认识与独立事项认识；recent 为查询视图，Input 的解释留在研判回执 |
+| summary / Note | 对象的长期认识与独立的事实、方法；recent 为查询视图 |
 | agent / execution | Topic、Task、Routine、Route、Weave 的原生会话与执行；Input 只在处理回执中引用执行 |
 | organization | Input、Task、Routine、Topic 最近一次组织调整的操作者、原因、时间和前后关系 |
 | conditions | Input、Task、Routine、Topic 按各自业务语义声明条件；不强求同一组状态判断 |

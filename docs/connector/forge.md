@@ -61,7 +61,7 @@ plugins:
           author: your-github-login
 ```
 
-GitHub 使用 GITHUB_TOKEN / GH_TOKEN，GitLab 使用 GITLAB_TOKEN；也可在 Connector 配置 token。
+配置 key 是 Connector 名称，config.host 是访问地址，config.forge 可覆盖业务身份。GitHub 的 GITHUB_TOKEN / GH_TOKEN 和 GitLab 的 GITLAB_TOKEN 优先于 config.token。启用的 Forge 缺少凭证时会在创建时报错。
 凭证决定可访问范围，author 显式决定 PR 作者。
 `connectors.<名称>.config.me.username` 显式标记本人账号；GitHub、GitLab 及提供相同公开 metadata 的 Forge Connector 都可使用。
 Host 将其映射为 `{ provider, scope: forge, id: username }`，与 Web、Lark、Meego 的本人身份汇总到同一个 Person。

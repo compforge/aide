@@ -92,7 +92,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
     const current = f.refresh(a);
     await upsertTopicNote(f.resources, current, "old-chief", { summaryOf: resourceRef(current), version: contentVersion(current), text: "Late finding" }, "summary", 4000, "aide:summary");
     const afterSummary = f.refresh(a);
-    await upsertTopicNote(f.resources, afterSummary, "old-chief", { version: afterSummary.metadata.resourceVersion, text: "Late progress from the draining Chief" }, "late-note");
+    await upsertTopicNote(f.resources, afterSummary, "old-chief", { nature: "semantic", version: afterSummary.metadata.resourceVersion, text: "Late progress from the draining Chief" }, "late-note");
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
   } } };
   await runInput(f.context, execution, f.refresh(a), "chief", "Review first", "first");

@@ -45,7 +45,7 @@ async function setup(t: TestContext) {
   const checker = new OutputDisclosure(store, ports, pino({ level: "silent" }));
   store.check = id => checker.reconcile(id);
   async function note(sensitivity: Sensitivity = "L1", visibility: Visibility = "any", people: PersonRef[] = []) {
-    return await client.create(NOTE_TYPE, { name: `n-${store.resources.list(NOTE_TYPE).length}`, spec: { subject: resourceRef(topic), text: "A verified fact", sensitivity, visibility, people: personRefs(people) }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
+    return await client.create(NOTE_TYPE, { name: `n-${store.resources.list(NOTE_TYPE).length}`, spec: { nature: "semantic", subject: resourceRef(topic), text: "A verified fact", sensitivity, visibility, people: personRefs(people) }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
   }
   function output(id: string, n?: NoteResource, target = larkPersonAddress("app", "ou_c")) {
     allowAddress(home, target);
@@ -219,7 +219,7 @@ test("Output policy combines current classifications and people across the cited
 /** @case A typed classification can be stored even when its current subject cannot yield a disclosure audience. */
 test("Person-subject topic visibility falls back to Me during disclosure", async t => {
   const f = await setup(t);
-  const note = await f.client.create(NOTE_TYPE, { name: "person-note", spec: { subject: personRef(f.other), text: "Profile fact", people: personRefs([]), sensitivity: "L1", visibility: "topic" }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
+  const note = await f.client.create(NOTE_TYPE, { name: "person-note", spec: { nature: "semantic", subject: personRef(f.other), text: "Profile fact", people: personRefs([]), sensitivity: "L1", visibility: "topic" }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
   f.output("person-scope", note); await f.checker.reconcile("person-scope");
   assert.equal(f.store.get("person-scope")!.status.disclosure!.decision, "denied");
   assert.deepEqual(f.store.get("person-scope")!.status.delivery!.target, webAddress("topic"));

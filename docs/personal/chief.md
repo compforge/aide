@@ -16,11 +16,11 @@ Chief 有两个研判时机。**业务 Input 受理**从刚收到的消息、观
 |---|---|
 | 有值得保留的事实或方法 | 用 `upsert_note` 记录或修订普通 Note |
 | 有明确的一次性交付或循环职责 | 查已有 Task / Routine；已有委托用 `append_input` 补材料、调整要求或暂停，新委托用 `upsert_work` 创建 |
-| Chief 自己要等结果、核实或收尾 | 用 `upsert_work` 创建 Ongoing；已有事项按 `workId` 和 `version` 更新进展、核实时间或结论 |
+| 同一事项预计还有下文，需要持续核实进展 | 用 `upsert_work` 创建 Ongoing；已有事项按 `workId` 和 `version` 更新进展、核实时间或结论 |
 
 同一件事可以同时留下 Note 和 Work。例如，Note 记载某项交接已经发生，Ongoing 负责核实对方是否收到。复盘发现一次性安排演变为固定职责时，先确认新的 Routine 已接手，再根据原委托的剩余目标决定继续、暂停或收尾。
 
-领域 Chief 用 `upsert_work` 声明当轮之后的责任。资源的 Topic 归属确定负责的 Chief。Task 和 Routine 的 Reconcile 分别调度对应 Agent。Ongoing 留在当前 Chief，`aide:followup` 只为它安排一次新的研判。创建、发现与三种责任的结束条件见[办理与沟通](README.md#后续处理的三种责任)。
+领域 Chief 用 `upsert_work` 声明当轮之后的责任。资源的 Topic 归属确定负责的 Chief。Task 和 Routine 的 Reconcile 分别调度对应 Agent。Ongoing 持续记录同一事项的进展，当前由 Secretary 通过 `aide:followup` 请领域 Chief 核实。创建、发现与三种责任的结束条件见 [Work](work.md)。
 
 ## Reconciler
 
@@ -30,11 +30,11 @@ Chief 从当前 root 的已准备待办中选择独立 Input 或 Batch；一个 
 
 Chief 的接收 Reconcile 先按祖先指纹分批刷新直属待办的负责人缓存、补齐缺失分派，再分别查询独立 Input 的负责人索引和 Batch 的就绪索引，具名 agent Reconcile 驱动 root Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 由 Secretary 聚合提级后按 Normal 激活；内部维护不消费业务回执。
 
-Topic Reconcile 先按 executionId 接纳本次 Input 或 Batch，再交给 Pi。投递确认和恢复见 [Input](input.md#归属与-chief-通知)。
+启动 Chief 时可以一次接纳已经排队、工具范围兼容的业务 Input，Immediate 优先，保留逐条投递回执。直接处理已有积压，无需等待新材料凑批。Secretary 对 Deferred 的组批窗口另见 [Batch](input.md#batch)。Topic Reconcile 先按 executionId 接纳本次 Input 或 Batch，再交给 Pi。投递确认和恢复见 [Input](input.md#归属与-chief-通知)。
 
 明确拒绝 steer / followUp 时恢复待通知状态。status.agent 保存 harness 和原生 sessionId，恢复由 SDK 承担。旧 Chief 自然结束后再释放成为子节点的原生句柄，不修改历史。
 
-root 按 Immediate → 已准备的 Deferred Batch → Normal → aide:organize → aide:followup → aide:curate → aide:summary 选择。Secretary 可在业务执行期间准备维护 Input；维护请求保持独立。Deferred 组批策略见 [Secretary](secretary.md#deferred-归组)，成员及准备契约见 [Batch](batch.md)。
+root 按 Immediate → 已准备的 Deferred Batch → Normal → aide:organize → aide:followup → aide:curate → aide:summary 选择。Secretary 可在业务执行期间准备维护 Input；维护请求保持独立。Deferred 组批策略见 [Secretary](secretary.md#deferred-归组)，成员及准备契约见 [Batch](input.md#batch)。
 
 维护只接纳本轮内部 Input，不消费业务回执。Immediate 可在维护期间 steer 同一 Chief，下一模型轮次切换工具；其它准备好的待办通过 followUp 排队，在实际取出时切换任务范围。工具与共享 session 的取舍见 [按 Input 选择工具](#按-input-选择工具)。运行中的 Batch 使用一个 deliveryId、一个原生消息和自身的接纳回执；成员通过 batchId 查询执行事实。
 
@@ -44,7 +44,7 @@ root 按 Immediate → 已准备的 Deferred Batch → Normal → aide:organize 
 
 材料进入 Chief 上下文后，运行时原子提交投递回执、Chief 工作量和维护调度水位。每个 Input 或 Batch 计一次。成员投影和重复通知不重复计数。见 [Secretary](secretary.md#工作量与时间窗口)。
 
-Chief 不为 Secretary 增加结果确认阶段。Batch 的终态由 Input Reconcile 投影到成员；Work 办理和 Output 投递继续遵循各自的完成契约。失败恢复见 [Input](input.md#归属与-chief-通知) 和 [Batch](batch.md)。
+Chief 不为 Secretary 增加结果确认阶段。Batch 的终态由 Input Reconcile 投影到成员；Work 办理和 Output 投递继续遵循各自的完成契约。失败恢复见 [Input](input.md#归属与-chief-通知) 和 [Batch](input.md#batch)。
 
 ### 会话释放
 
@@ -100,14 +100,14 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 
 Chief 注册以下业务工具，并按上述 Input 范围向每次模型请求暴露：
 
-- Work 共用创建、发现与读取入口。交办、请求和删除受托工作见 [输入交接](input.md#投递与办理)、[Task](task.md) 与 [Routine](routine.md)。Chief 自己核实进展和收尾的契约见 [Ongoing](ongoing.md)。
+- Work 共用创建、发现与读取入口。交办、请求和删除受托工作见 [输入交接](input.md#投递与办理)、[Task](work.md#task) 与 [Routine](work.md#routine)。持续跟进事项的进展与收尾契约见 [Ongoing](work.md#ongoing)。
 - read_input 按页读取会话关联的 Input 原文与证据，补足大输入的预览。
 - say 产生独立 Output；答复是新的 Input，不挂起 Harness 等待。
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
 - 固定成员组成的 Batch 投递一次，可以按成员身份交办 Work。
 - Chief 可以静默处理观察，无需为没有业务动作的 Input 生成文字。
 - list_notes 查询 recent 之外仍保留的具体事项；move_note 在责任树内调整事项归属，保留内容与年龄；超出数量或篇幅软预算时使用 upsert_note 整合信息，用 split_note 原子拆出新篇，合并到已有目标时确认保存后用 prune_note 削减来源，或用 retire_note 退役无独立价值的整篇 Note。
-- Chief 通过 upsert_note 记录近期事项。维护 Input 可以用同一工具修订摘要，只有认识或职责范围变化时才需要写入。
+- Chief 通过 upsert_note 保存事实性知识或可复用的方法。维护 Input 可以用同一工具修订摘要，只有认识或职责范围变化时才需要写入。
 
 提示词表达判断策略，工具边界保证持久化与会话范围。say 提问只产生 Output；用户是否回答不阻塞其它输入，已有 Work 的 waiting 状态表达具体工作的等待。
 
@@ -145,12 +145,12 @@ assistant / tool：结合新进展回答或交接，避免重复创建工作
 
 ### 上下文与记忆
 
-root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子节点没有独立 Chief，局部 summary 仍由当前 root Chief 维护。Input 的投递回执标记材料何时进入 Chief 上下文，summary 仅在长期认识变化时修订；近期事项按同一事项维护 Note。静默处理一条 Input 不要求修订认识。
+root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子节点没有独立 Chief，局部 summary 仍由当前 root Chief 维护。Input 的投递回执标记材料何时进入 Chief 上下文，summary 仅在长期认识变化时修订；持续跟进由 Ongoing 承接。静默处理一条 Input 不要求修订认识。
 
 原生会话通过 Harness 支持的方式初始化、持久化与恢复。新父 Topic 的 Chief 读取子主题认识，不拼接、改写子 Chief 的原生会话文件，不重放已完成 Input。模型请求前的业务背景使用 [Background](../harness/pi.md#当前业务背景) 通道；完整的知识维护和回收约束见 [Topic](topic.md#主题认识与汇总)。
 
 Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-hermes-memory](https://github.com/chandra447/pi-hermes-memory)，由 Pi 的扩展加载器显式加载。
-事项认识由 Note 承载，主题、人物、场合和工作的长期认识由各自 summary 承载，Topic tree 保存主题组织关系；Hermes 提供通用记忆与检索。职责与沉淀主线见 [Personal](README.md#从-input-到认识与成果)。
+事实与方法由 Note 承载，主题、人物、场合和工作的长期认识由各自 summary 承载，Topic tree 保存主题组织关系；Hermes 提供通用记忆与检索。职责与沉淀主线见 [Personal](README.md#从-input-到认识与成果)。
 
 Chief 处理 `aide:summary` 时通读所选对象的摘要及相关证据。Person 与 Address 的认识可以来自多个领域；修订时保留其他领域仍然有效的内容和用户修正，遇到版本冲突重新读取。各对象的内容职责见 [作为 summary 的 Note](note.md#作为-summary-的-note)。
 
@@ -208,7 +208,7 @@ PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_star
 
 ### 近期相关人物
 
-近期事项保存为独立 Note CRD，`spec.subject` 关联 Topic / Task / Routine，`spec.people` 关联人物。省略 people 保留已有引用，[] 清空；历史人物可悬空。完整契约见 [Note](note.md)。
+事实与方法保存为独立 Note CRD，`spec.subject` 关联 Topic / Task / Routine，`spec.people` 关联人物。省略 people 保留已有引用，[] 清空；历史人物可悬空。完整契约见 [Note](note.md)。
 
 上下文里的 persons 从当前 Topic 自身 Note 查询窗口中按 UID 去重，最多预览 8 人，返回 source=recentNotes、Note 数和省略人数；不回查 Input 或递归汇总子树。父 Topic 不复制子 Note。人物删除或重建时显示 unavailable，不展开私密资料。
 

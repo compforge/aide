@@ -41,25 +41,7 @@ Source 先持久化观察计划和 Input，再推进水位。输入身份应在�
 
 ## Forge 配置
 
-```yaml
-connectors:
-  github.com:
-    kind: forge
-    version: v1
-    config:
-      provider: github
-      host: github.com
-  gitlab.example.com:
-    kind: forge
-    version: v1
-    config:
-      provider: gitlab
-      host: gitlab.example.com
-```
-
-配置 key 是 Connector name，config.host 是访问地址，config.forge 可覆盖业务身份。GITHUB_TOKEN / GH_TOKEN、GITLAB_TOKEN 优先于 config.token；启用但缺失凭证的 Forge 在创建时明确报错。统一 HTTP 客户端处理协议、超时与错误，Source 策略不进入 Connector 的默认查询。
-
-PR 作者范围由 `plugins.personal.sources.pullRequests[].author` 显式指定，凭证不决定作者。配置示例与观察契约见 [Forge](forge.md)。
+选择 Forge 实例、身份、凭证和 PR 作者范围时，见 [Forge 配置与观察范围](forge.md#配置与观察范围)。
 
 ## 验证
 

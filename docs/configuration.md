@@ -249,7 +249,7 @@ plugins:
       idleRetentionMs: 86400000 # 释放后继续保留 Task 24 小时
 ```
 
-两项均为毫秒整数，范围 1000–2147483647。新分派清除两阶段计时；待处理 Input、等待用户、未来唤醒和待核对状态阻止 Task 回收。释放句柄保留 sessionId，回收 Task 通过 deletionTimestamp 与 finalize 完成，详见 [Task Agent](personal/task.md)。
+两项均为毫秒整数，范围 1000–2147483647。新分派清除两阶段计时；待处理 Input、等待用户、未来唤醒和待核对状态阻止 Task 回收。释放句柄保留 sessionId，回收 Task 通过 deletionTimestamp 与 finalize 完成，详见 [Task Agent](personal/work.md#task)。
 
 ## Routine 静默策略
 
@@ -263,7 +263,7 @@ plugins:
       agentIdleMs: 300000     # 执行结束、无下一条可执行输入后，静默 5 分钟释放句柄
 ```
 
-agentIdleMs 范围为 1000–2147483647 毫秒。Routine 保留 sessionId 和职责资源，之后由 cron、事件或 Chief Input 唤醒；没有静默回收阶段，显式删除才 finalize。见 [Routine Agent](personal/routine.md)。
+agentIdleMs 范围为 1000–2147483647 毫秒。Routine 保留 sessionId 和职责资源，之后由 cron、事件或 Chief Input 唤醒；没有静默回收阶段，显式删除才 finalize。见 [Routine Agent](personal/work.md#routine)。
 
 ## 模块归属
 
@@ -284,9 +284,10 @@ plugins:
         maxWaitSeconds: 600
       trigger:
         intervalSeconds: 60   # 固定唤醒 Reconcile；业务事件也可以唤醒
-      capacityCooldownSeconds: 60
+      capacityCooldownSeconds: 60  # 容量维护轮次的最小间隔
       maxUnfiledInput: 40
-      maxChildren: 8  # 容量维护轮次的最小间隔
+      maxChildren: 8
+      maxWork: 8
       review:
         completedInputs: 10  # Chief 完成 Input／Batch 数量阈值，包含维护 Input
         idleSeconds: 900      # 未回顾活动最长等待及静默检查基础间隔
@@ -399,26 +400,10 @@ harnesses:
 
 ## Topic 整理与 root 软目标
 
-```yaml
-plugins:
-  personal:
-    topic:
-      maxInput: 40           # 保留，暂不参与策略
-      maxUnfiledInput: 40
-      capacityCooldownSeconds: 60
-      maxWork: 8
-      maxChildren: 8
-    weave:
-      maxRoots: 20
-      intervalMs: 300000
-      reviewIntervalMs: 3600000
-      batchSize: 12
-```
+[Topic 阈值](#topic-定时协调与回顾)只统计直属材料。maxUnfiledInput 包含已研判、无 topicKey 的业务 Input。maxInput 保留配置，当前策略使用 maxUnfiledInput。超限后 Secretary 通过 `aide:organize` 请求空闲 Chief 整理，同种请求去重并按 capacityCooldownSeconds 冷却。`aide:summary` 每 15 分钟检查一次，忙时跳过。[容量与维护请求](personal/secretary.md#容量与维护请求)
 
-Topic 阈值按直接归属判断，由空闲 Chief 决定如何整理；Weave 的 maxRoots 统计普通 root，Default 单独兜底，允许无合理归并方案时超标。超过目标时，未变化但已检查的 root 在 reviewIntervalMs 后重查；独立子树有 15 分钟观察期。来源 topicKey 仍保留确定性定位语义。长期设计见 [Topic](personal/topic.md)。
+[Weave 的 maxRoots](#weave-主题整理)统计 Default 以外的领域 root。独立子树有 15 分钟观察期；没有合适归组时可以超过软目标。已有来源 topicKey 继续定位到原来的主题。[Topic](personal/topic.md)
 
-Topic 容量阈值：maxUnfiledInput 默认 40，统计直属无 topicKey 的业务 Input（包含已研判），maxChildren 默认 8，maxWork 保持默认 8。maxInput 保留配置但暂不参与策略。每个 Topic 超限时通过 aide:organize Input 请求 root；每种请求去重，完成后按 capacityCooldownSeconds 冷却。静默回顾使用 aide:curate，独立遵循 review.backoff。aide:summary 每 15 分钟检查一次，忙时跳过，独立于 review.backoff。详见 [Topic 内置请求](personal/secretary.md#容量与维护请求)。
-
-### Gate
+## Gate
 
 `harnesses.gate.model` 独立选择 Gate 模型，缺省复用 Chief 模型；`harnesses.gate.packages` 配置独立技能包，使用 `aide harness sync gate` 同步。Gate 使用专用会话，不与 Chief 共用上下文。职责及工具边界见 [Gate](personal/gate.md)。

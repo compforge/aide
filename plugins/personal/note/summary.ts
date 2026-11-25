@@ -10,7 +10,7 @@ import type { ResourceContext } from "../context.ts";
 
 export interface SummaryUpdate extends MaterialDisclosure { name?: string; pruned?: NoteStatus["pruned"]; nature?: NoteSpec["nature"]; maxChars?: number; text?: string; people?: Iterable<PersonRef>; addresses?: Iterable<AddressRef> }
 export type SummaryResource = Resource<unknown, ResourceContext>;
-const summaryName = (resource: SummaryResource) => `summary-${resource.metadata.uid}${resource.status.lastRetiredSummaryUid ? "-" + resource.status.lastRetiredSummaryUid : ""}`;
+export const summaryName = (resource: SummaryResource) => `summary-${resource.metadata.uid}${resource.status.lastRetiredSummaryUid ? "-" + resource.status.lastRetiredSummaryUid : ""}`;
 type Reader = Pick<ResourceValidationContext, "page">;
 export function summaryNote(reader: Reader, resource: SummaryResource): NoteResource | undefined {
   const note = reader.page<NoteSpec, NoteStatus>(NOTE_TYPE, { limit: 1, matchIndex: { name: "summaryOf", value: resource.metadata.uid } }).items[0];
