@@ -1,4 +1,5 @@
 import { seedNotes } from "./fixtures/notes.ts";
+import { upsertNote } from "../plugins/personal/note/service.ts";
 import { writeSummary } from "../plugins/personal/note/summary.ts";
 import { webAddress } from "../src/channel/address.ts";
 import { TASK_TYPE, type TaskSpec, type TaskStatus } from "../plugins/personal/task/model.ts";
@@ -225,7 +226,9 @@ test("Gate filters Notes independently of their summary owner and pages all Work
   const first = await aide.topics.ensure("one"), second = await aide.topics.ensure("two");
   const person = await aide.persons.observe({ provider: "test", scope: "gate", id: "one" }, "Alex");
   const address = aide.addresses.observe(webAddress("home"));
-  await seedNotes(client, first, [{ id: "draft", text: "Draft" }, { id: "how", text: "How", nature: "procedural" }]);
+  const chief = await client.patchStatus(first, { execution: { id: "draft", startedAt: new Date().toISOString() } });
+  await upsertNote(client, chief, { text: "Draft" }, "draft");
+  await seedNotes(client, chief, [{ id: "how", text: "How", nature: "procedural" }]);
   await seedNotes(client, second, [{ id: "fact", text: "Fact", nature: "semantic", updatedAt: "2020-01-01T00:00:00.000Z" }]);
   await writeSummary(client, aide.topics.resource("one")!, { text: "Topic summary", nature: "semantic" });
   await writeSummary(client, person, { text: "Person summary", nature: "semantic" });
