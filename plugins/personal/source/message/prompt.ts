@@ -12,7 +12,7 @@ const Observation = z.object({ provider: z.literal("lark"), accountId: z.string(
 /**
  * @spec Preview only the trigger or follow-up messages, preserving each author and relation beside their words.
  * @why Identity must survive compact input context without replacing original text or expanding surrounding history.
- * @link docs/kernel.md#输入关系与交流对象
+ * @link docs/personal/input.md#人物与场合
  * @case tests/message-source.test.ts
  */
 export function messagePreview(observation: Record<string, unknown> | undefined): string | undefined {

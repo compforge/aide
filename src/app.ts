@@ -66,7 +66,7 @@ export interface AideOptions {
 /**
  * @spec The application composes one generic runtime with the Personal domain plugin.
  * @why Transport topics select business context, never a separate scheduler or resource store.
- * @link docs/kernel.md
+ * @link AGENTS.md#项目定位与边界
  */
 export class Aide {
   readSession?: import("../plugins/personal/observation/session.ts").ReadSession;

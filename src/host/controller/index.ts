@@ -122,7 +122,7 @@ export const INTERRUPTED_NOTICE_TITLE = "Topic interrupted — tell the agent wh
 
 /** @spec Execute admitted calls serially per live native session, with bounded concurrency across sessions.
  * @why Operators own business scheduling; this executor protects live handles and records transient call facts.
- * @link docs/kernel.md
+ * @link docs/harness/README.md#执行契约
  */
 export class InvocationExecutor {
   /** Ephemeral native runtimes; recovery parameters always come from the caller. */

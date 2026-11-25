@@ -138,7 +138,7 @@ reconcile:
 
 `maxTotalConcurrency` 是正整数，缺省为 8，限制每个 Runner 启动新 Reconcile 的全局并发；Controller 自己声明的局部阈值仍生效。配置在启动时加载，修改后重启生效。
 
-等待 verb 会释放容量，返回后直接恢复执行，允许暂时超过阈值；达到或超过阈值时不启动新的 Reconcile。同资源仍串行，外部调用预算由 Connector、Harness 各自负责。调度契约见 [Kernel](kernel.md)。
+等待 verb 会释放容量，返回后直接恢复执行，允许暂时超过阈值；达到或超过阈值时不启动新的 Reconcile。同资源仍串行，外部调用预算由 Connector、Harness 各自负责。调度契约见 [Plugin 的外部能力调用](plugin/README.md#verb-与外部能力)。
 
 ## 默认执行 Harness
 
@@ -271,7 +271,7 @@ agentIdleMs 范围为 1000–2147483647 毫秒。Routine 保留 sessionId 和职
 Connector 配置由 `connectors/config.ts` 组合，Environment 和需求平台分别声明自己的字段与校验。需求平台的 `me.userKey` 标记本人，`profile` 选择执行账号，Source 的 `userKeys` 选择观察负责人；三者独立，完整示例见 [需求平台](connector/requirements.md)。
 Personal 的 `config.ts` 组合各类 Source 策略，装配阶段解析后仅向所属 Runner 下发有效观察范围。
 配置输入允许缺省和引用；有效配置已补齐默认值、解析模型与路径，并在创建运行实例之前验证。
-Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖顺序的判断。整体原则见 [Kernel](kernel.md)。
+Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖顺序的判断。执行归属见 [Harness](harness/README.md#operator-调用边界)。
 
 ## Topic 定时协调与回顾
 

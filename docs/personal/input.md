@@ -34,6 +34,8 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 
 IM 消息由 sender 在 source 指向的 Address 中发出。单聊与群聊都以场合表达可见范围；Input 不保存 receivers。Address.people 积累当前聊天中已确认的参与者，不声明完整或实时成员名单，也不代表实际已读。
 
+`sent / received / observed` 描述 Input 相对 Me 的关系。判断是否面向 Aide 时，要分别看作者和交流对象。Me 发给同事的请求是外部交流，群里有机器人也不能据此判定每条消息都在交办。模型预览按消息保留作者、关系、提及与回复线索，Channel 标出直接交流入口和已知机器人身份。原始正文、标题和完整证据可按需读取。
+
 mentions / mentionDetails 保留在 observation 中，表示正文提及与提醒。@ 不改变可见范围，也不能证明被提及者属于当前场合。Lark Channel 可根据平台明确的 user 类型发现 Person 及其联系地址，但不会把这些人物加入来源 Address；bot、Aide 自身和 @all 不建立 Person，类型未知时保留原始证据，不按名字合并跨应用身份。
 
 Bot 单聊登记与机器人对话的人；Source 观察的人与人单聊登记观察账号与当前聊天中已确认的发言者。群聊积累当前聊天中实际发言的人；转发正文、跨场合引用和 mentions 中的人物不参与这项推导。多作者讨论的逐条 sender、relation 和原始 mentions 保留在 observation 中。

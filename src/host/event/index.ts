@@ -104,7 +104,7 @@ export interface AgentMessageUpsert extends MessageUpsert {
 /**
  * 用户输入的实际（effective）投递方式：steer = 中途注入了当前 turn 的安全边界。
  * 开放联合；requested delivery 不形成执行事实——
- * steer 被拒降级成 follow-up 时，记录的是降级后的事实（见 docs/kernel.md）。
+ * steer 被拒降级成 follow-up 时，记录的是降级后的事实。
  */
 export type SubmitDelivery = "prompt" | "steer" | "follow_up" | (string & {});
 
@@ -335,7 +335,7 @@ export interface ContextWindowUpdate {
 
 /**
  * 结构化错误，不能只塞 stopReason。willRetry=true 表示 harness 仍在重试，
- * 此时 session 不得被切 idle（见 docs/kernel.md“执行上下文”）。
+ * 此时 session 不得被切 idle。
  */
 export interface ErrorUpdate {
   code?: string;

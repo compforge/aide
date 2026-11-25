@@ -23,7 +23,7 @@ export interface HarnessCallsOptions {
   log?: LogSink;
 }
 /** @spec Owns live invocations, waiting and cancellation; resource scheduling only sees HarnessExecution.
- * @link docs/kernel.md
+ * @link docs/harness/README.md#执行契约
  */
 export class HarnessCalls implements HarnessExecution {
   private readonly records: HarnessActivity;

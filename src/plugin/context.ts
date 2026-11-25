@@ -49,7 +49,7 @@ export function validateHarness(input: HarnessVerbInput): void {
 /**
  * @spec Host and Runner use the same facade; only the invocation transport differs.
  * @rule Context construction depends only on the public Plugin contract, never Host execution or storage.
- * @see {@link ../../docs/kernel.md}
+ * @see {@link ../../docs/plugin/README.md#host-与-runner}
  */
 export function createPluginVerbs(
   scope: ExecutionScope,

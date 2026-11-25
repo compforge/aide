@@ -16,7 +16,7 @@ import { ResourceStorageConfigSchema } from "./host/resource/storage.ts";
 
 const record = z.record(z.string(), z.unknown());
 /** @spec Aide owns default execution selection; Chief remains a separately bound role.
- * @link docs/kernel.md
+ * @link docs/configuration.md#默认执行-harness
  */
 export const DefaultHarnessSchema = z.enum(HARNESSES).exclude(["gate", "chief", "route", "weave", "task", "routine"]).default("pi");
 export type DefaultHarness = z.infer<typeof DefaultHarnessSchema>;

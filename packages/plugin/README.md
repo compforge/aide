@@ -145,7 +145,7 @@ The harness parameter selects startup configuration; snapshot.harnesses discover
 
 Harness and connector calls require timeoutMs covering their wait. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. A settled verb resumes without waiting for capacity; limits gate new reconciles, which pause admission while resumed work fills or exceeds those limits. Same-resource serialization remains in force throughout the wait. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
 
-Harness inference returns an invocation ID and execution result. Reconcile snapshots contain only cwd and configured Harness targets, never global execution history. ApplicationRuntime always provides resource scheduling; optional Harness configuration enables ExecutionService. Resource-only plugins need no adapter or target configuration. Native input operations refer to an invocation owned by the calling resource; they do not start a second host inference queue. Session operations do not fabricate invocations. See [execution boundary](../../docs/kernel.md#执行后端的边界).
+Harness inference returns an invocation ID and execution result. Reconcile snapshots contain only cwd and configured Harness targets, never global execution history. ApplicationRuntime always provides resource scheduling; optional Harness configuration enables ExecutionService. Resource-only plugins need no adapter or target configuration. Native input operations refer to an invocation owned by the calling resource; they do not start a second host inference queue. Session operations do not fabricate invocations. See [execution boundary](../../docs/harness/README.md#operator-调用边界).
 
 ## Resource Printers
 
@@ -191,7 +191,7 @@ Inline hooks fail open on failure or timeout. Deferred hooks use best-effort bou
 
 `context.logger` writes host-owned structured diagnostics with plugin identity; log transitions and errors, avoid repeated polling noise and secrets, and do not use logs as business state.
 
-See [Channel](../../docs/channel/README.md) for the current Web / Lark experience and [Kernel](../../docs/kernel.md) for execution ownership.
+See [Channel](../../docs/channel/README.md) for the current Web / Lark experience and [Harness](../../docs/harness/README.md#operator-调用边界) for execution ownership.
 
 Controllers may set an optional `name` (lowercase letter followed by up to 63 lowercase letters, digits or hyphens) to observe the same resource kind with independent queues, locks and durable deadlines. Use explicit status Watches and resource-version checks to coordinate their separate responsibilities.
 

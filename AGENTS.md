@@ -6,7 +6,7 @@ Aide 是小型、自托管的 personal agent，将持续到来的信息转化为
 
 项目有两个目标：做好 personal agent，并积累可复用的 TypeScript controller-runtime 底座。Personal 是底座的首个应用与验证场景，领域模型留在插件，通用资源、查询和调度能力沉淀到底座。按绿地视角开发，不建设账号权限中心或多实例平台。业务判断放在 Personal 与 Chief Agent；修改通用机制前先说明具体需求和现有能力缺口。
 
-Aide 是多角色并行系统：Input 经多个角色转换、加工和处理，贡献到 Output 或 Note 中。角色的本质是 Reconciler；Agent 为角色提供智能化执行能力，对外属于 Reconciler 的内部细节。角色通过资源事实协作，完成以持久化结果为准。
+每个角色由 Reconciler 接收资源变化，读取持久状态并先执行确定性规则。需要语义判断时，它把触发原因、目标和授权范围交给 Agent。Agent 选择动作，工具在事务里校验资源范围、版本与执行归属。跨角色交接以资源与回执为准。例如容量阈值可以发起主题整理，是否归组要由 Agent 结合材料判断。
 
 典型流转是：Channel／Source 形成 Input → Route 确定 Topic 归属 → Chief 接纳并处理。Deferred 分支先由 [Secretary](docs/personal/secretary.md) 整理成 Batch，再交给 Chief；Secretary 生成的内部维护 Input 直接绑定目标 Topic。aide:curate 按批梳理新增或改动的普通 Note，归类、去重；aide:organize 整理 Topic 树及材料归属，可拆分或移动普通 Note；aide:summary 在 Chief 空闲时复核一个 Topic、Person 或 Address 的默认认识；aide:followup 跟进需要回应的事项，按独立 Ongoing 的预约核实事项进展，仍无法判断时私下询问 Me。Chief 可以直接更新 Note、产生 Output，也可以通过 Input 的 Work 请求交给 Task／Routine 持续办理；这些角色产生的 Output 再进入披露与投递流程。一条 Input 可以贡献到多个产物，多条 Input 也可以共同形成一个 Note 或 Output。
 
@@ -133,8 +133,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 ## 关键约定
 
 - Gate 是全局信息域与行动范围，暂由 Me 与 Aide 独享，仅双方单聊进入。Gate 是唯一无 parentRef 的 Topic，统一通过 isGateTopic 判断；其直接子 Topic 是独立领域 root，统一通过 isRootTopic 判断；Gate Agent 与 Chief 独立。Gate 跨域读取并交办给领域 Chief，领域承担执行及知识沉淀；原单聊地址承接回复，Gate 汇集对话与交办连续性。Gate 不参与领域 Route 候选、Weave、知识维护与回收，不新建自己的 Work。见 [Gate](docs/personal/gate.md)。
-- Aide 是 Me 的独立助理；Gate / Chief / Route / Weave / Task / Routine 是助理内部角色。外部交流不是自动委托，凭证不决定身份；摘要、归并和工作交接保留作者、确认状态与授权范围。身份契约见 [Kernel](docs/kernel.md#助理定位与身份边界)。
-- 底座提供 TypeScript controller-runtime，服务 Plugin Operator；Personal 拥有 Input、Batch、Note、Output、Person、Topic、Task、Routine 与业务判断。通用资源和调度不能导入 Personal，应用装配负责安装定义、通信 action 和投递器。
+- Aide 以独立助理的身份服务 Me，各 Agent 共享这一身份。外部交流提供证据，代表 Me 表态、承诺或行动需要相应授权。凭证决定访问能力。摘要、归并和工作交接始终区分原作者、助理推断、用户采纳和获授权的执行范围。[助理身份与授权](docs/personal/README.md#助理身份与授权)
+- 应用在 `src/app.ts` 通过 ApplicationRuntime 装配插件、通信入口、Connector 与可选的 Harness。通用资源与调度层独立于 Personal，当前使用本地 SQLite 持久化。Personal 拥有自己的资源定义、业务完成条件和恢复策略。纯资源插件可以独立运行。[Plugin](docs/plugin/README.md)
 - 修改资源更新、并发、条件写入或协调机制时，先核对 [Resource 更新契约](docs/plugin/resource.md#更新操作与并发) 与 Kubernetes / controller-runtime；通用能力缺口优先在底座解决，再接入业务调用方。明确当前实现与设计目标，不用上层逐点重试或独立版本体系替代缺失的写入语义。
 - Host / Runner 不互相导入实现。Runner 经 ResourceClient、Connector API 与 Verb 请求宿主能力，不持有 Store、凭证客户端或 Harness SDK。共享协议放在 src/protocol，公共插件契约放在 packages/plugin。
 - 按业务职责在 plugin package 内组织模块：CRD 的模型、事务约束和生命周期就近放置；Chief / Secretary 等独立角色拥有自己的目录，即使状态存储在 Topic。Task / Routine 等兼具角色与资源的模块保持合一。Agent 是角色内部能力，放在角色的 agent/ 子目录并由 Host 工厂加载，Runner 入口不得运行时导入它；跨角色共享执行机制放在 execution/。ResourceDefinition 集中声明 Schema、校验、Printer、索引与保留策略；所有写入在存储事务内校验，提交后通知 Watch。
@@ -159,7 +159,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 ## References
 
 - [文档导航](docs/README.md)：使用、开发与验收的阅读入口。
-- [Kernel](docs/kernel.md)、[Plugin](docs/plugin/README.md)、[Resource](docs/plugin/resource.md)：底座边界、协调、定义、事务与容量；[公共契约](packages/plugin/README.md)。
+- [Plugin](docs/plugin/README.md)、[Resource](docs/plugin/resource.md)：底座边界、协调、定义、事务与容量；[公共契约](packages/plugin/README.md)。
 - [Personal](docs/personal/README.md)：认知沉淀、对象与完整流程；[Input](docs/personal/input.md)、[Address](docs/personal/address.md)、[Note](docs/personal/note.md)、[Route](docs/personal/route.md)、[Topic](docs/personal/topic.md)、[Output](docs/personal/output.md)。
 - [Topic](docs/personal/topic.md)：资源、归属交接、认识依赖与回收；[Secretary](docs/personal/secretary.md)：待办准备与维护调度；[Weave](docs/personal/weave.md)：全局主题关系。
 - [Chief](docs/personal/chief.md)：Input/Batch 接纳、执行、完成，以及提示词、上下文与记忆；[Person](docs/personal/person.md)；[Work](docs/personal/work.md) 说明 Task、Routine 与 Ongoing。

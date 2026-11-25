@@ -13,7 +13,7 @@ import { PluginInstanceStore } from "../plugin/instance.ts";
  * @spec Harness is an optional capability; resource-only startup never opens its execution history.
  * @case tests/runtime.test.ts
  * @why Resource ownership and scheduling must not depend on the native session storage layout.
- * @link docs/kernel.md
+ * @link docs/harness/README.md
  */
 export class ApplicationRuntime {
   private readonly logger: RuntimeLogger;

@@ -14,7 +14,7 @@ const writers = new Set<string>();
 /**
  * @spec Persist dispatch before an external call. Interrupted outcomes are recorded, never automatically replayed.
  * @why Connector-only plugins must not open Harness storage to preserve this guarantee.
- * @link docs/kernel.md
+ * @link docs/connector/README.md#观察与恢复
  */
 export class ConnectorCalls {
   private readonly pending = new Map<string, Started>();
