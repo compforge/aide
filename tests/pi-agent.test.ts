@@ -1,3 +1,4 @@
+import { replayClock } from "./fixtures/clock.ts";
 import { receiveDomain } from "./address-fixture.ts";
 import { isRootTopic } from "../plugins/personal/topic/boundary.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
@@ -293,7 +294,7 @@ test("Replay SDK groups roots and routes subsequent source input to the new root
       ...["direct", "group", "sent"].map(operation => ({ operation: operation as "direct" | "group" | "sent", key: "", start, end, complete: true, pages: 1 })),
       ...["oc_a", "oc_b"].map(key => ({ operation: "history" as const, key, start: "2026-10-18T23:55:00.000Z", end, complete: true, pages: 1 })),
     ],
-  }, { directory, weave: true, batchSize: 1, timeoutMs: 15_000, revision: "fixture", datasetHash: "fixture", model: fixture.config.config });
+  }, { directory, weave: true, batchSize: 1, timeoutMs: 180_000, revision: "fixture", datasetHash: "fixture", model: fixture.config.config }, replayClock());
   const result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
   assert.equal(result.topics.length, 3);
   const root = result.topics.find((topic: import("../plugins/personal/topic/model.ts").TopicSpec) => isRootTopic({ spec: topic }));

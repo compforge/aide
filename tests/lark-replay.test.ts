@@ -1,3 +1,4 @@
+import { replayClock } from "./fixtures/clock.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
@@ -182,10 +183,13 @@ test("An unacknowledged Input times out with failed-run evidence, never a succes
   const directory = mkdtempSync(join(tmpdir(), "aide-replay-timeout-"));
   try {
     mkdirSync(join(directory, "workspace"));
-    const options = fakeOptions({ complete: false, notify: false, async execute() { throw new Error("No Work"); } },
+    let received = false;
+    const options = fakeOptions({ complete: false, notify: false,
+      async chief() { received = true; return "received"; },
+      async execute() { throw new Error("No Work"); } },
       join(directory, "workspace"), [], join(directory, "state"));
     await assert.rejects(replay(fixture(), { directory, weave: false, batchSize: 20, timeoutMs: 5000,
-      revision: "fixture", datasetHash: "fixture", createAdapter: options.createAdapter }), /did not finish/);
+      revision: "fixture", datasetHash: "fixture", createAdapter: options.createAdapter }, replayClock(() => received)), /did not finish/);
     const result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
     assert.equal(result.state, "error"); assert.equal(result.batches, 0);
     assert.ok(result.inputs.some((i: any) => i.input.status.assess && !i.input.status.assess.completedAt));
@@ -197,7 +201,7 @@ test("Historical replay uses the real Source, routing, Chief receipts and report
   try {
     mkdirSync(join(directory, "workspace"));
     const options = fakeOptions({ notify: false, async execute() { throw new Error("Replay must not execute Work"); } }, join(directory, "workspace"), [], join(directory, "state"));
-    await replay(fixture(), { directory, weave: false, batchSize: 1, timeoutMs: 5000, revision: "fixture", datasetHash: "fixture", createAdapter: options.createAdapter });
+    await replay(fixture(), { directory, weave: false, batchSize: 1, timeoutMs: 180_000, revision: "fixture", datasetHash: "fixture", createAdapter: options.createAdapter }, replayClock());
     const result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
     assert.equal(result.state, "completed"); assert.equal(result.inputs.length, 2);
     assert.equal(result.topics.length, 1); assert.equal(result.protocolFixture, true);

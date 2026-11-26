@@ -41,7 +41,14 @@ export interface ReplayOptions {
   createAdapter?: AideOptions["createAdapter"];
 }
 
-export async function replay(snapshot: Snapshot, options: ReplayOptions) {
+/** Only batch polling uses this clock. Sources, controllers and evidence retain their own time. */
+interface ReplayClock {
+  now(): number;
+  wait(milliseconds: number): Promise<void>;
+}
+
+export async function replay(snapshot: Snapshot, options: ReplayOptions,
+  clock: ReplayClock = { now: Date.now, wait: delay }) {
   const timeoutMs = ReplayTimeoutSchema.parse(options.timeoutMs);
   const messages = new SnapshotMessages(snapshot), { directory } = options;
   const destination = pino.destination({ dest: join(directory, "replay.log"), sync: true });
@@ -97,9 +104,9 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
     inputs: aide.topics.inputStore.list().map(input => inputDetail(aide, input.metadata.name)), invocations: aide.invocations() });
   // A settled scheduler may still have unfinished receipts or a future Weave timer. Check all three.
   const drain = async () => {
-    const deadline = Date.now() + timeoutMs;
+    const deadline = clock.now() + timeoutMs;
     let stableSince = 0, last = "";
-    while (Date.now() < deadline) {
+    while (clock.now() < deadline) {
       messages.assertCoverage();
       const inputs = aide.topics.inputStore.list();
       const done = inputs.every(i => i.status.route?.completedAt && (!i.status.assess || !!i.status.assess.completedAt));
@@ -113,10 +120,10 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
       const quiet = done && !topics.some(t => aide.topics.resource(t.id)?.status.execution)
         && (!options.weave || (weave && !weave.status.execution && (roots.length < 2 || roots.every(t => aide.topics.resource(t.id)!.status.weaveReview?.version === candidateVersion(aide.topics.resource(t.id)!)))));
       const fingerprint = JSON.stringify([topics, inputs.map(i => i.status), roots.map(t => aide.topics.resource(t.id)!.status.weaveReview), weave?.status.execution]);
-      if (!quiet || fingerprint !== last) stableSince = Date.now();
-      if (quiet && Date.now() - stableSince >= settleMs) return;
+      if (!quiet || fingerprint !== last) stableSince = clock.now();
+      if (quiet && clock.now() - stableSince >= settleMs) return;
       last = fingerprint;
-      await delay(100);
+      await clock.wait(100);
     }
     throw new Error(`Replay batch did not finish within ${timeoutMs}ms; inspect retained Input receipts and executions`);
   };
