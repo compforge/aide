@@ -36,7 +36,7 @@ export async function upsertOngoing(resources: ResourceClient, actor: TopicResou
     const existing = await resources.get<OngoingSpec, OngoingStatus>(ref);
     if (existing) return ongoingView(existing);
     try {
-      return ongoingView(await resources.create(ONGOING_TYPE, { name: id, spec, status: { writer, updatedAt, nextCheckAt: args.checkAt ?? new Date(now.getTime() + 86_400_000).toISOString(), ...(args.progress ? { progress: args.progress } : {}) } }));
+      return ongoingView(await resources.create(ONGOING_TYPE, { name: id, spec, status: { writer, updatedAt, nextCheckAt: args.checkAt ?? new Date(now.getTime() + 3_600_000).toISOString(), ...(args.progress ? { progress: args.progress } : {}) } }));
     } catch (error) {
       if (!(error instanceof ResourceAlreadyExists) && !(error instanceof Error && error.name === "ResourceAlreadyExists")) throw error;
       return ongoingView(await readOngoing(resources, actor, id));
