@@ -46,7 +46,7 @@ Ongoing 记录尚有下文、值得持续跟进的同一事项。例如供应商
 | spec.topic、title | 所属 Topic 的 UID 引用与事项名称 |
 | spec.initialInputId、sourceUid | 首条业务 Input 的 ID，以及支持创建事项的来源 UID，两者均可选 |
 | spec.question | 目前需要核实的问题 |
-| status.nextCheckAt | 下次核实时间。创建时省略 checkAt，默认 24 小时后核实 |
+| status.nextCheckAt | 下次核实时间。创建时省略 checkAt，默认 1 小时后核实 |
 | status.progress | 目前查明的进展与依据 |
 | status.closure | 有结论后写入收尾时间 at 和结果 outcome，同时清除预约 |
 | status.updatedAt、writer | 最近一次业务更新的时间、Chief 身份和执行 ID |
@@ -60,6 +60,6 @@ Secretary 按保存的时间递交 `aide:followup`。Chief 先核对 Ongoing、�
 
 `append_input` 可给 Ongoing 追加原始 Input 或当场记录的材料。Input 的 `status.handle` 按 Work UID 保存关联。Secretary 将新增材料的 ID 一起递交给领域 Chief，原有预约继续有效。Chief 用 `read_work` 查看关联 Input 和 Output。
 
-Chief 在业务 Input 或跟进轮次中调用 `ask_me({ workId, text })` 私下询问 Me。Output 的 `spec.work` 指向事项，`purpose=question` 表示询问，`inputIds` 记录触发材料。预约时间变化不影响同一轮询问。事项已关闭或提醒中的问题已被替换时，旧提醒不能发问。同一事项、问题和触发材料重试时复用已接纳的 Output，实际送达结果见其 delivery 状态。
+Chief 在业务 Input 或跟进轮次中调用 `ask_me({ workId, text })` 创建发给 Me 的私聊 Output。Me 的 Person 投递频控决定实际发送时间，命中频控时 Output 保持 pending，等待重新投递。Output 的 `spec.work` 指向事项，`purpose=question` 表示询问，`inputIds` 记录触发材料。预约时间变化不影响同一轮询问。事项已关闭或提醒中的问题已被替换时，旧提醒不能发问。同一事项、问题和触发材料重试时复用已接纳的 Output，实际送达结果见其 delivery 状态。
 
 Me 可以在 Web Gate 的 Work 列表里打开任一开放事项，补充最新进展、结论或对问询的答复。提交将原文作为用户 Input 追加到事项，Secretary 通知所属领域的 Chief。Chief 根据补充更新进展或记录结论并关闭。

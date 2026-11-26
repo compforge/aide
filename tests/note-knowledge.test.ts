@@ -525,7 +525,7 @@ test("Ongoing checks have an independent identity, one durable request and one p
   const read = () => readOngoing(f.resources, f.read(), initial.id);
   const matter = await read();
   const due = Date.parse(initial.checkAt!);
-  assert.equal(due - Date.parse(matter.status.updatedAt), 86_400_000);
+  assert.equal(due - Date.parse(matter.status.updatedAt), 3_600_000);
   assert.equal((await upsertOngoing(f.resources, f.read(), args, "metrics")).uid, initial.uid);
   const policy = topicPolicy();
   assert.deepEqual(await prepareOngoingCheck(f.context, matter, policy, due - 1), { requeueAfterMs: 1 });
