@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { AgentSessionMode } from "../plugins/personal/execution/session.ts";
+import { usageRoles, UsageIndex, type UsageRole } from "../plugins/personal/observation/usage-index.ts";
 import { PiObservations, ObservationConfigSchema } from "../agents/pi/observation.ts";
 import type { PiConfig } from "./host/harness/pi/config.ts";
 import { ChannelSettings } from "./channel/settings.ts";
@@ -45,15 +46,24 @@ await withAsyncFileLock(path, async () => {
     task: observed(resolved.task), routine: observed(resolved.routine), pi: resolved.pi && observed(resolved.pi) };
   const sessionConfigs: Record<string, PiConfig | undefined> = { gate: harnesses.gate, chief: harnesses.chief, route: harnesses.route, weave: harnesses.weave,
     task: harnesses.task, routine: harnesses.routine, pi: harnesses.pi };
+  const directories = new Map<string, UsageRole[]>();
+  for (const role of usageRoles) {
+    const dir = resolve(harnesses[role].agentDir, "sessions");
+    directories.set(dir, [...directories.get(dir) ?? [], role]);
+  }
+  const usageIndex = new UsageIndex(cwd, directories);
+  const refreshUsage = () => { void usageIndex.refresh().catch(error => log.warn({ err: error }, "Pi usage index refresh failed")); };
   const connectors = await Connectors.load(config.connectors, { environment, registration: environment.AIDE_CONNECTOR_REGISTRATION ?? options.connectorRegistration, baseDir: dirname(file), log: entry => log[entry.level]({ component: entry.component, ...entry.attributes, ...(entry.error ? { err: entry.error } : {}) }, entry.message) });
+  refreshUsage();
+  const usageTimer = setInterval(refreshUsage, 60_000).unref();
   try {
     const transports = new Map(Object.values(config.channels).filter(c => c.enabled).map(c => [c.appId, larkTransport(c, log.child({ appId: c.appId }))]));
     const aide: Aide = new Aide(home, {
-      agentSession, config, connectors, connectorCatalog: await connectors.list(),
-      readSession: agent => {
+      usageIndex, agentSession, config, connectors, connectorCatalog: await connectors.list(),
+      readSession: (agent, expectedScopeRole) => {
         const selected = sessionConfigs[agent.harness];
         if (!selected) throw new Error("Session observation is not supported for this Harness");
-        return observation.read(cwd, selected, agent.sessionId);
+        return observation.read(cwd, selected, agent.sessionId, expectedScopeRole);
       },
       cwd, timezone, defaultHarnessConfig: harnesses.defaultHarnessConfig,
       createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, rootDir: home,
@@ -95,7 +105,7 @@ await withAsyncFileLock(path, async () => {
     await aide.close();
     await closingBots;
     log.info("Aide stopped");
-  } finally { await connectors.close(); }
+  } finally { clearInterval(usageTimer); await connectors.close(); }
 }, 0);
 
 }

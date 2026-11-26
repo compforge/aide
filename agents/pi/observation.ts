@@ -57,13 +57,18 @@ export class PiObservations {
       return nativeOnly;
     }
   }
-  async read(cwd: string, config: Pick<PiConfig, "agentDir">, sessionId: string) {
+  async read(cwd: string, config: Pick<PiConfig, "agentDir">, sessionId: string, expectedScopeRole?: string) {
     const file = SessionManager.findById(resolve(cwd), sessionId, join(config.agentDir, "sessions"));
     if (!file) throw new Error("Native Pi session is missing");
     // @spec Observation never opens a writable manager: SDK open() may migrate and rewrite recovery files.
     const text = readFileSync(file, "utf8"), entries = parseSessionEntries(text);
     const header = entries[0];
     if (header?.type !== "session" || header.id !== sessionId || resolve(header.cwd) !== resolve(cwd)) throw new Error("Native Pi session identity mismatch");
+    if (expectedScopeRole) {
+      const scope = entries.find(e => e.type === "custom" && e.customType === "aide.agent-scope");
+      const name = scope?.type === "custom" ? (scope.data as { scope?: string } | null)?.scope : undefined;
+      if (typeof name !== "string" || !name.startsWith(expectedScopeRole + ":")) throw new Error("Native Pi session role mismatch");
+    }
     const path = this.path(sessionId);
     let supplement;
     let issue: string | undefined;
