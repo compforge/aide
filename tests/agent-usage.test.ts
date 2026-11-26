@@ -5,7 +5,9 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { usageRoles, UsageIndex } from "../plugins/personal/observation/usage-index.ts";
-import { sessionCalls, usageReport } from "../plugins/personal/observation/usage.ts";
+import { BatchDefinition } from "../plugins/personal/batch/definition.ts";
+import { InputStore } from "../plugins/personal/input/store.ts";
+import { receiptOriginLookup, sessionCalls, usageReport } from "../plugins/personal/observation/usage.ts";
 
 test("role usage rebuilds and tails complete entries, including single-call Route sessions", async t => {
   const dir = mkdtempSync(join(tmpdir(), "aide-usage-"));
@@ -94,4 +96,30 @@ test("Usage HTTP serves the role dashboard, scoped SessionView and per-call deta
   assert.match(await (await get("/usage/session"+query)).text(),/route fixture/);
   assert.equal((await get("/usage/session?id=session-1&role=gate")).status,404);
   assert.equal((await get("/usage/report?window=30d")).status,400);
+});
+
+
+test("Historical usage resolves receipts once per query and matches the exact delivery", async t => {
+  const dir = mkdtempSync(join(tmpdir(), "aide-usage-receipts-"));
+  const inputStore = new InputStore(dir);
+  t.after(() => { inputStore.storage.db.close(); rmSync(dir, { recursive: true, force: true }); });
+  inputStore.storage.register("personal", [BatchDefinition]);
+  await inputStore.storage.prepare();
+
+  const agent = { harness: "chief", sessionId: "session" };
+  inputStore.submit("fixture", "ordinary", { origin: "source", originId: "fixture", text: "A source Input" },
+    { assess: { executionId: "exec", agent } });
+  inputStore.submit("fixture", "followup", { origin: "aide:followup", originId: "fixture", text: "An Ongoing reminder" },
+    { assess: { executionId: "exec", deliveryId: "exec:followup", agent } });
+
+  const inputs = t.mock.method(inputStore, "list");
+  const batches = t.mock.method(inputStore.resources, "list");
+  const lookup = receiptOriginLookup({ inputStore, resources: inputStore.resources });
+  assert.equal(inputs.mock.callCount(), 0);
+  assert.equal(lookup("session", "exec"), "business");
+  assert.equal(lookup("session", "exec:followup"), "aide:followup");
+  assert.equal(lookup("other-session", "exec:followup"), "unknown");
+  assert.equal(lookup("session", "exec:unknown"), "unknown");
+  assert.equal(inputs.mock.callCount(), 1);
+  assert.equal(batches.mock.callCount(), 1);
 });

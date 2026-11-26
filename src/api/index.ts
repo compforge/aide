@@ -30,7 +30,7 @@ import { historyCursor } from "../../plugins/personal/topic/history.ts";
 import { streamTopic } from "./stream.ts";
 import { renderHTML } from "@compforge/agent-observation";
 import { usageRoles } from "../../plugins/personal/observation/usage-index.ts";
-import { usageReport, receiptOrigin, sessionCalls } from "../../plugins/personal/observation/usage.ts";
+import { usageReport, receiptOriginLookup, sessionCalls } from "../../plugins/personal/observation/usage.ts";
 import { inputObservation, ObservationQuery } from "./observation.ts";
 import { outputList, outputFilters, outputDetail, outputSession } from "./outputs.ts";
 import { inputList, inputFilters, inputDetail } from "./inputs.ts";
@@ -344,7 +344,7 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
           const filters = z.object({ window: z.enum(["24h", "7d"]).default("24h"), role: z.enum(usageRoles).optional(),
             provider: z.string().max(200).optional(), model: z.string().max(250).optional() }).strict();
           const params = Object.fromEntries(url.searchParams);
-          const lookup = (id: string, marker: string) => receiptOrigin(aide.topics, id, marker);
+          const lookup = receiptOriginLookup(aide.topics);
           if (url.pathname === "/usage/calls") {
             const q = filters.extend({ id: z.string().min(1).max(250), role: z.enum(usageRoles), page: z.coerce.number().int().positive().default(1) }).parse(params);
             const result = sessionCalls(index,q.id,q,lookup,q.page);
