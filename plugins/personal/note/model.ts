@@ -29,6 +29,7 @@ export const NoteWriterSchema = z.object({ resource: WriterResourceSchema, execu
 const ReductionReceiptSchema = z.object({ at: z.string().datetime(), reason: z.string().trim().min(1).max(2000), writer: NoteWriterSchema }).strict();
 export const NoteStatusSchema = z.object({ updatedAt: z.string().datetime(), writer: NoteWriterSchema.optional(),
   curationRoot: z.string().optional(), pendingSince: z.iso.datetime().optional(),
+  curateAt: z.iso.datetime().optional(),
   curationRetry: z.object({ inputUid: z.string(), material: z.string(), at: z.iso.datetime() }).strict().optional(),
   curated: z.object({ inputUid: z.string(), material: z.string() }).strict().optional(),
   splitFrom: z.object({ uid: z.string(), version: z.string() }).strict().optional(),
@@ -41,6 +42,10 @@ export const NoteStatusSchema = z.object({ updatedAt: z.string().datetime(), wri
 export const NoteViewSchema = NoteSpecSchema.extend({ nameMissing: z.boolean().optional(), retired: ReductionReceiptSchema.optional(), people: z.array(PersonRefSchema), addresses: z.array(AddressRefSchema), id: z.string(), uid: z.string(), version: z.string(), createdAt: z.string(), updatedAt: z.string() });
 export type NoteSpec = Omit<z.infer<typeof NoteSpecSchema>, "sensitivity" | "visibility"> & import("../disclosure.ts").MaterialDisclosure;
 export type NoteStatus = z.infer<typeof NoteStatusSchema>;
+export function clearCurationSchedule(status: NoteStatus): NoteStatus {
+  const { curateAt: _curateAt, ...rest } = status;
+  return rest;
+}
 export type NoteResource = Resource<NoteSpec, NoteStatus>;
 /** @spec Display names and budgets do not change the knowledge to curate. */
 export const noteMaterial = (s: NoteSpec) => createHash("sha256").update(JSON.stringify([

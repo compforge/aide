@@ -41,6 +41,7 @@ Chief 处理 `aide:curate` 时，对照相关 Input、Work 和其他 Note 核对
 | metadata.creationTimestamp | 创建时间 |
 | status.updatedAt | 最近一次内容修改时间 |
 | status.writer | Agent 写入者资源和 executionId；用户编辑、配置合并与 Weave 创建摘要不伪造 Agent 执行身份 |
+| status.curateAt | Secretary 最早可再次派发当前材料参与整理的时间，可选 |
 | status.curationRetry | 最近一次暂缓的材料指纹、时间和梳理 Input UID |
 | status.curated | 最近一次确认的材料指纹和梳理 Input UID，可回查该次完成回执 |
 | status.pruned / retired | 最近删减或整篇退役的时间、原因、执行身份；退役保留正文和原内容版本 |
@@ -106,6 +107,8 @@ Topic understandingVersion 纳入其查询窗口中 Note 的 UID 和版本。回
 move_note 接受 noteId、version、目标 subject 和 reason。当前 root Chief 可在责任树内移动 Note，来源和目标均在写入事务内校验，目标可以是 Topic / Task / Routine。移动保留 ID、正文、people 和内容更新时间，记录组织调整；subject 改变使内容版本变化。upsert_note 专注内容维护，已有 Note 的归位使用 move_note。
 
 curate 核对普通 Note 的证据与分类，organize 调整材料在 Topic 树中的归属。Chief 通过 `aide:summary` 单独复核某个对象的默认认识。对新材料，判断下次因另一件事接触这个对象时是否值得默认读到；对已有摘要，核对每项判断的依据、适用范围和确定程度。仍然准确时，完成复核即可。
+
+Secretary 在 Topic 内按到期顺序选取待整理的普通 Note，每次最多 8 条。创建 `notes_changed` Input 和更新本批 Note 的 `curateAt` 在同一事务完成，冷却时长取 `curation.maxWaitSeconds` 与 `capacityCooldownSeconds` 的较大值（默认 15 分钟）。尚未确认的 Note 到期可再次入选；内容、归属或分类等材料发生变化时清除冷却，改名或调整篇幅预算保留冷却。
 
 ## 数量与篇幅驱动的整理
 

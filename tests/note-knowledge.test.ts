@@ -52,7 +52,7 @@ async function setup(t: TestContext) {
   };
   const get = async (id: string) => (await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: id }))!;
   const context = { resources, logger: { info() {}, debug() {} }, instance: { config: { topic: { idleMs: 1000 } } } } as unknown as PluginContext;
-  return { aide, resources, root, read, note, get, context };
+  return { aide, resources, root, read, note, get, context, home };
 }
 
 test("Note discovery covers retained history beyond recent with bounded search pages", async t => {
@@ -707,6 +707,49 @@ test("two stale-only assessments defer that material behind other pending drafts
   assert.deepEqual(await finish(), deferred);
   assert.ok(pendingCuration(await f.get(other.noteId))! <= pendingCuration(await f.get(draft.noteId))!);
   assert.equal((await f.get(draft.noteId)).status.curated, undefined);
+});
+
+test("Note dispatch cooldown follows the material across overlapping batches and survives reopening", async t => {
+  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const f = await setup(t), policy = topicPolicy({ curation: { count: 1 } });
+  const a = await f.note({ nature: "semantic", text: "A" }, "a");
+  const b = await f.note({ nature: "semantic", text: "B" }, "b");
+  const now = Date.now();
+  const requests = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate");
+  await Promise.all([a, b].map(async n => prepareNoteMaintenance(f.context, await f.get(n.noteId), policy, now)));
+  assert.equal(requests().length, 1);
+  const first = requests()[0]!;
+  assert.deepEqual(new Set((first.spec.observation!.notes as typeof a[]).map(n => n.noteId)), new Set([a.noteId, b.noteId]));
+  const retryAt = (await f.get(a.noteId)).status.curateAt!;
+  assert.equal((await f.get(b.noteId)).status.curateAt, retryAt);
+  assert.ok(Date.parse(retryAt) >= now + policy.curation.maxWaitSeconds * 1000);
+
+  const c = await f.note({ nature: "semantic", text: "C" }, "c");
+  await prepareNoteMaintenance(f.context, await f.get(c.noteId), policy, now + 1);
+  assert.equal((await f.get(c.noteId)).status.curateAt, undefined);
+  await deliverInput(f.resources, f.read(), "live", first.metadata.name);
+  await prepareNoteMaintenance(f.context, await f.get(c.noteId), policy, now + 2);
+  const second = requests().find(i => i.metadata.uid !== first.metadata.uid)!;
+  assert.deepEqual(second.spec.observation!.notes, [c]);
+  await deliverInput(f.resources, f.read(), "live", second.metadata.name);
+  const renamed = await f.note({ ...a, name: "new label" }, "rename");
+  assert.equal((await f.get(a.noteId)).status.curateAt, retryAt);
+  await f.note({ ...renamed, text: "A changed" }, "edit");
+  assert.equal((await f.get(a.noteId)).status.curateAt, undefined);
+
+  const { home } = f;
+  await f.aide.close();
+  const reopened = new Aide(home, fakeOptions({ async execute() { throw new Error("Unexpected inference"); } }, home), log);
+  try {
+    const resources = reopened.runtime.plugins.resourceClient("personal");
+    const saved = (await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, name: b.noteId, namespace: "v1" }))!;
+    assert.equal(saved.status.curateAt, retryAt);
+    const ctx = { ...f.context, resources };
+    assert.equal((await prepareNoteMaintenance(ctx, saved, policy, Date.parse(retryAt) - 1))?.requeueAfterMs, 1);
+    await prepareNoteMaintenance(ctx, saved, policy, Date.parse(retryAt));
+    const retried = await resources.get<NoteSpec, NoteStatus>(resourceRef(saved));
+    assert.ok(Date.parse(retried!.status.curateAt!) > Date.parse(retryAt));
+  } finally { await reopened.close(); }
 });
 
 test("curate batches classified drafts and acknowledges only final versions it actually reviewed", async t => {

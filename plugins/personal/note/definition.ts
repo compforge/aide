@@ -4,7 +4,7 @@ import type { InputSpec, InputStatus } from "../input/model.ts";
 import { isGateTopic } from "../topic/boundary.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { requireOrganization, requireTopic } from "../topic/ownership.ts";
-import { pendingCuration, noteMaterial, noteVersion, noteMaxChars } from "./model.ts";
+import { clearCurationSchedule, pendingCuration, noteMaterial, noteVersion, noteMaxChars } from "./model.ts";
 import { requireContentWriter } from "../context-write.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { NOTE_TYPE, WriterResourceSchema, NoteSpecSchema, NoteStatusSchema, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
@@ -58,7 +58,7 @@ function validateSplitPart(part: NoteResource, context: ResourceValidationContex
   requireOrganization({ actorUid: writer.resource.uid, executionId: writer.executionId, at: part.status.updatedAt, reason: "Split Note" }, context, topics);
 }
 export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
-  type: NOTE_TYPE, indexVersion: 8, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
+  type: NOTE_TYPE, indexVersion: 9, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
   validator: { create: (note, context) => {
     const owner = validate(note, context);
     const chiefDraft = note.status.writer?.resource.kind === "Topic" && !note.status.splitFrom && !!note.spec.text;
@@ -67,12 +67,16 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
       if (note.spec.text !== "" || note.metadata.name !== summaryName(owner))
         throw new Error("Creating an ordinary Note requires nature (semantic or procedural)");
     }
-    if (note.status.curationRetry || note.status.curated || note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts");
+    if (note.status.curateAt || note.status.curationRetry || note.status.curated || note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts");
     validateAddresses(note, context); validateSplitPart(note, context);
   }, update: (before, after, context) => {
     if (!after.spec.summaryOf && !after.spec.nature && (before.spec.nature || (!before.spec.text && after.spec.text)))
       throw new Error("An ordinary Note must retain its nature");
     if (!equalResourceValue(before.status.splitFrom, after.status.splitFrom)) throw new Error("Split provenance is immutable");
+    // Secretary schedules the next dispatch independently of the historical content writer.
+    if (after.status.curateAt && after.status.curateAt !== before.status.curateAt
+      && pendingCuration(before) && equalResourceValue(before.spec, after.spec)
+      && equalResourceValue({ ...before.status, curateAt: after.status.curateAt }, after.status)) return;
     if (!equalResourceValue(before.status.curationRetry, after.status.curationRetry)) {
       const retry = after.status.curationRetry;
       const input = retry && context.get<InputSpec, InputStatus>(INPUT_TYPE, retry.inputUid);
@@ -119,7 +123,8 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
     if (!equalResourceValue(before.spec.addresses, after.spec.addresses)) validateAddresses(after, context);
     if (!equalResourceValue(before.spec.addresses, after.spec.addresses)
       && equalResourceValue({ ...before.spec, addresses: undefined }, { ...after.spec, addresses: undefined })
-      && equalResourceValue(before.status, after.status)) {
+      && equalResourceValue(clearCurationSchedule(before.status), clearCurationSchedule(after.status))
+      && (!after.status.curateAt || after.status.curateAt === before.status.curateAt)) {
       const removed = [...before.spec.addresses].filter(a => ![...after.spec.addresses].some(ref => ref.uid === a.uid));
       const targets = [...after.spec.addresses].filter(a => ![...before.spec.addresses].some(ref => ref.uid === a.uid));
       const sourceUids = removed.length ? removed.map(a => a.uid) : before.spec.summaryOf?.kind === "Address" ? [before.spec.summaryOf.uid] : [];
@@ -167,7 +172,7 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
   orderedIndexes: {
     pendingCuration: note => {
       const since = pendingCuration(note);
-      return since ? [{ value: note.status.curationRoot ?? note.spec.subject.uid, order: since }] : [];
+      return since ? [{ value: note.status.curationRoot ?? note.spec.subject.uid, order: note.status.curateAt && note.status.curateAt > since ? note.status.curateAt : since }] : [];
     },
     oversizedSubject: r => !r.metadata.deletionTimestamp && !r.status.retired && r.spec.text.length > noteMaxChars(r.spec)
       ? [{ value: r.spec.subject.uid, order: r.metadata.uid }] : [],
