@@ -1,3 +1,4 @@
+import { observeEntries } from "./usage.ts";
 import { bindBackground } from "./background.ts";
 import type { ReadBackground } from "../background.ts";
 import { existsSync } from "node:fs";
@@ -59,10 +60,11 @@ export async function createPiAgent(options: PiAgentOptions): Promise<AgentSessi
   const extensionTools = extensions.extensions.flatMap((extension) => [...extension.tools.keys()]).filter(name => !options.extensionToolNames || options.extensionToolNames.includes(name));
   const tools = options.tools ?? [];
   const native = manager ?? SessionManager.create(cwd, `${agentDir}/sessions`);
-  const capture = options.config.observation?.open(native);
+  const observed = options.config.observeEntry ? observeEntries(native, options.scope ?? "pi", options.config.observeEntry) : native;
+  const capture = options.config.observation?.open(observed);
   let session: AgentSession;
   try {
-    ({ session } = await createAgentSession({ cwd, agentDir, sessionManager: capture?.manager ?? native, modelRuntime,
+    ({ session } = await createAgentSession({ cwd, agentDir, sessionManager: capture?.manager ?? observed, modelRuntime,
     settingsManager: settings, resourceLoader: loader, model,
     tools: [...(options.nativeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls"]), ...tools.map((tool) => tool.name), ...extensionTools], customTools: tools }));
   } catch (error) { capture?.close(); throw error; }

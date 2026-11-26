@@ -6,7 +6,7 @@ export interface WebService extends ChannelService {
   health(): { status: "ok" | "unavailable"; unavailablePlugins: string[] };
   defaultAddress(): import("../../plugins/personal/address/model.ts").AddressRef;
   validateDefaultAddress(ref: import("../../plugins/personal/address/model.ts").AddressRef): Promise<void>;
-  readonly usageIndex?: import("../../plugins/personal/observation/usage-index.ts").UsageIndex;
+  readonly usageStore?: import("../../plugins/personal/observation/usage-store.ts").UsageStore;
   readSession?: import("../../plugins/personal/observation/session.ts").ReadSession;
   readonly addresses: import("../../plugins/personal/address/service.ts").Addresses;
   readonly persons: import("../../plugins/personal/person/service.ts").Persons;
