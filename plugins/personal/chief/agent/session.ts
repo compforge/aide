@@ -69,6 +69,7 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
     }, confirm, notes => mailSender.cite(active().status.execution!.id, notes));
     let inputOrigin: import("../../input/model.ts").InputOrigin = "chief";
     const session = await createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, inputBinding: {
+      onUsageError: err => log.warn({ err, topicId }, "Chief usage origin unavailable"),
       read: () => {
         const c = active();
         return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "chief",

@@ -14,6 +14,7 @@ export interface ChiefInputBinding {
   read(): ChiefInputTask;
   ongoingUid?(id: string): Promise<string | undefined>;
   noteSummaryOwner?(id: string): Promise<string | undefined>;
+  onUsageError?(error: unknown): void;
   changed(task: ChiefInputTask, tools: string[]): void;
 }
 const instructions: Record<InputOrigin, string> = {
@@ -52,6 +53,7 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
   let allowed: Set<string> | undefined;
   let deliveredInternalId: string | undefined;
   let delivered = new Set<string>();
+  let taggedOrigin: string | undefined;
   const select = (receivedOrigin?: InputOrigin) => {
     const admitted = binding.read();
     const newExecution = current?.executionId !== admitted.executionId;
@@ -83,6 +85,7 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
   // Switch the tool scope only when Pi actually appends the admitted user message.
   session.agent.subscribe(event => {
     if (event.type !== "message_end" || event.message.role !== "user") return;
+    taggedOrigin = undefined;
     const id = deliveredMessageId(event.message.content);
     if (!id) return;
     const inputs = binding.read().inputs.filter(input => (input.deliveryId ?? input.id) === id);
@@ -95,6 +98,17 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
   const prepareRequest = session.agent.prepareRequest;
   session.agent.prepareRequest = async (request, signal) => {
     const prepared = await prepareRequest?.(request, signal);
+    if (current) {
+      const categories = new Set(current.inputs.map(input => isInternalInput(input) ? input.origin : "business"));
+      const fallback = isInternalInput(current) ? current.origin : "business";
+      const origin = categories.size > 1 ? "mixed" : [...categories][0] ?? fallback;
+      if (origin !== taggedOrigin) {
+        try {
+          session.sessionManager.appendCustomEntry("aide.usage-origin", { origin });
+          taggedOrigin = origin;
+        } catch (error) { binding.onUsageError?.(error); }
+      }
+    }
     const context = prepared?.context ?? request.context;
     const tools = session.agent.state.tools.slice();
     // Pi declares its normal next-turn loadout before queued messages arrive. Project a late delivery's

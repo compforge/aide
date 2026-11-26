@@ -1368,7 +1368,7 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
     return { text: "Answered the immediate input" };
   }, "chief");
   const result = () => ({ content: [{ type: "text" as const, text: "ok" }], details: {} });
-  const session = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding: {
+  const session = await createChiefAgent({ ...fixture.config, scope: "chief:usage-test", work: fixture.work, inputBinding: {
     read: () => task,
     changed: current => switched.push(current.origin),
   }, tools: [
@@ -1387,6 +1387,12 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
     await session.prompt('Activation: {"inputId":"maintenance"}');
     assert.equal(fixture.requests.length, 5);
     assert.equal(reviewed, 1); assert.equal(said, 1);
+    const { UsageIndex } = await import("../plugins/personal/observation/usage-index.ts");
+    const index = new UsageIndex(fixture.config.cwd, new Map([[join(fixture.config.agentDir, "sessions"), ["chief"]]]));
+    await index.refresh();
+    const observed = index.sessions().find(s => s.id === session.sessionId);
+    assert.deepEqual(Array.from(observed!.calls.values(), call => call.origin),
+      ["aide:curate", "aide:curate", "business", "business", "business"]);
     assert.deepEqual(switched, ["aide:curate", "channel"]);
     assert.match(JSON.stringify(fixture.requests[1]!.messages), /not found|unavailable|not available/i);
     assert.match(JSON.stringify(fixture.requests[3]!.messages), /not found|unavailable|not available/i);

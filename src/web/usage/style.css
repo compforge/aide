@@ -1,0 +1,17 @@
+@import "../shared/style.css";
+header .main-tabs { grid-column: 3 }
+main { display: block; height: auto; padding: 22px clamp(16px,4vw,60px) 60px }
+h2 { margin: 0 0 20px }
+h3 { margin-top: 28px }
+form { display: flex; align-items: center; gap: 16px; flex-wrap: wrap }
+form label { font-size: .9rem }
+select, form button { padding: 7px 10px; border-radius: 6px; font: inherit }
+.sheet { overflow-x: auto; border: 1px solid #d8dfd5; border-radius: 8px; background: white }
+table { width: 100%; border-collapse: collapse; white-space: nowrap; font-variant-numeric: tabular-nums }
+th, td { text-align: right; padding: 9px 12px; font-size: .86rem; border-bottom: 1px solid #e4e8df }
+th { background: #edf1e8 }
+th:first-child, td:first-child { text-align: left }
+tr:last-child td { border-bottom: 0 }
+#calls { scroll-margin-top: 100px }
+td a, #calls a { color: #305b43 }
+#calls button { margin: 8px 6px 0 0 }

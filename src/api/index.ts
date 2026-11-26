@@ -29,6 +29,8 @@ import { topicView } from "../channel/view.ts";
 import { historyCursor } from "../../plugins/personal/topic/history.ts";
 import { streamTopic } from "./stream.ts";
 import { renderHTML } from "@compforge/agent-observation";
+import { usageRoles } from "../../plugins/personal/observation/usage-index.ts";
+import { usageReport, receiptOrigin, sessionCalls } from "../../plugins/personal/observation/usage.ts";
 import { inputObservation, ObservationQuery } from "./observation.ts";
 import { outputList, outputFilters, outputDetail, outputSession } from "./outputs.ts";
 import { inputList, inputFilters, inputDetail } from "./inputs.ts";
@@ -332,6 +334,30 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         await aide.start();
         const detail = outputDetail(aide, query.id, query.uid);
         json(response, detail ? 200 : 404, detail ?? { error: "Output 已回收或不存在。" }); return;
+      }
+      if (request.method === "GET" && (["/usage/report", "/usage/session", "/usage/calls"].includes(url.pathname))) {
+        const index = aide.usageIndex;
+        if (!index) { json(response, 503, { error: "Usage 索引未启用。" }); return; }
+        await index.latest();
+        response.setHeader("cache-control", "no-store");
+        if (url.pathname !== "/usage/session") {
+          const filters = z.object({ window: z.enum(["24h", "7d"]).default("24h"), role: z.enum(usageRoles).optional(),
+            provider: z.string().max(200).optional(), model: z.string().max(250).optional() }).strict();
+          const params = Object.fromEntries(url.searchParams);
+          const lookup = (id: string, marker: string) => receiptOrigin(aide.topics, id, marker);
+          if (url.pathname === "/usage/calls") {
+            const q = filters.extend({ id: z.string().min(1).max(250), role: z.enum(usageRoles), page: z.coerce.number().int().positive().default(1) }).parse(params);
+            const result = sessionCalls(index,q.id,q,lookup,q.page);
+            json(response,result ? 200 : 404,result ?? { error: "Session 不可用。" }); return;
+          }
+          json(response, 200, usageReport(index, filters.parse(params), lookup)); return;
+        }
+        const query = z.object({ id: z.string().min(1).max(250), role: z.enum(usageRoles) }).strict().parse(Object.fromEntries(url.searchParams));
+        const session = index.sessions().find(s => s.id === query.id && s.role === query.role);
+        if (!session || !aide.readSession) { json(response, 404, { error: "Session 不可用。" }); return; }
+        const view = await aide.readSession({ harness: session.role, sessionId: session.id }, session.role);
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'" });
+        response.end(renderHTML(view)); return;
       }
       if (request.method === "GET" && url.pathname === "/outputs/session") {
         const query = OutputDetailSchema.extend({ uid: z.string().min(1).max(250) }).parse(Object.fromEntries(url.searchParams));
