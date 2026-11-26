@@ -12,18 +12,36 @@ export function usageOrigin(origin: string) {
   return origins.has(origin) || origin === "mixed" || origin === "business" ? origin : "unknown";
 }
 
-/** Match a native admission marker to the durable receipt for this exact session. */
-export function receiptOrigin(topics: Pick<TopicStore, "inputStore" | "resources">, session: string, marker: string) {
-  const execution = marker.split(":")[0]!;
-  const matches = (receipt: InputStatus["assess"]) => receipt?.agent?.sessionId === session
-    && (receipt.deliveryId ?? receipt.executionId) === marker;
-  const matching = topics.inputStore.query("deliveryExecution", execution).filter(i => matches(i.status.assess));
-  const values = new Set(matching.map(input => usageOrigin(input.spec.origin)));
-  // Batch admission accepts only compatible business Inputs.
-  const batches = topics.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "deliveryExecution", value: execution } });
-  if (batches.some(b => matches(b.status.assess))) values.add("business");
-  return values.size > 1 ? "mixed" : [...values][0] ?? "unknown";
+/**
+ * @spec Historical attribution matches the exact native Session and admission marker.
+ * @why Build one request-local lookup on demand so old Sessions cannot trigger thousands of resource queries.
+ * @link docs/observation.md#agent-usage
+ */
+export function receiptOriginLookup(topics: Pick<TopicStore, "inputStore" | "resources">): OriginLookup {
+  let index: Map<string, string> | undefined;
+  const key = (session: string, marker: string) => JSON.stringify([session, marker]);
+  return (session, marker) => {
+    if (!index) {
+      const origins = new Map<string, string>();
+      const collect = (receipt: InputStatus["assess"], origin: string) => {
+        if (!receipt?.executionId || !receipt.agent?.sessionId) return;
+        const id = key(receipt.agent.sessionId, receipt.deliveryId ?? receipt.executionId);
+        const previous = origins.get(id);
+        origins.set(id, previous && previous !== origin ? "mixed" : origin);
+      };
+      for (const input of topics.inputStore.list()) {
+        if (!input.status.batchId && !input.metadata.deletionTimestamp)
+          collect(input.status.assess, usageOrigin(input.spec.origin));
+      }
+      // Batch admission accepts only compatible business Inputs.
+      for (const batch of topics.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE))
+        collect(batch.status.assess, "business");
+      index = origins;
+    }
+    return index.get(key(session, marker)) ?? "unknown";
+  };
 }
+
 class Group {
   calls = 0;
   auxiliaryRecords = 0;
