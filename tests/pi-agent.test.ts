@@ -48,7 +48,7 @@ import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createHarnessAdapter } from "../src/host/harness/registry.ts";
 import type { HarnessEvent, HarnessSessionReference } from "../src/host/harness/adapter.ts";
 
-type Reply = { text: string; stop?: string; thought?: string; pause?: Promise<void> } | { tool: string; args: unknown; pause?: Promise<void> } | { error: true } | { hold: true };
+type Reply = { text: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }; stop?: string; thought?: string; pause?: Promise<void> } | { tool: string; args: unknown; pause?: Promise<void> } | { error: true } | { hold: true };
 
 /** @case Gate uses its independent native session, reads domain evidence and delegates a Task whose cited result returns to Gate. */
 test("Gate native loop reads across roots, delegates analysis and resumes after restart", { timeout: 45_000 }, async t => {
@@ -165,6 +165,10 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
         id: `tool-${requests.length}`, type: "function", function: { name: reply.tool, arguments: JSON.stringify(reply.args) } }] } : { content: reply.text }) }, null);
       if ("pause" in reply) await reply.pause;
       chunk({}, "tool" in reply ? "tool_calls" : reply.stop ?? "stop");
+      if ("usage" in reply && reply.usage) res.write(`data: ${JSON.stringify({
+        id: `reply-${requests.length}`, object: "chat.completion.chunk", created: 1, model: "test-model",
+        choices: [], usage: reply.usage,
+      })}\n\n`);
       res.end("data: [DONE]\n\n");
     } catch (error) { res.writeHead(500); res.end(String(error)); }
   });
@@ -1365,10 +1369,14 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
     if (index === 1) return { tool: "maintenance_action", args: {} };
     if (index === 2) return { tool: "maintenance_action", args: {} };
     if (index === 3) return { tool: "say", args: {} };
-    return { text: "Answered the immediate input" };
+    return { text: "Answered the immediate input", usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } };
   }, "chief");
   const result = () => ({ content: [{ type: "text" as const, text: "ok" }], details: {} });
-  const session = await createChiefAgent({ ...fixture.config, scope: "chief:usage-test", work: fixture.work, inputBinding: {
+  const { UsageStore } = await import("../plugins/personal/observation/usage-store.ts");
+  const usageStore = new UsageStore(join(fixture.config.cwd, "usage.sqlite"));
+  t.after(() => usageStore.close());
+  const session = await createChiefAgent({ ...fixture.config, scope: "chief:usage-test",
+    config: { ...fixture.config.config, observeEntry: usageStore.record.bind(usageStore) }, work: fixture.work, inputBinding: {
     read: () => task,
     changed: current => switched.push(current.origin),
   }, tools: [
@@ -1387,12 +1395,11 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
     await session.prompt('Activation: {"inputId":"maintenance"}');
     assert.equal(fixture.requests.length, 5);
     assert.equal(reviewed, 1); assert.equal(said, 1);
-    const { UsageIndex } = await import("../plugins/personal/observation/usage-index.ts");
-    const index = new UsageIndex(fixture.config.cwd, new Map([[join(fixture.config.agentDir, "sessions"), ["chief"]]]));
-    await index.refresh();
-    const observed = index.sessions().find(s => s.id === session.sessionId);
-    assert.deepEqual(Array.from(observed!.calls.values(), call => call.origin),
+    const observed = [...usageStore.calls(0, Date.now(), { window: "24h", role: "chief" })];
+    assert.deepEqual(observed.map(call => call.origin),
       ["aide:curate", "aide:curate", "business", "business", "business"]);
+    assert.equal(new Set(observed.map(call => call.session)).size, 1);
+    assert.deepEqual(observed.filter(call => call.input !== null).map(call => [call.input, call.output]), [[10, 5]]);
     assert.deepEqual(switched, ["aide:curate", "channel"]);
     assert.match(JSON.stringify(fixture.requests[1]!.messages), /not found|unavailable|not available/i);
     assert.match(JSON.stringify(fixture.requests[3]!.messages), /not found|unavailable|not available/i);

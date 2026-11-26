@@ -60,7 +60,7 @@ export interface AideOptions {
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
   defaultHarnessConfig: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
   createAdapter: ExecutionOptions["createAdapter"];
-  readonly usageIndex?: import("../plugins/personal/observation/usage-index.ts").UsageIndex;
+  readonly usageStore?: import("../plugins/personal/observation/usage-store.ts").UsageStore;
   readSession?: import("../plugins/personal/observation/session.ts").ReadSession;
 }
 
@@ -70,7 +70,7 @@ export interface AideOptions {
  * @link AGENTS.md#项目定位与边界
  */
 export class Aide {
-  readonly usageIndex?: import("../plugins/personal/observation/usage-index.ts").UsageIndex;
+  readonly usageStore?: import("../plugins/personal/observation/usage-store.ts").UsageStore;
   readSession?: import("../plugins/personal/observation/session.ts").ReadSession;
   private readonly inputDefinitions = new Map<string, ChannelDefinition | SourceDefinition>([
     ...Object.values(CHANNELS).map((definition) => [`channel:${definition.id}`, definition] as const),
@@ -111,7 +111,7 @@ export class Aide {
   private closed = false;
 
   constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
-    this.usageIndex = options.usageIndex;
+    this.usageStore = options.usageStore;
     this.readSession = options.readSession;
     this.defaultHarnessConfig = Object.freeze({ ...options.defaultHarnessConfig });
     const config = options.config;

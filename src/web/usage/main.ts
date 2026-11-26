@@ -2,7 +2,7 @@ import "./style.css";
 import { byId, element } from "../shared/dom.ts";
 import { request, errorMessage } from "../shared/http.ts";
 import type { UsageReport } from "../../../plugins/personal/observation/usage.ts";
-import type { UsageCall } from "../../../plugins/personal/observation/usage-index.ts";
+import type { UsageCall } from "../../../plugins/personal/observation/usage-store.ts";
 
 const roleName = (role: string) => role.charAt(0).toUpperCase() + role.slice(1);
 const period = byId<HTMLSelectElement>("window"), role = byId<HTMLSelectElement>("role"), model = byId<HTMLSelectElement>("model");

@@ -45,9 +45,9 @@ observation:
 
 Web 主导航的「Usage」按滚动 24 小时或 7 天展示 Gate、Route、Chief、Weave、Task、Routine。按角色或 provider/model 筛选后，可以打开用量最高的 20 个 Session，分页查看调用和原生 SessionView。单次调用和缓存命中都计入使用该模型的角色，短 Session 也可单独查看。
 
-Host 启动时读取已配置 Pi 角色目录中属于当前工作目录的原生 JSONL。内存索引只保留查询使用的元数据，按文件增量读取完整行，定期刷新，重启时从仍保留的原生文件重建。计量身份为 Session ID 和原生 entry ID。多个 Input 共享一次模型调用时，这次用量只计一次。用量统计独立于 captureRequests。
+Gate、Route、Chief、Weave、Task、Routine 运行时，Host 在 Pi 追加带用量的条目后把计数写入 `$AIDE_HOME/usage.sqlite`。记录包含时间、角色、模型、Session ID、entry ID 和可用的触发来源。计量身份为 Session ID 和原生 entry ID。多个 Input 共享一次模型调用时，这次用量只计一次。报表与调用明细查询 SQLite。原生 SessionView 仍按需读取 Pi 文件。用量统计独立于 `captureRequests`，数据从升级后首次调用开始积累。
 
 - 每条原生 Assistant 响应计一次可观测调用，包括有用量的失败响应。窗口按原生记录时间确定。有用量的调用数除以可观测调用数表示覆盖率，缺失或全零 usage 的响应保留在分母中。provider 未返回记录的尝试无法从 Session 还原。
 - Input、Output、Cache read、Cache write 使用 Pi 适配器归一化的计数。单次输入规模为 Input 加 Cache read 和 Cache write，P50、P95 取有计数的响应。压缩、分支摘要和缓存预热等原生辅助记录中显式报告的用量也计入 token 总量，另列辅助 token。单条摘要可能涵盖多次请求，辅助记录单独展示类型。模型未记录时显示 unknown。
-- Chief 在 provider 请求准备阶段将当前任务来源写入 Pi 原生自定义条目，沿原生父子关系关联响应。历史调用可通过同一 Session 内的投递标识与保留的 Input 或 Batch 回执关联。不同业务渠道均归入普通 Input。混合来源和无法归属的调用单列。
+- Chief 在 provider 请求准备阶段标记当前任务来源，Host 记录响应时把该来源一并写入 SQLite。不同业务渠道均归入普通 Input。混合来源和无法归属的调用单列。
 - Route 的分母取窗口内成功的 route_input 回执，按 Input ID 去重。平均值为同一窗口 Route 的已观测 tokens 除以成功路由的 Input 数。跨窗口推进会影响该比值，按模型筛选时只展示模型本身的用量。
