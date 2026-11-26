@@ -15,24 +15,28 @@ export async function prepareNoteMaintenance(context: PluginContext, note: NoteR
   if (note.metadata.deletionTimestamp || note.status.retired || note.spec.summaryOf) return;
   const since = pendingCuration(note);
   if (!since) return;
+  const at = new Date(now).toISOString();
+  if (note.status.curateAt && note.status.curateAt > at) return { requeueAfterMs: Date.parse(note.status.curateAt) - now };
   const topic = await noteRoot(context, note);
   if (!topic || !isRootTopic(topic)) return;
-  const cooldown = policy.capacityCooldownSeconds;
+  // Give an unchanged Note a full curation window before it can consume another Chief turn.
+  const cooldown = Math.max(policy.capacityCooldownSeconds, policy.curation.maxWaitSeconds);
   let next: number;
   const { items } = await context.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, {
     matchIndex: { name: "pendingCuration", value: topic.metadata.uid }, limit: 8, direction: "asc" });
   // A Work or subtree may have moved since the last Note write. Recheck ownership before sharing its ID.
-  const roots = await Promise.all(items.map(item => noteRoot(context, item)));
-  const batch = items.filter((_, i) => roots[i]?.metadata.uid === topic.metadata.uid);
+  const eligible = items.filter(item => !item.status.curateAt || item.status.curateAt <= at);
+  const roots = await Promise.all(eligible.map(item => noteRoot(context, item)));
+  const batch = eligible.filter((_, i) => roots[i]?.metadata.uid === topic.metadata.uid);
   if (batch.length < 8 && !batch.some(item => item.metadata.uid === note.metadata.uid)) batch.push(note);
   const oldest = Math.min(...batch.map(item => Date.parse(pendingCuration(item)!)));
   const due = batch.length >= policy.curation.count ? now : oldest + policy.curation.maxWaitSeconds * 1000;
   if (due <= now) {
     const notes = batch.map(item => ({ noteId: item.metadata.name, version: noteVersion(item) }));
     const instructions = `Start with these changed ordinary Notes, then look for related evidence and duplicates: ${notes.map(item => item.noteId).join(", ")}.`;
-    await tryCreateMaintenanceInput(context, topic, new Date(now).toISOString(), await maintenanceAgenda(context.resources, [], policy),
-      "aide:curate", "notes_changed", { notes, instructions, cooldownSeconds: cooldown }, policy, digest(notes));
-    next = now + cooldown * 1000;
+    await tryCreateMaintenanceInput(context, topic, at, await maintenanceAgenda(context.resources, [], policy),
+      "aide:curate", "notes_changed", { notes: batch, instructions, cooldownSeconds: cooldown }, policy, digest(notes));
+    next = now + policy.capacityCooldownSeconds * 1000;
   } else next = due;
   return { requeueAfterMs: Math.min(Math.max(1, next - now), 2_147_483_647) };
 }

@@ -7,7 +7,7 @@ import { ADDRESS_TYPE, addressRef, addressRefs, locators, type AddressResource, 
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { PERSON_TYPE, personRefs, type Person, type PersonStatus } from "../person/model.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../topic/model.ts";
-import { NOTE_TYPE, type NoteSpec, type NoteStatus } from "../note/model.ts";
+import { clearCurationSchedule, NOTE_TYPE, type NoteSpec, type NoteStatus } from "../note/model.ts";
 import { OUTPUT_TYPE } from "../output/model.ts";
 
 /** @spec Address owns equivalence and merge progress. Inputs persist before coordination and immutable historical refs never redirect.
@@ -84,7 +84,7 @@ export class AddressCoordinator {
     }
     const notes = r.page<NoteSpec, NoteStatus>(NOTE_TYPE, { limit: 50, matchIndex: { name: "addresses", value: source.uid } }).items;
     for (const note of notes) r.replace(NOTE_TYPE, note.metadata.name, { ...note.spec,
-      addresses: addressRefs([...note.spec.addresses].map(ref => ref.uid === source.uid ? to : ref)) }, note.status);
+      addresses: addressRefs([...note.spec.addresses].map(ref => ref.uid === source.uid ? to : ref)) }, clearCurationSchedule(note.status));
     if (notes.length) return { requeueAfterMs: 100 };
     // The old summary remains an independently classified Note, discoverable at the survivor. Its authorship and body are untouched.
     const summary = r.page<NoteSpec, NoteStatus>(NOTE_TYPE, { limit: 1, matchIndex: { name: "summaryOf", value: source.uid } }).items[0];

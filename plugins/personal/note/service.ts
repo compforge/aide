@@ -9,7 +9,7 @@ import type { Resource, ResourceClient, ResourceCommit } from "@compforge/aide-p
 import { personRefs, PersonRefsSchema } from "../person/model.ts";
 import { readTopicRoot } from "../topic/tree.ts";
 import { resourceRef } from "../input/state.ts";
-import { NOTE_TYPE, pendingCuration, noteMaterial, NoteNameSchema, NoteNatureSchema, MaxCharsSchema, noteMaxChars, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
+import { clearCurationSchedule, NOTE_TYPE, pendingCuration, noteMaterial, NoteNameSchema, NoteNatureSchema, MaxCharsSchema, noteMaxChars, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
 
 export const NoteUpdateSchema = z.object({ version: z.string().min(1).optional(), noteId: z.string().min(1).optional(),
   name: NoteNameSchema.optional(), nature: NoteNatureSchema.optional(), maxChars: MaxCharsSchema.optional(),
@@ -75,8 +75,9 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
   const updatedAt = new Date(now).toISOString();
   const topic = actor.kind === "Topic" ? writer.resource : (actor.status as import("../work/model.ts").WorkStatus).topic;
   const root = topic && await readTopicRoot(resources, topic);
-  const status = { ...previous?.status, updatedAt, writer, curationRoot: root?.metadata.uid,
-    pendingSince: previous && noteMaterial(previous.spec) === noteMaterial(spec) ? previous.status.pendingSince : (previous && pendingCuration(previous)) ?? updatedAt, ...(pruning ? { pruned: pruning } : {}) };
+  const sameMaterial = previous && noteMaterial(previous.spec) === noteMaterial(spec);
+  const status = { ...(previous && (sameMaterial ? previous.status : clearCurationSchedule(previous.status))), updatedAt, writer, curationRoot: root?.metadata.uid,
+    pendingSince: sameMaterial ? previous.status.pendingSince : (previous && pendingCuration(previous)) ?? updatedAt, ...(pruning ? { pruned: pruning } : {}) };
   try {
     const updated = previous ? await resources.replace(previous, spec, status)
       : await resources.create(NOTE_TYPE, { name: id, spec, status });

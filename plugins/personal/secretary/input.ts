@@ -1,4 +1,5 @@
-import { retryOnConflict, type PluginContext } from "@compforge/aide-plugin";
+import { isResourceVersionConflict, retryOnConflict, type PluginContext } from "@compforge/aide-plugin";
+import { noteVersion, type NoteResource } from "../note/model.ts";
 import { assignInput } from "../input/assignment.ts";
 import { inputStatus } from "../input/conditions.ts";
 import { INPUT_TYPE, InputAttention, deliveryFinished, type InputSpec, type InputStatus } from "../input/model.ts";
@@ -10,7 +11,7 @@ import type { ReviewPreparation } from "./review.ts";
 import { chiefWorkload } from "../topic/workload.ts";
 import { digest } from "../identity.ts";
 import { followupInputId, type OngoingResource } from "../ongoing/model.ts";
-class ObsoleteOngoingCheck extends Error {}
+class ObsoleteMaintenanceRequest extends Error {}
 type MaintenanceOrigin = "aide:curate" | "aide:followup" | "aide:organize";
 
 const maintenanceTask: Record<MaintenanceOrigin, string> = {
@@ -25,15 +26,15 @@ const maintenanceTask: Record<MaintenanceOrigin, string> = {
  * @link docs/personal/secretary.md#容量与维护请求
  */
 export async function createMaintenanceInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" | "ongoing_check_due" | "work_input" = "idle", preparation?: { notes?: { noteId: string; version: string }[]; ongoing?: OngoingResource; materials?: readonly Input[]; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
-  if (origin === "aide:followup" && (!preparation?.ongoing || !preparation.materials?.length && !followupInputId(preparation.ongoing))) throw new ObsoleteOngoingCheck();
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" | "ongoing_check_due" | "work_input" = "idle", preparation?: { notes?: NoteResource[]; ongoing?: OngoingResource; materials?: readonly Input[]; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
+  if (origin === "aide:followup" && (!preparation?.ongoing || !preparation.materials?.length && !followupInputId(preparation.ongoing))) throw new ObsoleteMaintenanceRequest();
   const target = resourceRef(topic);
   const maintenance = preparation?.plan, instructions = preparation?.instructions ?? "";
   const input = await retryOnConflict(async () => {
     const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(target);
     if (preparation?.ongoing && origin === "aide:followup") {
       const fresh = await context.resources.get<OngoingResource["spec"], OngoingResource["status"]>(resourceRef(preparation.ongoing));
-      if (!fresh || fresh.metadata.resourceVersion !== preparation.ongoing.metadata.resourceVersion) throw new ObsoleteOngoingCheck();
+      if (!fresh || fresh.metadata.resourceVersion !== preparation.ongoing.metadata.resourceVersion) throw new ObsoleteMaintenanceRequest();
     }
     if (!current || current.metadata.deletionTimestamp) throw new Error("Maintenance Topic no longer exists");
     const pending = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
@@ -42,18 +43,28 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
     const scheduledMatter = origin === "aide:followup" ? preparation?.ongoing : undefined;
     const materials = preparation?.materials ?? [];
     const consumesCheck = scheduledMatter && !scheduledMatter.status.followupInputId && dueAt === scheduledMatter.status.nextCheckAt;
-    const inputId = scheduledMatter ? (consumesCheck ? followupInputId(scheduledMatter)! : fingerprint) : `${origin.slice(5)}-${digest([topic.metadata.uid, dueAt])}`;
+    const requestKey = [topic.metadata.uid, dueAt];
+    if (preparation?.notes) requestKey.push(fingerprint);
+    const inputId = scheduledMatter ? (consumesCheck ? followupInputId(scheduledMatter)! : fingerprint) : `${origin.slice(5)}-${digest(requestKey)}`;
     const at = new Date().toISOString();
     const spec: InputSpec = {
       origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
       text: `${maintenanceTask[origin]} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; ${origin === "aide:followup" ? "Ask Me privately if a consequential fact is still missing." : origin === "aide:curate" ? "Maintain existing mandates. Base new Work on the original business Input or source Note or Work. Keep this review silent." : "Do not communicate or hand off business Work."} Work on at most 8 materials or 8 direct children this round.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
-      observation: { ...(preparation?.notes ? { notes: preparation.notes } : {}), ...(scheduledMatter ? { ongoingId: scheduledMatter.metadata.name, ongoingUid: scheduledMatter.metadata.uid, question: scheduledMatter.spec.question ?? null, ...(materials.length ? { inputIds: materials.map(i => i.metadata.name) } : {}) } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
+      observation: { ...(preparation?.notes ? { notes: preparation.notes.map(note => ({ noteId: note.metadata.name, version: noteVersion(note) })) } : {}), ...(scheduledMatter ? { ongoingId: scheduledMatter.metadata.name, ongoingUid: scheduledMatter.metadata.uid, question: scheduledMatter.spec.question ?? null, ...(materials.length ? { inputIds: materials.map(i => i.metadata.name) } : {}) } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
         completed: chiefWorkload(current).completed, weaveRevision: maintenance?.weaveRevision ?? 0,
         pressure: (maintenance?.notePressure ?? []).map(({ uid, pressure }) => ({ uid, version: pressure.version })),
       } } : {}) },
     };
     const status: InputStatus = { topic: target,
       route: { completedAt: at, result: { topics: [target], reason: `Built-in ${origin} request for this Topic` } }, assess: {} };
+    const noteWrites = [];
+    if (preparation?.notes) {
+      const curateAt = new Date(Math.max(Date.parse(dueAt), Date.parse(at)) + preparation.cooldownSeconds * 1000).toISOString();
+      for (const note of preparation.notes) {
+        noteWrites.push({ operation: "patchStatus" as const, resource: note,
+          options: { resourceVersion: note.metadata.resourceVersion }, patch: { curateAt } });
+      }
+    }
     const pressureWrites = [];
     let ownerPressure: TopicStatus["notePressure"];
     for (const entry of maintenance?.notePressure ?? []) {
@@ -77,6 +88,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
         } } }) } })),
       ...(scheduledMatter ? [{ operation: "patchStatus" as const, resource: scheduledMatter, patch: consumesCheck ? { followupInputId: inputId } : {},
         options: { resourceVersion: scheduledMatter.metadata.resourceVersion } }] : []),
+      ...noteWrites,
       ...pressureWrites,
       { operation: "patchStatus", resource: current, options: { resourceVersion: current.metadata.resourceVersion }, patch: {
         ...(ownerPressure ? { notePressure: ownerPressure } : {}),
@@ -87,6 +99,11 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
           chiefWorkload: { ...chiefWorkload(current), requestedThrough: chiefWorkload(current).completed, afterRequestSince: null } } : {}),
       } },
     ]); } catch (error) {
+      // Reconcile again from the ordered Note index if another writer won the dispatch.
+      if (preparation?.notes && isResourceVersionConflict(error)) {
+        context.logger.debug?.("Note dispatch superseded by a concurrent change", { attributes: { topicUid: topic.metadata.uid, fingerprint } });
+        throw new ObsoleteMaintenanceRequest();
+      }
       if (typeof error !== "object" || error === null || !("name" in error) || error.name !== "ResourceAlreadyExists") throw error;
       const existing = await context.resources.get<InputSpec, InputStatus>(inputRef(inputId));
       if (!existing || existing.metadata.deletionTimestamp || existing.spec.origin !== origin || existing.status.topic?.uid !== target.uid) throw error;
@@ -113,7 +130,7 @@ export async function tryCreateMaintenanceInput(context: Pick<PluginContext, "re
     // Fourteen attempts reach the cap even with a one-second base cooldown.
     const delay = Math.min(Math.max(7200, policy.capacityCooldownSeconds), policy.capacityCooldownSeconds * 2 ** Math.max(0, attempts - 1));
     const nextAt = Date.parse(input?.status.assess?.completedAt ?? previous.checkedAt) + delay * 1000;
-    if (!preparation?.materials?.length && Date.now() < nextAt) {
+    if (!preparation?.notes && !preparation?.materials?.length && Date.now() < nextAt) {
       context.logger.debug?.("Secretary maintenance cooling down", { attributes: { topicUid: topic.metadata.uid, origin,
         reason: attempts ? "unchanged_need" : "minimum_cooldown", attempts, nextAt: new Date(nextAt).toISOString() } });
       return;
@@ -121,7 +138,7 @@ export async function tryCreateMaintenanceInput(context: Pick<PluginContext, "re
   }
   try { return await createMaintenanceInput(context, current, dueAt, agenda, origin, trigger, preparation, fingerprint); }
   catch (error) {
-    if (error instanceof ObsoleteOngoingCheck) return;
+    if (error instanceof ObsoleteMaintenanceRequest) return;
     if (!String(error).includes("Resource capacity exhausted")) throw error;
     context.logger.warn("Topic maintenance deferred at resource capacity", { attributes: { topicUid: topic.metadata.uid, origin, error: String(error) } });
   }
