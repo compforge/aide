@@ -36,7 +36,7 @@ Personal 在首次 prompt、steer 和 followUp 中通过 `aide.input` 投递业�
 
 读取单个 Topic、Note 或 Work 时，工具在原生 toolResult 中保留原调用关系和本次返回的正文，details 标识快照种类、UID 和适用版本。Note 使用所读的内容版本；Task、Routine、Ongoing 共用 Work 读取入口。分页和目录遵守各工具的范围，列出对象仅代表可发现。业务消息定义见 [Personal messages](../../plugins/personal/messages.ts)。
 
-Pi 的 AgentMessage 和 JSONL 保留 `aide.input` 的原生身份、正文和投递信息。模型边界由 Pi 的 `convertToLlm` 转成包含正文和时间戳的 user Message。Aide 对固定版本 pi-hermes-memory 0.11.0 应用[消费端适配](../../patches/pi-hermes-memory+0.11.0.patch)，在运行时纠错、轮次计数、整理会话与检索建索引时使用同一投影。读取 JSONL 和 SessionManager 快照时沿用原条目 ID；旧索引按 Hermes 的回填策略更新。业务来源和 Batch 成员仍可通过 Personal 工具查询。
+Pi 的 AgentMessage 和 JSONL 保留 `aide.input` 的原生身份、正文和投递信息。模型边界由 Pi 的 `convertToLlm` 转成包含正文和时间戳的 user Message。Aide 暂时依赖 [Hermes fork 分支](https://github.com/qiankunli/pi-hermes-memory/tree/feat/user-message-projection)，安装版本由 package-lock.json 锁定。在 [Hermes 原生配置](../personal/chief.md#存储与配置) 中启用 `aide.input` 后，运行时纠错、轮次计数、会话整理与检索索引使用同一投影。读取 JSONL 和 SessionManager 快照时沿用原条目 ID；旧索引按 Hermes 的回填策略更新。业务来源和 Batch 成员仍可通过 Personal 工具查询。
 
 读取当前背景失败会终止本次推理，避免带着旧事实继续。快照生成之后资源仍可能变化，写入工具继续校验 UID、版本和执行归属。动态前缀也占上下文预算；Personal 提供有界预览和分页补查，不把常驻背景当作额外授权。
 

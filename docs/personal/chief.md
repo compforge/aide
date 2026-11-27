@@ -194,6 +194,14 @@ Chief 使用上游记忆工具维护有长期价值的信息，保留足以理�
 └── sessions/                       # Pi 原生会话
 ```
 
+要让 Hermes 把 Aide 的原生 Input 计入用户轮次、纠错和会话索引，在上述 `hermes-memory-config.json` 的 `userMessageCustomTypes` 数组中加入 `aide.input`，保留已有类型和其它配置，然后重启 Aide。最小配置为：
+
+```json
+{ "userMessageCustomTypes": ["aide.input"] }
+```
+
+Hermes 默认的类型列表为空。启用后，符合保留策略的已有会话会由增量回填更新，也可以运行 `/memory-index-sessions` 手动重建索引。
+
 `hermes-memory-config.json` 中的 `memoryDir` 可单独更改全局记忆目录；其它选项和文件由 [上游配置文档](https://github.com/chandra447/pi-hermes-memory#configuration) 定义。依赖随 `npm install` 安装，不需要另运行 `pi install` 或 `aide sync`。
 
 此处全局记忆由同一进程根目录下的 Chief 共享，项目记忆按 Hermes 的 cwd 规则划分，**不按 Aide Session 或 Topic 隔离**。不同群的原生对话上下文仍独立，但扩展的长期记忆和会话检索可能跨会话使用。不要把 Topic 分组理解为记忆访问边界。

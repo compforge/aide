@@ -7,6 +7,6 @@ import { join } from "node:path";
 export const memoryAgentDir = mkdtempSync(join(tmpdir(), "aide-hermes-test-"));
 process.env.PI_CODING_AGENT_DIR = memoryAgentDir;
 writeFileSync(join(memoryAgentDir, "hermes-memory-config.json"), JSON.stringify({
-  reviewEnabled: false, correctionDetection: false, flushOnCompact: false, flushOnShutdown: false,
+  userMessageCustomTypes: ["aide.input"], reviewEnabled: false, correctionDetection: false, flushOnCompact: false, flushOnShutdown: false,
 }));
 process.once("exit", () => rmSync(memoryAgentDir, { recursive: true, force: true }));
