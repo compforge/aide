@@ -92,6 +92,10 @@ export class UsageStore {
     const { sql, params } = this.filter(since, until, filter);
     yield* this.db.prepare("SELECT * FROM calls WHERE " + sql).iterate(...params) as Iterable<UsageRow>;
   }
+  models(since: number, until: number) {
+    return this.db.prepare("SELECT DISTINCT provider, model FROM calls WHERE at BETWEEN ? AND ? ORDER BY provider, model")
+      .all(since, until) as unknown as { provider: string; model: string }[];
+  }
   hasSession(role: UsageRole, id: string) {
     return !!this.db.prepare("SELECT 1 FROM calls WHERE session=? AND role=? LIMIT 1").get(id, role);
   }

@@ -42,23 +42,36 @@ export function usageReport(store: UsageStore, filter: UsageFilter, now = Date.n
   const byOrigin = new Map<string, Group>();
   const byModel = new Map<string, Group>();
   const bySession = new Map<string, Group>();
+  const minuteTotals = new Map<number, number>();
   const identities = new Map<string, UsageRole>();
   for (const row of store.calls(since, now, filter)) {
     const call = usageCall(row);
+    if (call.tokens) {
+      const minute = Math.floor(call.at / 60_000) * 60_000;
+      const { input, output, cacheRead, cacheWrite } = call.tokens;
+      minuteTotals.set(minute, (minuteTotals.get(minute) ?? 0) + input + output + cacheRead + cacheWrite);
+    }
     roles.get(row.role)!.add(row.session, call);
     group(byModel, JSON.stringify([call.provider, call.model])).add(row.session, call);
     group(bySession, row.session).add(row.session, call);
     identities.set(row.session, row.role);
     if (row.role === "chief") group(byOrigin, call.origin ?? "unknown").add(row.session, call);
   }
+  const models = [...byModel].map(([key,g]) => {
+    const [provider, model] = JSON.parse(key) as [string, string];
+    return { provider, model, ...g.result() };
+  });
+  const modelOptions = filter.role || filter.provider || filter.model
+    ? store.models(since, now)
+    : models.map(({ provider, model }) => ({ provider, model }));
   const route = roles.get("route")!.result();
   // Successful receipts belong to Inputs; a routed Input can span several models.
   const includeRoute = !filter.role || filter.role === "route";
   const routeInputs = includeRoute && !filter.model && !filter.provider ? store.routedInputs(since, now) : null;
-  return { since, until: now, routeInputs, tokensPerRouteInput: routeInputs && (route.covered || route.auxiliaryTokens) ? route.total / routeInputs : null,
+  return { since, until: now, minutes: [...minuteTotals].sort(([a], [b]) => a - b).map(([at, tokens]) => ({ at, tokens })), routeInputs, tokensPerRouteInput: routeInputs && (route.covered || route.auxiliaryTokens) ? route.total / routeInputs : null,
     roles: [...roles].map(([role,g]) => ({ role, ...g.result() })),
     origins: [...byOrigin].map(([origin,g]) => ({ origin, ...g.result() })),
-    models: [...byModel].map(([key,g]) => { const [provider,model] = JSON.parse(key) as [string,string]; return { provider,model,...g.result() }; }),
+    models, modelOptions,
     sessions: [...bySession].map(([id,g]) => ({ id, role: identities.get(id)!, ...g.result() })).sort((a,b) => b.total-a.total).slice(0,20) };
 }
 export type UsageReport = ReturnType<typeof usageReport>;

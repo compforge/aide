@@ -43,7 +43,7 @@ observation:
 
 ## Agent Usage
 
-Web 主导航的「Usage」按滚动 24 小时或 7 天展示 Gate、Route、Chief、Weave、Task、Routine。按角色或 provider/model 筛选后，可以打开用量最高的 20 个 Session，分页查看调用和原生 SessionView。单次调用和缓存命中都计入使用该模型的角色，短 Session 也可单独查看。
+Usage 有总览、角色、模型三个视图，共用滚动 24 小时或 7 天窗口。总览展示已观测 tokens、调用次数、按记录时间归入自然分钟的用量和角色占比。分钟峰值反映 Aide 收到的用量记录，provider 的限流窗口和计数口径由其独立决定。模型视图可以按 provider/model 进入角色用量。角色详情展示所选范围内用量最高的 20 个 Session，支持分页查看调用和打开原生 SessionView；Chief 详情按触发来源分组，Route 详情在有成功回执时展示路由效率。
 
 Gate、Route、Chief、Weave、Task、Routine 运行时，Host 在 Pi 追加带用量的条目后把计数写入 `$AIDE_HOME/usage.sqlite`。记录包含时间、角色、模型、Session ID、entry ID 和可用的触发来源。计量身份为 Session ID 和原生 entry ID。多个 Input 共享一次模型调用时，这次用量只计一次。报表与调用明细查询 SQLite。原生 SessionView 仍按需读取 Pi 文件。用量统计独立于 `captureRequests`，数据从升级后首次调用开始积累。
 

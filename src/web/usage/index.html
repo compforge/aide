@@ -8,9 +8,13 @@
 <header><h1 class="brand"><img src="/icon.png" width="32" height="32" alt="">Aide</h1><nav class="main-tabs" aria-label="主导航"><a href="/gate">Gate</a><a href="/inputs">Inputs</a><a href="/">Topics</a><a href="/people">Persons</a><a href="/addresses">Addresses</a><a href="/outputs">Outputs</a><a href="/usage" aria-current="page">Usage</a></nav></header>
 <main>
 <h2>Agent Usage</h2>
+<nav id="views" class="main-tabs detail-tabs" aria-label="Usage 视图">
+  <a data-view="overview" href="/usage" aria-current="page">总览</a>
+  <a data-view="roles" href="/usage?view=roles">角色</a>
+  <a data-view="models" href="/usage?view=models">模型</a>
+</nav>
 <form><label>时间范围 <select id="window"><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option></select></label>
-<label>角色 <select id="role"><option value="">全部角色</option></select></label>
-<label>模型 <select id="model"><option value="">全部模型</option></select></label><button type="submit">刷新</button></form>
+<label id="model-filter">模型 <select id="model"><option value="">全部模型</option></select></label><button type="submit">刷新</button></form>
 <p id="notice" role="status" aria-live="polite"></p>
 <div id="report"></div><section id="calls"></section>
 </main><script type="module" src="/usage.js"></script>
