@@ -144,11 +144,13 @@ test("Gate read tools discover multiple roots and enforce the active owner on ev
   const writer = await resources.patchStatus(second, { execution: { id: "seed", startedAt: new Date().toISOString() } });
   const { upsertOngoing } = await import("../plugins/personal/ongoing/service.ts");
   const original = await upsertNote(resources, writer, { text: "Verify rc.7" }, "target");
-  const snapshot = await execute("read_note", { noteId: original.noteId });
+  const snapshot = await execute("read_note", { noteId: original.noteId.slice(0, 13) });
   const revised = await upsertNote(resources, writer, { noteId: original.noteId, version: original.version, text: "Verify rc.8" }, "revised");
   assert.notEqual(original.version, revised.version);
   assert.deepEqual(snapshot.details, { customType: "aide.note", details: { kind: "note", uid: original.uid, version: original.version } });
-  assert.equal(JSON.parse((snapshot.content[0] as { text: string }).text).text, "Verify rc.7");
+  const noteSnapshot = JSON.parse((snapshot.content[0] as { text: string }).text);
+  assert.equal(noteSnapshot.text, "Verify rc.7");
+  assert.equal(noteSnapshot.url, `/gate?note=${original.noteId}`);
   assert.equal((await call("read_note", { noteId: original.noteId })).version, revised.version);
   const matter = await upsertOngoing(resources, writer, { title: "Awaiting the approval" }, "approval");
   assert.equal((await call("list_work", { kind: "ongoing", topicUid: second.metadata.uid })).items[0].id, matter.id);

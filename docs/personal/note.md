@@ -78,7 +78,7 @@ summaryOf 按对象 UID 建立索引，事务校验每个对象至多一份活�
 
 Chief 在 aide:summary 中用 upsert_note 维护所选 Topic、Person 或 Address 的摘要，Task 和 Routine 各自维护本工作摘要。工具支持 people，省略保留已有关联，[] 明确清空。读取对象的 summaryNote，以 id 和 version 更新已有摘要。首次写入提供 summaryOf 对象引用和正文。摘要与对象内容指纹在同一事务提交。只改 people 也改变内容版本，避免元数据变化绕过并发与依赖检查。用户仅修订正文时保留 people；Person 合并双方正文与 people，并保留历史人物引用，不猜测或重写来源。
 
-读取和常驻上下文提供正文与 summaryNote（id、uid、version、subject、summaryOf、people），部分列表另投影 summaryUid。自动上下文最多预览 8 个人物关联并标明省略数量；read_note 可按 Note ID 或 UID 读取完整内容与关联。Note 正文与分类可独立编辑，省略字段保留原值；摘要 Note 通过同一更新入口保持依赖指纹一致。upsert_note 的回执提供 noteId、uid、version：noteId 用于继续编辑，uid/version 可直接用于 say.notes 或 cite_output，调用方无需推断 UID。Stream.status.references 记录实际使用的 Note UID、读取版本和接纳时校验的正文指纹；summary Note 与普通 Note 使用相同的 sensitivity、visibility 和披露检查。
+读取和常驻上下文提供正文与 summaryNote（id、uid、version、subject、summaryOf、people），部分列表另投影 summaryUid。自动上下文最多预览 8 个人物关联并标明省略数量；read_note 可按完整 Note ID 或 UID 读取内容与关联，也可用普通 Note 的 `note-` 加至少 8 位十六进制字符作前缀。前缀唯一匹配时返回完整 ID，零条或多条匹配时提示通过 list_notes 查找完整 ID。Note 正文与分类可独立编辑，省略字段保留原值；摘要 Note 通过同一更新入口保持依赖指纹一致。upsert_note 的回执提供 noteId、uid、version：noteId 用于继续编辑，uid/version 可直接用于 say.notes 或 cite_output，调用方无需推断 UID。Stream.status.references 记录实际使用的 Note UID、读取版本和接纳时校验的正文指纹；summary Note 与普通 Note 使用相同的 sensitivity、visibility 和披露检查。
 
 recent 展示排除 summaryOf 非空的 Note，摘要通过独立位置展示；list_notes 仍可查到它。Note Reconcile 对摘要只修复对象上的派生内容指纹。
 

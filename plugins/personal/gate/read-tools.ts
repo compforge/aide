@@ -53,10 +53,10 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
     tool({ name: "list_notes", label: "Find Notes", description: "Find retained Notes across Topics, including summaries. Filter subject UID or name/body q; each request scans at most 20 records. Follow continue even on empty matching pages. Previews are incomplete.",
       parameters: Type.Object({ subject: Type.Optional(text), people: Type.Optional(text), addresses: Type.Optional(text), isSummary: Type.Optional(Type.Boolean()), q: Type.Optional(Type.String({ maxLength: 500 })), continue: Type.Optional(text), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }),
       async execute(_id, args) { return result(await listNotes(store.client, args)); } }),
-    tool({ name: "read_note", label: "Read Note", description: "Read a complete Note with provenance, nature and uid/version for citations. The returned URL opens the evidence in Gate.",
+    tool({ name: "read_note", label: "Read Note", description: "Read a complete Note with provenance, nature and uid/version for citations. Accepts a full Note ID, UID or unique note- ID prefix with at least 8 hex digits. The returned URL opens the evidence in Gate.",
       parameters: Type.Object({ noteId: text }),
       async execute(_id, { noteId }) { const note = await readNote(store.client, noteId);
-        return noteResult({ ...note, url: `/gate?note=${encodeURIComponent(noteId)}` }); } }),
+        return noteResult({ ...note, url: `/gate?note=${encodeURIComponent(note.id)}` }); } }),
     tool({ name: "list_inputs", label: "Find Topic inputs", description: "Page retained Inputs for one Topic. Read full original evidence with read_input; foreign Inputs cannot be assessed or assigned by Gate.",
       parameters: Type.Object({ topicUid: text, continue: Type.Optional(text) }),
       async execute(_id, args) {

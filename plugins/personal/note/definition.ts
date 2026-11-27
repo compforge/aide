@@ -7,7 +7,7 @@ import { requireOrganization, requireTopic } from "../topic/ownership.ts";
 import { clearCurationSchedule, pendingCuration, noteMaterial, noteVersion, noteMaxChars } from "./model.ts";
 import { requireContentWriter } from "../context-write.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
-import { NOTE_TYPE, WriterResourceSchema, NoteSpecSchema, NoteStatusSchema, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
+import { noteIdPrefix, NOTE_TYPE, WriterResourceSchema, NoteSpecSchema, NoteStatusSchema, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
 
 /** @spec Chief may capture an unclassified draft; delegated Work and split parts declare their knowledge nature on creation.
  * @spec Note is independent knowledge. summaryOf identifies the subject whose long-lived understanding it holds.
@@ -58,7 +58,7 @@ function validateSplitPart(part: NoteResource, context: ResourceValidationContex
   requireOrganization({ actorUid: writer.resource.uid, executionId: writer.executionId, at: part.status.updatedAt, reason: "Split Note" }, context, topics);
 }
 export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
-  type: NOTE_TYPE, indexVersion: 10, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
+  type: NOTE_TYPE, indexVersion: 11, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
   validator: { create: (note, context) => {
     const owner = validate(note, context);
     const chiefDraft = note.status.writer?.resource.kind === "Topic" && !note.status.splitFrom && !!note.spec.text;
@@ -177,6 +177,10 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
       throw new Error("Summary subject still exists");
   } },
   indexes: {
+    noteIdPrefix: note => {
+      const prefix = noteIdPrefix(note.metadata.name);
+      return prefix && !note.metadata.deletionTimestamp ? [prefix] : [];
+    },
     summaryOf: r => r.spec.summaryOf && !r.status.retired ? [r.spec.summaryOf.uid] : [],
     knownSummary: r => r.spec.summaryOf && !r.metadata.deletionTimestamp && !r.status.retired && r.spec.text.trim() ? [r.spec.summaryOf.uid] : [],
     uid: r => [r.metadata.uid], subject: r => [r.spec.subject.uid], addresses: r => [...r.spec.addresses].map(a => a.uid), people: r => [...new Set([...r.spec.people].map(p => p.uid))] },
