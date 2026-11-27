@@ -49,7 +49,8 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
       }
       return;
     }
-    if (current.kind === "Topic" && /version conflict/.test(String(error))) return;
+    if (current.kind === "Topic" && String(error).includes("Chief has queued business")) return { requeueAfterMs: 60_000 };
+    if (current.kind === "Topic" && /Chief is dormant|version conflict/.test(String(error))) return;
     throw error;
   }
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", inputIds, executionId: execution.executionId } });

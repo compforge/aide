@@ -21,11 +21,16 @@ const reviewQuestions = {
 
 async function oldestWithNotes(reader: ResourceReader, type: typeof TOPIC_TYPE | typeof PERSON_TYPE | typeof ADDRESS_TYPE) {
   const association = type.kind === "Person" ? "recentPeople" : type.kind === "Address" ? "recentAddresses" : "recentSubject";
+  if (type.kind !== "Topic") {
+    const shared = await reader.page<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, { matchIndex: { name: "default", value: "default" }, limit: 1 });
+    if (shared.items[0]?.status.phase === "dormant") return;
+  }
   let cursor: string | undefined;
   do {
     const page = await reader.page<unknown, SummaryResource["status"]>(type, { namespace: "v1", limit: 32, continue: cursor,
       matchIndex: { name: "summaryReview", value: "owner" }, direction: "asc" });
     for (const owner of page.items) {
+      if (owner.kind === "Topic" && (await readTopicRoot(reader, resourceRef(owner)))?.status.phase === "dormant") continue;
       if (owner.status.summaryRevision) return owner;
       for (const name of new Set(["recentSubject", association])) {
         const notes = await reader.page(NOTE_TYPE, { matchIndex: { name, value: owner.metadata.uid }, limit: 1 });
@@ -65,7 +70,7 @@ export async function checkSummary(context: Pick<PluginContext, "resources" | "l
         observation: { summaryOwner: target, checkedAt: at } },
       status: { topic, route: { completedAt: at, result: { topics: [topic], reason: "Idle Summary review" } }, assess: { topic } } }]);
   } catch (error) {
-    if (!String(error).includes("Chief has queued work") && !String(error).includes("Resource capacity exhausted")) throw error;
+    if (!String(error).includes("Chief is dormant") && !String(error).includes("Chief has queued work") && !String(error).includes("Resource capacity exhausted")) throw error;
     await commitStatus(context.resources, [clock]);
     context.logger.debug?.("Secretary skipped Summary check", { attributes: { at, chiefUid: topic.uid, reason: String(error) } });
     return next;

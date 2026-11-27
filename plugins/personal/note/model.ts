@@ -27,11 +27,13 @@ export const NoteSpecSchema = z.object({ name: NoteNameSchema.optional(), subjec
   addresses: AddressRefsSchema.prefault([]), nature: NoteNatureSchema.optional(), maxChars: MaxCharsSchema.optional(), text: z.string().max(16000), ...DisclosureFields }).strict();
 export const NoteWriterSchema = z.object({ resource: WriterResourceSchema, executionId: z.string().min(1) }).strict();
 const ReductionReceiptSchema = z.object({ at: z.string().datetime(), reason: z.string().trim().min(1).max(2000), writer: NoteWriterSchema }).strict();
+const CurationReceipt = z.object({ inputUid: z.string(), material: z.string() }).strict();
 export const NoteStatusSchema = z.object({ updatedAt: z.string().datetime(), writer: NoteWriterSchema.optional(),
   curationRoot: z.string().optional(), pendingSince: z.iso.datetime().optional(),
+  curationDelivery: CurationReceipt.optional(),
   curateAt: z.iso.datetime().optional(),
   curationRetry: z.object({ inputUid: z.string(), material: z.string(), at: z.iso.datetime() }).strict().optional(),
-  curated: z.object({ inputUid: z.string(), material: z.string() }).strict().optional(),
+  curated: CurationReceipt.optional(),
   splitFrom: z.object({ uid: z.string(), version: z.string() }).strict().optional(),
   retired: ReductionReceiptSchema.optional(),
   pruned: ReductionReceiptSchema.optional(),
@@ -43,7 +45,7 @@ export const NoteViewSchema = NoteSpecSchema.extend({ nameMissing: z.boolean().o
 export type NoteSpec = Omit<z.infer<typeof NoteSpecSchema>, "sensitivity" | "visibility"> & import("../disclosure.ts").MaterialDisclosure;
 export type NoteStatus = z.infer<typeof NoteStatusSchema>;
 export function clearCurationSchedule(status: NoteStatus): NoteStatus {
-  const { curateAt: _curateAt, ...rest } = status;
+  const { curateAt: _curateAt, curationDelivery: _delivered, ...rest } = status;
   return rest;
 }
 export type NoteResource = Resource<NoteSpec, NoteStatus>;

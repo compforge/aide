@@ -108,7 +108,7 @@ move_note 接受 noteId、version、目标 subject 和 reason。当前 root Chie
 
 curate 核对普通 Note 的证据与分类，organize 调整材料在 Topic 树中的归属。Chief 通过 `aide:summary` 单独复核某个对象的默认认识。对新材料，判断下次因另一件事接触这个对象时是否值得默认读到；对已有摘要，核对每项判断的依据、适用范围和确定程度。仍然准确时，完成复核即可。
 
-Secretary 在 Topic 内按到期顺序选取待整理的普通 Note，每次最多 8 条。创建 `notes_changed` Input 和更新本批 Note 的 `curateAt` 在同一事务完成，冷却时长取 `curation.maxWaitSeconds` 与 `capacityCooldownSeconds` 的较大值（默认 15 分钟）。尚未确认的 Note 到期可再次入选；内容、归属或分类等材料发生变化时清除冷却，改名或调整篇幅预算保留冷却。
+Secretary 在 Topic 内按到期顺序选取待整理的普通 Note，每次最多 8 条。创建 `notes_changed` Input 和更新本批 Note 的 `curateAt` 在同一事务完成，冷却时长取 `curation.maxWaitSeconds` 与 `capacityCooldownSeconds` 的较大值（默认 15 分钟）。投递回执同时记录当前 Input 的 UID 和对应 Note 的材料指纹（`status.curationDelivery`）。已投递、尚未确认的同版材料只在同一归属对象有新材料且批次有余量时随批带入，单独到期不会触发 Chief。内容、归属或分类等材料变化后重新获得派单资格，改名或调整篇幅预算保留冷却。
 
 ## 数量与篇幅驱动的整理
 

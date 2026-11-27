@@ -1336,12 +1336,12 @@ test("Weave queues a review Input after busy Chief business without mixing tools
   assert.equal(fixture.requests.length, 1, "maintenance must wait for business");
   release(); await aide.settled();
   assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Topic structure changed/);
-  assert.equal(aide.invocations().filter(i => i.topicId === "parent").length, 1);
+  assert.equal(aide.invocations().filter(i => i.topicId === "parent").length, 2, "maintenance gets its own idle turn");
   assert.equal(aide.topics.resource("parent")!.status.notifiedWeaveRevision, 1);
   assert.equal(summaryText(aide.topics.resources, aide.topics.resource("parent")!), "");
   assert.ok(aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!.status.assess?.completedAt);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
-  assert.equal([...state.harnessInputs.values()].filter(i => i.delivery === "followUp").length, 1);
+  assert.equal([...state.harnessInputs.values()].filter(i => i.delivery === "followUp").length, 0);
   assert.ok(aide.topics.inputStore.get("first")!.status.assess?.executionId);
 });
 
@@ -1512,4 +1512,51 @@ test("Chief Summary tools edit only the owner of the admitted Input", async t =>
   try { await session.prompt("Review this person"); }
   finally { session.dispose(); }
   assert.deepEqual(written, [args[2]]);
+});
+
+test("Chief wake compacts before business delivery and keeps the session usable if compaction fails", { timeout: 30_000 }, async t => {
+  const { ConfigSchema } = await import("../src/config.ts");
+  let summaries = 0, rejectSummary = false;
+  const fixture = await setup(t, request => {
+    if ((request.messages as { content: unknown }[]).some(m => messageText(m.content).includes("context summarization assistant"))) {
+      summaries++;
+      return { text: "Historical checkpoint for earlier work", stop: rejectSummary ? "length" : "stop" };
+    }
+    return { text: "Choose the blue option or the green option.", usage: { prompt_tokens: 4000, completion_tokens: 10, total_tokens: 4010 } };
+  });
+  const pi = fixture.config.config;
+  const aide: Aide = new Aide(join(fixture.config.cwd, "wake-home"), { cwd: fixture.config.cwd, timezone: "UTC",
+    config: ConfigSchema.parse({ plugins: { personal: { topic: { wakeCompactTokens: 1000 } } } }), defaultHarnessConfig: { id: "default", harness: "pi" },
+    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness }, chiefSession: aide.chiefSession(ports.scope, {
+      ...pi, settings: { ...pi.settings, compaction: { enabled: false, keepRecentTokens: 500, reserveTokens: 1500 } },
+    }) }),
+  }, pino({ level: "silent" }));
+  t.after(() => aide.close());
+  await aide.start();
+  const resources = aide.runtime.plugins.resourceClient("personal");
+  await aide.topics.ensure("wake");
+  const send = async (id: string, text: string) => {
+    await aide.topics.submit(id, { topicId: "wake", origin: "source", originId: "fixture", text });
+    await aide.settled();
+    assert.ok(aide.topics.inputStore.get(id)!.status.assess?.completedAt, JSON.stringify(aide.topics.inputStore.get(id)!.status));
+  };
+  await send("old", "Old evidence ".repeat(500));
+  await send("recent", "Which option, A or B?");
+  const topic = () => aide.topics.resource("wake")!;
+  const session = topic().status.agent!.sessionId;
+  await resources.patchStatus(topic(), { phase: "dormant" });
+  await send("answer", "Use option B");
+  assert.ok(summaries > 0);
+  const afterWake = summaries;
+  assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Historical checkpoint/);
+  assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Use option B/);
+  assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Choose the blue option or the green option/);
+  await send("more", "More evidence");
+  assert.equal(summaries, afterWake);
+  await resources.patchStatus(topic(), { phase: "dormant" });
+  rejectSummary = true;
+  await send("after-failure", "Continue processing after wake");
+  assert.ok(summaries > afterWake);
+  assert.equal(topic().status.agent!.sessionId, session);
+  assert.equal(topic().status.compactOnWake, false);
 });

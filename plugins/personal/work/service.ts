@@ -1,3 +1,4 @@
+import { externalActivity } from "../topic/activity.ts";
 import { OUTPUT_TYPE, type OutputSpec, type OutputStatus } from "../output/model.ts";
 import { ongoingView, ONGOING_TYPE, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
 import type { AddressRef } from "../address/model.ts";
@@ -6,7 +7,7 @@ import { ResourceAlreadyExists } from "@compforge/aide-plugin";
 import { NOTE_TYPE, type NoteSpec, type NoteStatus } from "../note/model.ts";
 import { noteRoot } from "../note/reconcile.ts";
 import { upsertOngoing } from "../ongoing/service.ts";
-import { readTopicInScope } from "../topic/tree.ts";
+import { readTopicRoot, readTopicInScope } from "../topic/tree.ts";
 import { isGateTopic } from "../topic/boundary.ts";
 import { commitStatus } from "../status.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -218,10 +219,12 @@ export class WorkService {
       }
       const handle = { ...input?.status.handle, [target.metadata.uid]: { resource: resourceRef(target), assignedAt: at, request } };
       try {
+        const root = supplement && !input ? await readTopicRoot(this.store.client, ref) : undefined;
         const [, saved] = await commitStatus(this.store.client, [
           { operation: "patchStatus", resource: target, patch: ongoing ? {} : { idleSince: null, agentStoppedAt: null } },
           input ? { operation: "patchStatus", resource: input, patch: { handle } }
             : { operation: "create", type: INPUT_TYPE, name: inputId, spec: draft!.spec, status: { ...draft!.status, handle } },
+          ...(root ? [{ operation: "patchStatus" as const, resource: root, patch: externalActivity(root, at) }] : []),
         ]);
         // Admission can return another caller’s identical Input. Append to that version if it has other recipients.
         if (!input && !isDeepStrictEqual((saved?.status as InputStatus)?.handle?.[target.metadata.uid]?.request, request)) {

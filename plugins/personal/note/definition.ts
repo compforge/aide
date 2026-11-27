@@ -58,7 +58,7 @@ function validateSplitPart(part: NoteResource, context: ResourceValidationContex
   requireOrganization({ actorUid: writer.resource.uid, executionId: writer.executionId, at: part.status.updatedAt, reason: "Split Note" }, context, topics);
 }
 export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
-  type: NOTE_TYPE, indexVersion: 9, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
+  type: NOTE_TYPE, indexVersion: 10, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
   validator: { create: (note, context) => {
     const owner = validate(note, context);
     const chiefDraft = note.status.writer?.resource.kind === "Topic" && !note.status.splitFrom && !!note.spec.text;
@@ -67,7 +67,7 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
       if (note.spec.text !== "" || note.metadata.name !== summaryName(owner))
         throw new Error("Creating an ordinary Note requires nature (semantic or procedural)");
     }
-    if (note.status.curateAt || note.status.curationRetry || note.status.curated || note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts");
+    if (note.status.curationDelivery || note.status.curateAt || note.status.curationRetry || note.status.curated || note.status.retired || note.status.pruned) throw new Error("A new Note cannot have reduction receipts");
     validateAddresses(note, context); validateSplitPart(note, context);
   }, update: (before, after, context) => {
     if (!after.spec.summaryOf && !after.spec.nature && (before.spec.nature || (!before.spec.text && after.spec.text)))
@@ -77,6 +77,17 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
     if (after.status.curateAt && after.status.curateAt !== before.status.curateAt
       && pendingCuration(before) && equalResourceValue(before.spec, after.spec)
       && equalResourceValue({ ...before.status, curateAt: after.status.curateAt }, after.status)) return;
+    const delivery = after.status.curationDelivery;
+    if (delivery && !equalResourceValue(before.status.curationDelivery, delivery)) {
+      const input = context.get<InputSpec, InputStatus>(INPUT_TYPE, delivery.inputUid);
+      const planned = input?.spec.observation?.notes;
+      if (!input?.status.assess?.executionId || !input.status.assess.completedAt || input.spec.origin !== "aide:curate"
+        || !Array.isArray(planned) || !planned.some(n => n?.noteId === before.metadata.name && n.version === noteVersion(before))
+        || delivery.material !== noteMaterial(before.spec) || !equalResourceValue(before.spec, after.spec)
+        || !equalResourceValue({ ...before.status, curationDelivery: delivery }, after.status))
+        throw new Error("Note delivery requires the delivered curation Input and matching Note version");
+      return;
+    }
     if (!equalResourceValue(before.status.curationRetry, after.status.curationRetry)) {
       const retry = after.status.curationRetry;
       const input = retry && context.get<InputSpec, InputStatus>(INPUT_TYPE, retry.inputUid);
@@ -172,8 +183,10 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
   orderedIndexes: {
     pendingCuration: note => {
       const since = pendingCuration(note);
-      return since ? [{ value: note.status.curationRoot ?? note.spec.subject.uid, order: note.status.curateAt && note.status.curateAt > since ? note.status.curateAt : since }] : [];
+      return since && note.status.curationDelivery?.material !== noteMaterial(note.spec) ? [{ value: note.status.curationRoot ?? note.spec.subject.uid, order: note.status.curateAt && note.status.curateAt > since ? note.status.curateAt : since }] : [];
     },
+    offeredCuration: note => note.status.curationDelivery?.material === noteMaterial(note.spec) && pendingCuration(note) && note.status.curateAt
+      ? [{ value: note.spec.subject.uid, order: note.status.curateAt }] : [],
     oversizedSubject: r => !r.metadata.deletionTimestamp && !r.status.retired && r.spec.text.length > noteMaxChars(r.spec)
       ? [{ value: r.spec.subject.uid, order: r.metadata.uid }] : [],
     pressureSubject: r => r.spec.summaryOf || r.metadata.deletionTimestamp || r.status.retired ? [] : [{ value: r.spec.subject.uid, order: r.metadata.uid }],

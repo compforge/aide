@@ -12,6 +12,8 @@ import { batchWatch } from "../batch/reconcile.ts";
 import { chiefPreviews } from "./inputs.ts";
 import { finalizeExecution, runInput } from "../execution/loop.ts";
 import { submitChiefPending } from "./intake.ts";
+import { isInternalInput } from "../input/model.ts";
+import { patchStatus } from "../status.ts";
 import { topicPolicy, type TopicPolicy } from "../topic/config.ts";
 
 const instructions = `Handle the activated Input using only the tools available for its origin. Keep the current task separate from background evidence and earlier unfinished tasks.
@@ -57,13 +59,18 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     const result = await collectTopic(context, initial, execution);
     return { ...result, requeueAfterMs: Math.min(result?.requeueAfterMs ?? Infinity, policy.trigger.intervalSeconds * 1000) };
   }
+  if (initial.status.phase === "dormant" && isInternalInput(input.spec) && input.spec.origin !== "aide:followup") {
+    await patchStatus(context.resources, input, { assess: { ...input.status.assess, completedAt: new Date().toISOString(),
+      result: { disposition: "cancelled", summary: "Domain Chief is dormant" } } });
+    return { requeueAfterMs: 1 };
+  }
   const items = chiefPreviews(inputs, policy.contextChars - 3000);
   const prompt = `${instructions}\nActivation: ${JSON.stringify({ kind: "input", topicId: initial.spec.id,
     inputId: items[0]!.inputId, inputIds: items.map(i => i.inputId), inputs: items, at: new Date().toISOString() })}\nRead full evidence with read_input.`;
-  await runInput(context, execution.withContext({ topicId: initial.spec.id, inputId: input.metadata.name,
+  const retry = await runInput(context, execution.withContext({ topicId: initial.spec.id, inputId: input.metadata.name,
     inputIds: inputs.map(i => i.metadata.name) }), initial, "chief", boundedPrompt(prompt, policy.contextChars),
     input.metadata.name, inputs.map(i => i.metadata.name), batch);
-  return { requeueAfterMs: 1 };
+  return typeof retry === "object" ? retry : { requeueAfterMs: 1 };
 }
 
 /** @spec Intake and agent controllers keep separate queues so new material can steer active inference. */

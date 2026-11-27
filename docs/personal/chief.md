@@ -36,7 +36,7 @@ Chief 的接收 Reconcile 先按祖先指纹分批刷新直属待办的负责人
 
 root 按 Immediate → 已准备的 Deferred Batch → Normal → aide:organize → aide:followup → aide:curate → aide:summary 选择。Secretary 可在业务执行期间准备维护 Input；维护请求保持独立。Deferred 组批策略见 [Secretary](secretary.md#deferred-归组)，成员及准备契约见 [Batch](input.md#batch)。
 
-维护只接纳本轮内部 Input，不消费业务回执。Immediate 可在维护期间 steer 同一 Chief，下一模型轮次切换工具；其它准备好的待办通过 followUp 排队，在实际取出时切换任务范围。工具与共享 session 的取舍见 [按 Input 选择工具](#按-input-选择工具)。运行中的 Batch 使用一个 deliveryId、一个原生消息和自身的接纳回执；成员通过 batchId 查询执行事实。
+维护只接纳本轮内部 Input，不消费业务回执。Immediate 可在维护期间 steer 同一 Chief，下一模型轮次切换工具；其它准备好的业务 Input 或 Batch 通过 followUp 排队，在实际取出时切换任务范围。工具与共享 session 的取舍见 [按 Input 选择工具](#按-input-选择工具)。运行中的 Batch 使用一个 deliveryId、一个原生消息和自身的接纳回执；成员通过 batchId 查询执行事实。
 
 普通待办查询按明确负责人索引，不发现责任树。处理当前任务时，按需工具可读取责任子树内的知识；待办查询边界不限制知识读取。
 
@@ -74,7 +74,7 @@ Route 确定归属。Chief 的接收 Controller 和 agent Controller 分别负�
 | aide:organize | 创建或移动 Topic，归位 Input、Work 和 Note。跨 Topic 的 Note 先写目标再削减或退役来源。|
 | aide:summary | 复核指定 Topic、Person 或 Address 的默认认识，按需修订其摘要 |
 
-同一批次可以包含工具能力相同的业务 Input；维护 Input 独立接纳，不与业务取工具并集。业务 Input 优先于内部维护，Immediate 可通过 steer 在下一次安全模型请求边界接入；已经开始的模型调用或工具不会被瞬间撤销。运行中仅 Immediate 使用 steer，其他可投递 Input 始终使用 followUp，业务和内部维护遵循同一规则；工具范围在 Pi 实际取出 followUp 开始处理时切换，排队本身不会打断当前任务。FollowUp 每次取一条，不同 origin 不合并工具列表。未确认完成的 Input 在执行结束后释放占用，记录可重试错误，等待角色 trigger 间隔后继续；已有终态结果保持不变。
+同一批次可以包含工具能力相同的业务 Input；维护 Input 独立接纳，不与业务取工具并集。业务 Input 优先于内部维护，Immediate 可通过 steer 在下一次安全模型请求边界接入；已经开始的模型调用或工具不会被瞬间撤销。运行中仅 Immediate 使用 steer，其他可投递的业务 Input 使用 followUp；例行维护留待 Chief 空闲后单独接纳；工具范围在 Pi 实际取出 followUp 开始处理时切换，排队本身不会打断当前任务。FollowUp 每次取一条，不同 origin 不合并工具列表。未确认完成的 Input 在执行结束后释放占用，记录可重试错误，等待角色 trigger 间隔后继续；已有终态结果保持不变。
 
 Pi 的 `setActiveToolsByName` 替换可用工具，Chief 在首轮 prompt 前初始化，在后续模型轮次准备时更新。Pi 负责生成下一请求的工具声明；当前任务指令通过不持久化的 context projection 注入，原生历史继续共享。日志记录 executionId、origin、Input IDs、实际工具名与数量。
 

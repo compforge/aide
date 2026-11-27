@@ -18,6 +18,14 @@ Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为
 
 每个普通 Topic 检查自己的直属容量；维护请求交给其当前 root Chief 处理。领域 root 负责子树认识维护和业务批次准备。Gate 的单聊与协调请求逐条研判。具体范围见[容量与维护请求](#容量与维护请求)和 [Gate](gate.md)。
 
+## 领域静默
+
+领域根 Topic 的 `status.phase` 取 `active` 或 `dormant`，覆盖整棵职责树。Channel、Source 和 Gate 转交的用户请求按原始到达时间更新 `lastInputAt`。用户主动补充 Ongoing 也算外部活动。秘书的内部 Input 和 Chief 的办理决定保持现有活动时间。
+
+距最后一次外部活动满 `topic.dormantAfterSeconds`（默认 900 秒），Chief 的执行结束，业务 Input 与 Batch 排空后，领域可以静默。有尚未投递的普通 Note 时，秘书可在当前活跃期结束前安排最后一批整理。静默期间暂停 Curate、Organize 和该领域负责的 Summary 复核。已承诺的 Ongoing 仍按计划跟进。执行中的业务可以接收新业务，例行维护等待独立的空闲轮次。仍在秘书处积攒的 Deferred 材料先按 Batch 策略归组。
+
+外部 Input 唤醒领域后，在下一次 Chief prompt 前评估一次当前 Pi session 的上下文。达到 `topic.wakeCompactTokens`（默认 128000）时，Pi 生成历史摘要并按其近期消息预算保留原文。Chief 可按 ID 回读仍在职责树内的 Input。压缩使用现有 Usage 记录，失败时记录原因并继续处理原请求。进入静默本身不调用模型、不释放 session；长期空闲的 session 沿用原有回收策略。
+
 ## Note 维护
 
 Secretary 合并领域内的梳理需求，并在开放 Ongoing 到期或收到新关联材料时递交 followup。Chief 创建 Ongoing 时保存核实时间，缺省为 1 小时后，之后可以通过 upsert_work 调整。curate 结合普通 Note、已有 Work 和后续证据复盘该领域的认识与责任。followup 围绕指定 Ongoing 核实未决问题，必要时私下询问 Me。[Note 梳理](note.md#梳理与提炼)、[Ongoing 核实与收尾](work.md#核实与收尾)
@@ -64,7 +72,7 @@ maxUnfiledInput 统计直属、无 topicKey、未删除的业务 Input，包含�
 
 Secretary 根据 Weave 通知、工作量和 Note 本身的变化或容量压力准备维护请求。父子 Summary 独立修订。压力指纹使用材料身份、正文和预算，单纯改名沿用原退避。
 
-无活动、无维护需求时，Secretary 的静默检查默认按 15、30、60、120 分钟退避；资源 Watch 和短周期 tick 仍保障新 Input 与阈值响应。空检查不触发 Agent，新的业务到达恢复检查节奏。
+领域仍活跃且没有维护需求时，Secretary 的回顾检查默认按 15、30、60、120 分钟退避；资源 Watch 和短周期 tick 仍保障新 Input 与阈值响应。空检查不触发 Agent，新的业务到达恢复检查节奏。
 
 ### 协调周期与配置变更
 

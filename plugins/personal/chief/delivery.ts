@@ -12,6 +12,7 @@ import type { ResourceContext } from "../context.ts";
 import type { TopicResource, TopicStatus } from "../topic/model.ts";
 import { commitStatus } from "../status.ts";
 import { inputOutcome } from "./input-outcome.ts";
+import { NOTE_TYPE, noteVersion, noteMaterial, type NoteResource } from "../note/model.ts";
 import { completeChiefWork } from "./workload.ts";
 
 /** Commit all items carried by the same provider request before the model can produce side effects. */
@@ -38,6 +39,16 @@ export async function recordDelivery(resources: ResourceClient, owner: TopicReso
         const input = item as typeof inputs[number];
         writes.push({ operation: "patchStatus", resource: input, patch: { assess } });
         Object.assign(status, inputOutcome(input, { ...topic, status }, at));
+        if (input.spec.origin === "aide:curate" && Array.isArray(input.spec.observation?.notes)) {
+          for (const item of input.spec.observation.notes) {
+            const note = await resources.get<NoteResource["spec"], NoteResource["status"]>({ ...NOTE_TYPE, namespace: input.metadata.namespace, name: item.noteId });
+            if (note && !note.metadata.deletionTimestamp && !note.status.retired && noteVersion(note) === item.version) {
+              const material = noteMaterial(note.spec);
+              if (material !== note.status.curationDelivery?.material) writes.push({ operation: "patchStatus", resource: note,
+                patch: { curationDelivery: { inputUid: input.metadata.uid, material } } });
+            }
+          }
+        }
         if (input.spec.origin === "aide:summary") {
           const ref = SummaryOwnerSchema.parse(input.spec.observation?.summaryOwner);
           const subject = await resources.get<unknown, ResourceContext>(ref);

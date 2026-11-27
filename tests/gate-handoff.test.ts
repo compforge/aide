@@ -67,8 +67,11 @@ test("Gate forwards each user Input once per root and domain replies return to i
     source: larkAddress("cli_test", "oc_me"), sender: me, replyToMessageId: "om_request", text: "Investigate the domain" });
   await routeByRules(context, source);
   const forward = async (inputId: string, text: string) => appendGateInput(aide.personal.store, aide.topics.resource("gate")!, { inputId, topicUid: domain.metadata.uid, text });
+  await resources.patchStatus(domain, { phase: "dormant" });
   const { inputId } = await forward("dm", "Investigate this domain");
   assert.equal((await forward("dm", "Investigate this domain")).inputId, inputId);
+  assert.equal(aide.topics.resource("domain")!.status.phase, "active");
+  assert.equal(aide.topics.resource("domain")!.status.compactOnWake, true);
   assert.equal(aide.topics.inputStore.get(inputId)!.spec.origin, "aide:handoff");
   assert.equal(aide.topics.inputStore.get(inputId)!.status.topic?.uid, domain.metadata.uid);
   await resources.patchStatus(domain, { execution: { id: "chief-execution", startedAt: new Date().toISOString() } });

@@ -1,3 +1,4 @@
+import { externalActivity } from "../topic/activity.ts";
 import { inputClassification } from "../disclosure.ts";
 import { resourceRef } from "../input/state.ts";
 import { isGateTopic, isRootTopic } from "../topic/boundary.ts";
@@ -27,6 +28,8 @@ export function appendGateInput(store: Store, gate: TopicResource, args: { input
       source: source.spec.source, sender: source.spec.sender, replyToMessageId: source.spec.replyToMessageId,
       observation: { originalText: source.spec.text }, ...inputClassification(source.spec),
     }, { topic: target, assess: {}, route: { completedAt: new Date().toISOString(), result: { topics: [target], reason: "Gate handoff" } } });
+    if (input.status.topic && (!topic.status.lastInputAt || input.metadata.creationTimestamp > topic.status.lastInputAt))
+      store.resources.patchStatus(TOPIC_TYPE, topic.metadata.name, externalActivity(topic, input.metadata.creationTimestamp));
     return { inputId: input.metadata.name, topicId: topic.spec.id };
   });
 }

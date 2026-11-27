@@ -46,9 +46,12 @@ export async function groupTopics(resources: ResourceClient, weave: WeaveResourc
     const prepared = group.parent ? { writes: [], status: {} } : await prepareSummary(resources, parent, { maxChars, text: group.summary!, people: group.people });
     await commitStatus(resources, [
       ...prepared.writes,
-      ...children.map(resource => ({ operation: "replace" as const, resource, spec: { ...resource.spec, parentRef: resourceRef(parent) },
-        status: { ...resource.status, reviewCheckedAt: null, idleReviewCount: 0, idleReviewReset: null, organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid,
-          reviewedVersion: versions.get(resource.metadata.uid), toUid: parent.metadata.uid, reason: `Weave grouped under ${parent.spec.name ?? parent.spec.id}` } } })),
+      ...children.map(resource => {
+        const { phase, closeoutFor, compactOnWake, ...childStatus } = resource.status;
+        return { operation: "replace" as const, resource, spec: { ...resource.spec, parentRef: resourceRef(parent) },
+        status: { ...childStatus, reviewCheckedAt: null, idleReviewCount: 0, idleReviewReset: null, organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid,
+          reviewedVersion: versions.get(resource.metadata.uid), toUid: parent.metadata.uid, reason: `Weave grouped under ${parent.spec.name ?? parent.spec.id}` } } };
+      }),
       { operation: "patchStatus", resource: parent, patch: { organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid, ...(group.parent ? { reviewedVersion: versions.get(parent.metadata.uid) } : {}), reason: "Weave combined related roots" }, weaveRevision: (parent.status.weaveRevision ?? 0) + 1,
         ...prepared.status,
         lastInputAt: (group.parent ? [parent, ...children] : children).map(t => t.status.lastInputAt ?? t.metadata.creationTimestamp).sort().at(-1),
