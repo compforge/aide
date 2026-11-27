@@ -103,6 +103,12 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
       log.info({ topicId, targetTopicId: input.topicId, noteId: result.noteId, version: result.version, sensitivity: result.sensitivity, visibility: result.visibility }, "Topic Note updated");
       return result;
     }, beforeWorkMutation: () => { active(); } });
+    session.subscribe(event => {
+      if (event.type === "entry_appended" && event.entry.type === "compaction" && event.entry.fromHook) {
+        log.info({ topicId, sessionId: session.sessionId, entryId: event.entry.id, tokensBefore: event.entry.tokensBefore },
+          "Chief session compaction checkpoint appended");
+      }
+    });
     bindInputDelivery(session, active, plugins.resourceClient("personal"), log);
     return Object.assign(session, { async preparePrompt() {
       const claimed = await retryOnConflict(async () => {
