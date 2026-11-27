@@ -23,7 +23,7 @@ import { understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
 import { notes, readNotes } from "../plugins/personal/note/query.ts";
-import { NOTE_TYPE } from "../plugins/personal/note/model.ts";
+import { NOTE_TYPE, type NoteSpec, type NoteStatus } from "../plugins/personal/note/model.ts";
 import { PERSON_TYPE, type PersonRef } from "../plugins/personal/person/model.ts";
 import { ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
 import { chiefNoteTools } from "../plugins/personal/chief/agent/note-tools.ts";
@@ -62,6 +62,28 @@ test("one independent Note follows progress; tool retries preserve newer content
   assert.equal("recent" in f.read().status, false);
   await assert.rejects(f.upsert({ noteId: first.noteId, version: first.version, text: "stale edit" }, "stale"), /version conflict/);
   await assert.rejects(f.upsert({ noteId: "missing", version: done.version, text: "resurrection" }, "missing"), /no longer exists/);
+});
+test("Note reads resolve unique ID prefixes and report ambiguous or missing matches", async t => {
+  const f = await setup(t);
+  const receipt = await f.upsert({ nature: "semantic", text: "Evidence" }, "prefix");
+  const prefix = receipt.noteId.slice(0, 13);
+  const full = await readNote(f.resources, receipt.noteId);
+  assert.deepEqual(await readNote(f.resources, receipt.uid), full);
+  assert.deepEqual(await readNote(f.resources, prefix), full);
+  await assert.rejects(readNote(f.resources, prefix.slice(0, -1)), /at least 8 hex digits/);
+  await assert.rejects(readNote(f.resources, "note-00000000"), /No Note matches ID prefix.*full Note ID/);
+
+  const original = (await f.resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: receipt.noteId }))!;
+  const otherDigit = receipt.noteId[13] === "0" ? "1" : "0";
+  const collision = await f.resources.create(NOTE_TYPE, {
+    name: prefix + otherDigit + "0".repeat(23), spec: { ...original.spec, text: "Unrelated evidence" }, status: original.status,
+  });
+  await assert.rejects(readNote(f.resources, prefix), /Ambiguous Note ID prefix.*full Note ID/);
+  assert.deepEqual(await readNote(f.resources, receipt.noteId.slice(0, 14)), full);
+  assert.deepEqual(await readNote(f.resources, receipt.noteId), full);
+
+  await f.resources.delete(NOTE_TYPE, collision.metadata.name);
+  assert.deepEqual(await readNote(f.resources, prefix), full);
 });
 test("Note receipts report stored classification across defaults, partial edits and retries", async t => {
   const f = await setup(t);

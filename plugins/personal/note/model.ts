@@ -16,6 +16,7 @@ export const NoteNatureSchema = z.enum(["semantic", "procedural"]);
 export const noteMaxChars = (spec: { maxChars?: number }) => spec.maxChars ?? DEFAULT_MAX_CHARS;
 
 export const NOTE_TYPE = { apiVersion: "aide.dev/v1alpha5", kind: "Note" } as const;
+export const noteIdPrefix = (id: string) => /^(note-[0-9a-f]{8})[0-9a-f]{0,24}$/.exec(id)?.[1];
 export const WriterResourceSchema = z.object({ apiVersion: z.string().min(1), kind: z.enum(["Topic", "Task", "Routine"]),
   namespace: z.literal("v1"), name: z.string().min(1), uid: z.string().min(1) }).strict();
 export const SubjectSchema = WriterResourceSchema.extend({ kind: z.enum(["Topic", "Task", "Routine", "Person", "Address"]) });

@@ -9,7 +9,7 @@ import type { Resource, ResourceClient, ResourceCommit } from "@compforge/aide-p
 import { personRefs, PersonRefsSchema } from "../person/model.ts";
 import { readTopicRoot } from "../topic/tree.ts";
 import { resourceRef } from "../input/state.ts";
-import { clearCurationSchedule, NOTE_TYPE, pendingCuration, noteMaterial, NoteNameSchema, NoteNatureSchema, MaxCharsSchema, noteMaxChars, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
+import { clearCurationSchedule, NOTE_TYPE, pendingCuration, noteMaterial, noteIdPrefix, NoteNameSchema, NoteNatureSchema, MaxCharsSchema, noteMaxChars, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus, type NoteResource } from "./model.ts";
 
 export const NoteUpdateSchema = z.object({ version: z.string().min(1).optional(), noteId: z.string().min(1).optional(),
   name: NoteNameSchema.optional(), nature: NoteNatureSchema.optional(), maxChars: MaxCharsSchema.optional(),
@@ -90,12 +90,28 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
   }
 }
 
-/** Read the complete stored matter when a context window or preview truncated it. */
+/** @spec Exact ID and UID take precedence. A generated Note ID prefix resolves only if unique.
+ * @case tests/notes.test.ts
+ * @link docs/personal/note.md
+ */
 export async function readNote(resources: ResourceClient, noteId: string) {
   const resource = await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: noteId })
     ?? (await resources.page<NoteSpec, NoteStatus>(NOTE_TYPE, { namespace: "v1", limit: 1, matchIndex: { name: "uid", value: noteId } })).items[0];
-  if (!resource || resource.metadata.deletionTimestamp) throw new Error(`Note no longer exists: ${noteId}`);
-  return noteView(resource);
+  if (resource && !resource.metadata.deletionTimestamp) return noteView(resource);
+
+  if (!resource && /^note-[0-9a-f]{0,7}$/.test(noteId))
+    throw new Error("A Note ID prefix requires at least 8 hex digits after note-. Use list_notes to find the full Note ID.");
+  const prefix = noteIdPrefix(noteId);
+  if (!resource && prefix && noteId.length < "note-".length + 32) {
+    const candidates = await resources.list<NoteSpec, NoteStatus>(NOTE_TYPE, {
+      namespace: "v1", matchIndex: { name: "noteIdPrefix", value: prefix },
+    });
+    const matches = candidates.filter(note => !note.metadata.deletionTimestamp && note.metadata.name.startsWith(noteId));
+    if (matches.length > 1) throw new Error(`Ambiguous Note ID prefix: ${noteId}. Use list_notes to find the full Note ID.`);
+    if (matches[0]) return noteView(matches[0]);
+    throw new Error(`No Note matches ID prefix: ${noteId}. Use list_notes to find the full Note ID.`);
+  }
+  throw new Error(`Note no longer exists: ${noteId}`);
 }
 
 export const ReduceNoteSchema = z.object({ noteId: z.string().min(1), version: z.string().min(1),

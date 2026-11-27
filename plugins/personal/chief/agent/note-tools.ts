@@ -6,7 +6,7 @@ import { summaryDescription, noteDescription, noteFields } from "../../execution
 export function chiefNoteTools(upsert?: (input: TopicNoteUpdate, callId: string) => Promise<unknown>, beforeMutation?: () => void, read?: (id: string) => Promise<import("../../note/model.ts").Note>): ChiefToolDefinition[] {
   if (!upsert) return [];
   const { subject, ...fields } = noteFields;
-  const reads: ChiefToolDefinition[] = read ? [{ name: "read_note", inputOrigins: INPUT_ORIGINS, label: "Read note", description: "Read one complete independent Note, including its content version and subject. Select a Note by its directory name, then read its complete body by stable noteId before relying on its details or editing it.",
+  const reads: ChiefToolDefinition[] = read ? [{ name: "read_note", inputOrigins: INPUT_ORIGINS, label: "Read note", description: "Read one complete independent Note, including its content version and subject. Select a Note by its directory name, then read its complete body before relying on its details or editing it. Accepts a full Note ID, UID or unique note- ID prefix with at least 8 hex digits. Use the returned full ID for edits.",
     parameters: Type.Object({ noteId: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
     async execute(_id, args) { return noteResult(await read((args as { noteId: string }).noteId)); },
   }] : [];
