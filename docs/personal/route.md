@@ -77,14 +77,14 @@ system 包含助理身份、归属约束与 Route 固定规则；user 背景包�
 
 每个候选 root 占一个条目：身份 UID，以及有则展示的名称、summary、近期活动和[近期相关人物](chief.md#近期相关人物)预览。名称最多 200 字符、summary 最多 2000 字符；近期活动从子树 Input、Work 进展和 Topic Note 中选最近 3 条，每条最多 240 字符。通过归属与父子关系索引查询，自动上下文不加载历史正文；目录同时受分页条数和字符预算限制，缺失详情按需读取。
 
-上下文组织是后续效果优化的重点。固定职责属于 system；会变化的候选信息属于业务背景，以 Pi custom message 投影，LLM 侧是 user；Input 保留为独立 user 消息。当前按以下结构准备每次模型请求，v1 / v2 只表示内容变化，不是 CRD 版本字段：
+上下文组织是后续效果优化的重点。固定职责属于 system；会变化的候选信息属于业务背景，以 Pi custom message 投影，LLM 侧是 user；业务 Input 以独立的 aide.input 进入会话，在模型侧呈现为 user 消息。当前按以下结构准备每次模型请求，v1 / v2 只表示内容变化，不是 CRD 版本字段：
 
-Route 使用本资源目录下的 [Background](../../plugins/personal/route/background.ts) 保存候选会话快照。每次模型请求前，`background()` 工厂读取最新资源并构造快照；Harness 调用 `Background.text()`，将结果放到 custom → user 的业务前缀。`text()` 只负责文本化，不重新读取资源。共用契约见 [Background 接口](../../agents/background.ts) 和 [Pi 当前业务背景](../harness/pi.md#当前业务背景)。
+Route 使用本资源目录下的 [Background](../../plugins/personal/route/background.ts) 保存候选会话快照。每次模型请求前，`background()` 工厂读取最新资源并构造快照；Harness 将有类型的目录消息放到 custom → user 的业务前缀。`text()` 只负责文本化，不重新读取资源。共用契约见 [Background 接口](../../agents/background.ts) 和 [Pi 当前业务背景](../harness/pi.md#当前业务背景)。
 
 ```text
 请求 1
   system：固定 instruction、tools、rules
-  custom → user：Background.text()，候选会话快照 v1
+  custom → user：aide.topic-directory，候选会话快照 v1
     A：UID、名称、Default 标记、summary、有界近期活动
     B：UID、名称、Default 标记、summary、有界近期活动
   user：Input 1
@@ -92,13 +92,13 @@ Route 使用本资源目录下的 [Background](../../plugins/personal/route/back
 
 请求 2（会话信息未变）
   system：同上
-  custom → user：Background.text()，同一快照 v1
+  custom → user：aide.topic-directory，同一快照 v1
   历史：Input 1、处理与回执
   user：Input 2
 
 请求 3（B.summary 变化）
   system：同上
-  custom → user：Background.text()，当前快照 v2 替换前缀中的 v1
+  custom → user：aide.topic-directory，当前快照 v2 替换前缀中的 v1
   历史：已有对话、处理与回执
   user：Input 3
 ```

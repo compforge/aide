@@ -123,7 +123,7 @@ Chief 的话题材料由 [Topic Background](../../plugins/personal/chief/agent/b
 
 ```text
 system：Chief 的固定职责、沟通规则和授权边界
-custom → user：Background.text()，当前业务背景 v1
+custom → user：aide.topic，当前业务背景 v1
   topic：当前话题 summary、有限 recent
   work：所属 Topic 的 Task / Routine UID、目标和状态
   me：服务对象的当前认识与明确修正

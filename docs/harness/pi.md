@@ -6,7 +6,7 @@ Pi 是通用 Harness，使用 `agents/pi/` 中的 Pi Agent 和 `PiAdapter` 提�
 
 通用 Agent 创建 Pi SDK 会话，加载工作目录上下文与 Skills，启用文件和 CLI 原生工具。调用方可以注入提示词、工具与会话范围。默认使用 Pi 的提示词，不承担 Chief 的工作识别与主动发现策略。
 
-PiAdapter 实现 Harness 的 create、resume、prompt、followUp、steer、abort、close，负责事件归一和恢复引用，不解释工具背后的业务含义。一个 HarnessInvocation 可通过 Pi 原生 followUp 接收后续普通输入，通过 steer 接收紧急输入；宿主不复制 Pi 的追加队列。原生 user message 事件确认输入已应用，结束时清理未应用队列并报告失败。不声明媒体能力。
+PiAdapter 实现 Harness 的 create、resume、prompt、followUp、steer、abort、close，负责事件归一和恢复引用，不解释工具背后的业务含义。一个 HarnessInvocation 可通过 Pi 原生 followUp 接收后续普通输入，通过 steer 接收紧急输入；宿主不复制 Pi 的追加队列。原生消息事件按投递 ID 确认输入已应用，结束时清理未应用队列并报告失败。不声明媒体能力。
 
 ## 装配与模型配置
 
@@ -30,15 +30,13 @@ Agent 不自动发现环境中的扩展、提示词命令或交互主题；装�
 
 ## 当前业务背景
 
-上下文分为三个层次：system 保存固定 instruction、tools 和 rules；custom 保存当前业务背景，在 LLM 侧转换为 user；普通 user 消息承载陆续到达的 Input。业务背景可以包含候选会话、当前 CRD 的 summary、近期依据和相关工作，具体内容由业务决定。
+Personal 在首次 prompt、steer 和 followUp 中通过 `aide.input` 投递业务 Input。模型读取正文，Pi 原生条目的 details 保存 deliveryId、各 Input 的身份与来源，以及可选的 Batch ID。Adapter 在原生消息到达时确认应用；Gate 和 Chief 用同一 ID 提交投递回执。重启后按原生记录补回执，旧会话兼容原有 user 消息前缀。定时唤醒继续使用激活指令。Weave 的候选批次和 Route 的 root 目录使用 `aide.topic-directory`，分别标明目录范围。
 
-`Background` 是本次请求的业务快照，提供 `text(): string`。调用方通过 `createPiAgent({ background: () => new TopicBackground(...) })` 提供它；工厂读取最新资源，`text()` 只文本化快照，Harness 不解释其中的业务字段。
+每次模型请求前，`agent.transformContext` 读取当前 Background，把各部分作为 custom message 注入历史前缀。Chief 读取 `aide.topic`，Task、Routine 还分别读取 `aide.task`、`aide.routine` 委托快照。通用文本背景沿用 `aide.background`。Pi 将正文转换为模型消息；system 继续承载指令和工具。前缀由业务资源重建，覆盖工具后续轮次、followUp、steer 和 resume。原生历史只保留实际投递与读取的记录，当次注入的背景可从请求观察中核对。
 
-Personal 的 Route、Topic、Task、Routine 分别在自己的目录实现 Background，共用有界投影与文本组织辅助函数；它们是派生对象，不是新的 CRD，也不单独持久化。
+读取单个 Topic、Note 或 Work 时，工具在原生 toolResult 中保留原调用关系和本次返回的正文，details 标识快照种类、UID 和适用版本。Note 使用所读的内容版本；Task、Routine、Ongoing 共用 Work 读取入口。分页和目录遵守各工具的范围，列出对象仅代表可发现。业务消息定义见 [Personal messages](../../plugins/personal/messages.ts)。
 
-公开的 `agent.transformContext` 在每次模型请求前调用工厂、取得 `Background.text()`，作为一个 custom message 投影到历史消息之前，包括工具后续轮次、followUp 和 steer。SDK 仍负责 system、工具声明和原生消息转换；业务材料不写进 system。内容不变时前缀保持相同，变化时下一次请求使用新内容，移除的 part 不再提供。
-
-这个前缀是当前资源的派生视图，不追加到原生 transcript，因此不会积累多个旧快照，也不参与历史压缩。压缩保留对话、工具与回执的摘要；恢复时从 CRD 重建当前背景。Aide 不编辑原生会话文件，不存另一套快照历史或模型已读版本。排查当次背景应查看实际模型请求，原生 transcript 只反映历史事实。
+Pi 原生观察和恢复支持 aide.input。当前使用的 pi-hermes-memory 0.9.10 仅将普通 user、assistant 和 system 会话条目纳入 session_search，故新增的 aide.input 正文须通过业务 Input 查询。该扩展按 user 事件触发的纠错检测和轮次计数也采用自身的角色过滤。
 
 读取当前背景失败会终止本次推理，避免带着旧事实继续。快照生成之后资源仍可能变化，写入工具继续校验 UID、版本和执行归属。动态前缀也占上下文预算；Personal 提供有界预览和分页补查，不把常驻背景当作额外授权。
 

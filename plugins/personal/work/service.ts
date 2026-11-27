@@ -68,7 +68,7 @@ export class WorkService {
     return topic ? this.store.topics.scope(topic.metadata.uid).map(t => t.metadata.uid) : [];
   }
 
-  list(): Work[] {
+  list() {
     return this.store.workResources(this.scope()).map(r => this.store.toWork(r));
   }
 
@@ -95,7 +95,7 @@ export class WorkService {
         .items.map(o => ({ outputId: o.metadata.name, purpose: o.spec.purpose, phase: o.status.phase, deliveredAt: o.status.deliveredAt })) };
   }
 
-  read(id: string): Work {
+  read(id: string) {
     const work = this.list().find((item) => item.id === id);
     if (!work) throw new Error(`Unknown work in this topic: ${id}`);
     return work;
@@ -138,7 +138,7 @@ export class WorkService {
 
   async create(definition: WorkDefinition, inputId?: string, key?: string, sourceUid?: string): Promise<Work>;
   async create(definition: OngoingDefinition, inputId?: string, key?: string, sourceUid?: string): Promise<ReturnType<typeof ongoingView>>;
-  async create(definition: WorkDefinition | OngoingDefinition, inputId?: string, key: string = randomUUID(), sourceUid?: string) {
+  async create(definition: WorkDefinition | OngoingDefinition, inputId?: string, key: string = randomUUID(), sourceUid?: string): Promise<Work | ReturnType<typeof ongoingView>> {
     const topic = await this.store.topics.ensure(this.topicId);
     if (definition.kind === "ongoing") {
       if (inputId) sourceUid ??= this.store.topics.inputStore.get(inputId)?.metadata.uid;

@@ -308,7 +308,7 @@ export class InvocationExecutor {
   }
 
   /** @spec Steering targets an existing invocation; admission and application are distinct live facts. */
-  private async appendInput(operation: "steer" | "followUp", invocationId: string, messageId: string, text: string): Promise<{ accepted: boolean; reason?: string }> {
+  private async appendInput(operation: "steer" | "followUp", invocationId: string, messageId: string, text: string, message?: import("@compforge/aide-plugin").ApplicationMessage): Promise<{ accepted: boolean; reason?: string }> {
     const run = this.runForInvocation(invocationId);
     if (!run || run.status !== "active" || !run.binding.ref) return { accepted: false, reason: "not_running" };
     const binding = run.binding;
@@ -316,7 +316,7 @@ export class InvocationExecutor {
     if (!send) return { accepted: false, reason: `${operation}_unsupported` };
     const existing = this.options.records.projection.harnessInputs.get(messageId);
     if (existing) return { accepted: existing.deliveryOutcome !== "failed", reason: "already_admitted" };
-    const input = { messageId, invocationId, runtimeId: binding.runtimeId, target: binding.target, blocks: [{ type: "text" as const, text }],
+    const input = { messageId, invocationId, runtimeId: binding.runtimeId, target: binding.target, blocks: [{ type: "text" as const, text, ...(message && { message }) }],
       source: run.input?.source ?? { type: "user" as const }, status: "dispatching" as const, delivery: operation };
     this.appendEvent(binding, { kind: "harness_input.updated", invocationId, payload: harnessInputUpdate(input, "dispatching") }, { type: "aide" });
     const prompt = { invocationId, messageId, blocks: input.blocks };
@@ -879,7 +879,7 @@ export class InvocationExecutor {
       return { outcome: "accepted" };
     }
     if (input.operation === "followUp" || input.operation === "steer") {
-      const result = await this.appendInput(input.operation, input.invocationId, input.messageId, input.prompt);
+      const result = await this.appendInput(input.operation, input.invocationId, input.messageId, input.prompt, input.message);
       return { outcome: result.accepted ? "accepted" : "rejected", reason: result.reason };
     }
     if (this.processing.has(runtimeId) || this.queues.get(runtimeId)?.head || (current && this.opening.has(current))) return { outcome: "rejected", reason: "session_busy" };

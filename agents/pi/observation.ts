@@ -1,3 +1,4 @@
+import type { Operation } from "@compforge/agent-observation";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -75,6 +76,17 @@ export class PiObservations {
     try { supplement = readObservation(path, sessionId); }
     catch { issue = "Supplemental provider requests are unavailable; native history does not reconstruct the exact request/background."; }
     const view = sessionView(header, entries.filter(e => e.type !== "session"), supplement);
+    // The Pi reader presents extension messages as operations. Expose an admitted Input on the
+    // same timeline and entry ID as its durable native record, including its delivery metadata.
+    view.nodes = view.nodes.map(node => {
+      if (node.kind !== "operation") return node;
+      const operationNode = node as Operation;
+      if (operationNode.operation !== "pi.custom_message") return node;
+      const entry = operationNode.data;
+      if (!entry || typeof entry !== "object" || Array.isArray(entry) || entry.customType !== "aide.input") return node;
+      const { operation, data, ...base } = operationNode;
+      return { ...base, kind: "input", content: { ...entry, role: "custom" } };
+    });
     if (entries.length !== text.split("\n").filter(line => line.trim()).length)
       view.issues = [...(view.issues ?? []), "Native Session contains malformed or incomplete records; only parsed entries are shown."];
     if (issue) view.issues = [...(view.issues ?? []), issue];

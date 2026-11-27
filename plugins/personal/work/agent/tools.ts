@@ -1,3 +1,4 @@
+import { snapshotResult } from "../../messages.ts";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { WorkService } from "../service.ts";
@@ -26,7 +27,8 @@ export function workTools(work: WorkService): ToolDefinition[] {
     tool({ name: "read_work", label: "Read work",
       description: "Read a Task, Routine or Ongoing by id, including its current state and pending question. Reading never resumes execution.",
       parameters: Type.Object({ id }, { additionalProperties: false }),
-      async execute(_id, args, signal) { signal?.throwIfAborted(); return result(await work.readItem(args.id)); },
+      async execute(_id, args, signal) { signal?.throwIfAborted(); const item = await work.readItem(args.id);
+        return snapshotResult({ kind: item.kind, uid: item.uid, version: item.kind === "ongoing" ? item.version : item.revision }, item); },
     }),
     tool({ name: "create_input", label: "Record independent decision",
       description: "Record a new independent Chief decision within existing entrusted authority. For a received Input use its existing ID instead. Returns inputId for upsert_work or append_input.",
