@@ -4,7 +4,7 @@ import { INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
 import { topicSubtree } from "../topic/tree.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 import { z } from "zod";
-import { requireTopic } from "../topic/ownership.ts";
+import { requireProcessingRoot, requireTopic } from "../topic/ownership.ts";
 import { isRootTopic } from "../topic/boundary.ts";
 import { topicReview } from "../topic/review.ts";
 import type { ResourceValidationContext } from "@compforge/aide-plugin";
@@ -30,6 +30,8 @@ export function validateReviewRequest(input: { metadata: { name: string }; spec:
   reviewEvidence(input.spec);
   const topic = requireTopic(input.status.topic, context);
   if (input.spec.originRef?.uid !== topic.metadata.uid) throw new Error("Internal Input target changed");
+  if (input.spec.origin !== "aide:followup" && requireProcessingRoot(input.status.topic, context).status.phase === "dormant")
+    throw new Error("Chief is dormant");
   if (input.spec.origin === "aide:summary") {
     const ref = SummaryOwnerSchema.parse(input.spec.observation?.summaryOwner);
     const owner = context.get(ref, ref.uid);

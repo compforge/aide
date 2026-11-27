@@ -653,7 +653,10 @@ test("curation can revise child Notes and summaries without scheduling another r
   await patchSummary(f.resources, child, { summary: "New lasting understanding" });
   await expireMaintenance(f);
   await f.run();
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.length, 2, "one undelivered Note gets a final curation at dormancy");
+  assert.equal(f.read().status.phase, "dormant");
+  await f.run();
+  assert.equal(f.calls.length, 2);
 });
 
 test("Business arriving after a maintenance receipt resets review backoff", async t => {

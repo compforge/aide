@@ -1,3 +1,4 @@
+import { settleDomain } from "./dormancy.ts";
 import { checkSummary } from "./summary.ts";
 import { ONGOING_TYPE, type OngoingResource } from "../ongoing/model.ts";
 import { topicWatch, materialWatch } from "../topic/watch.ts";
@@ -76,9 +77,22 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
   if (isGateTopic(topic)) return { requeueAfterMs: Math.min(next, await checkSummary(context, topic)) };
   await refreshNotePressure(context, topic);
   await cancelObsolete(context, topic, policy);
-  await ensureOrganizationInput(context, topic, policy);
-  if (!isRootTopic(topic)) return { requeueAfterMs: next };
+  if (!isRootTopic(topic)) {
+    await ensureOrganizationInput(context, topic, policy);
+    return { requeueAfterMs: next };
+  }
   topic = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(topic)))!;
+  if (topic.status.phase === "dormant") return { requeueAfterMs: next };
+  const since = topic.status.lastInputAt ?? topic.metadata.creationTimestamp;
+  const remaining = Date.parse(since) + policy.dormantAfterSeconds * 1000 - Date.now();
+  if (remaining <= 0) {
+    await settleDomain(context, topic, policy, since);
+    return { requeueAfterMs: next };
+  }
+  if (!topic.status.phase) {
+    topic = await context.resources.patchStatus(topic, { phase: "active" }, { resourceVersion: topic.metadata.resourceVersion });
+  }
+  await ensureOrganizationInput(context, topic, policy);
   const schedule = idleReviewSchedule(topic, policy.review);
   if (Object.keys(schedule.patch).length) topic = await context.resources.patchStatus(topic, schedule.patch);
   const due = topicReview(topic.spec.review).enabled && Date.parse(schedule.dueAt) <= Date.now();
@@ -109,7 +123,7 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
       reason: "no_review_demand", completed: work.completed, reviewed: work.reviewed, idleReviewCount: patch.idleReviewCount,
       nextAt: idleReviewSchedule({ ...topic, status: { ...topic.status, ...patch } }, policy.review).dueAt } });
   }
-  return { requeueAfterMs: next };
+  return { requeueAfterMs: Math.min(next, remaining) };
 }
 
 export function registerSecretary(context: PluginContext): void {

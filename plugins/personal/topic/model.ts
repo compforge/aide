@@ -16,6 +16,9 @@ export interface TopicStatus extends ResourceContext {
   assignmentRefresh?: { version: string; cursor: string; complete: boolean };
   conditions?: import("../conditions.ts").Condition[];
   organization?: import("./ref.ts").Organization;
+  phase?: "active" | "dormant";
+  compactOnWake?: boolean;
+  closeoutFor?: string;
   lastInputAt?: string;
   /** Notification progress belongs to the Topic, not to its Input material. */
   weaveRevision?: number;

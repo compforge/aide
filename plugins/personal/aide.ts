@@ -188,7 +188,7 @@ export class Personal {
       const batch = scheduled ? await expandBatch(resources, scheduled) : inputs as NonNullable<typeof inputs[number]>[];
       if (scheduled && (batch.length !== ids.length || batch.some(i => !ids.includes(i.metadata.name)))) return { accepted: false, reason: "admission_conflict" };
       const input = batch[0]!;
-      if (batch.some(i => isInternalInput(i.spec)) && batch.length !== 1) throw new Error("Maintenance admits exactly one Input");
+      if (batch.some(i => isInternalInput(i.spec))) return { accepted: false, reason: "maintenance_waits_for_idle" };
       if (args.operation === "steer" && (scheduled || batch.some(i => !immediate(i.spec)))) throw new Error("Only Immediate Inputs may steer Chief");
       const deliveryId = `${topic.status.execution.id}:${scheduled?.metadata.uid ?? input.metadata.uid}`;
       const startedAt = new Date().toISOString();

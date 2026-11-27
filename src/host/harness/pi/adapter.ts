@@ -9,12 +9,13 @@ import { unsupportedPromptBlocks } from "../adapter.ts";
 import type { LogSink } from "../../logging.ts";
 
 /** The composition root binds tools; the adapter only speaks Pi's session API. */
-export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner"> & Partial<Pick<AgentSession, "steer" | "followUp" | "clearQueue">>;
+export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner"> & Partial<Pick<AgentSession, "steer" | "followUp" | "clearQueue">> & { preparePrompt?(): Promise<void> };
 export type PiSessionFactory = (options: { cwd: string; sessionId?: string }) => Promise<PiSession>;
 interface Turn {
   steering: Map<string, string>;
   admissions: Set<Promise<unknown>>;
   closing?: boolean;
+  preparing?: boolean;
   compactionFailure?: string;
   id: string; done?: Promise<void>; cancelled: boolean;
   streaming?: { messageId: string; thoughtId: string };
@@ -99,6 +100,7 @@ export class PiAdapter implements Harness {
     const text = blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
     if (session.active) {
       const turn = session.active;
+      if (turn.preparing) return { accepted: false, effective: "rejected", reason: "not_running" };
       if (operation === "prompt" || turn.id !== input.invocationId || turn.cancelled || turn.compactionFailure || turn.settled || turn.closing || !session.native[operation] || !session.native.clearQueue) {
         return { accepted: false, effective: "rejected", reason: "Pi cannot accept this operation in the current invocation" };
       }
@@ -118,7 +120,11 @@ export class PiAdapter implements Harness {
     session.active = turn;
     this.log("Pi turn accepted", turn.id);
     // Admission precedes execution; subsequent failures must reach the event stream.
-    turn.done = Promise.resolve().then(() => {
+    turn.preparing = !!session.native.preparePrompt;
+    turn.done = Promise.resolve().then(async () => {
+      try {
+        if (!turn.cancelled) await session.native.preparePrompt?.();
+      } finally { turn.preparing = false; }
       if (!turn.cancelled) return session.native.prompt(text, { expandPromptTemplates: false });
     }).then(() => {
       // Pi emits agent_settled before unwinding its prompt stack. Release the binding only after both boundaries.
@@ -169,7 +175,7 @@ export class PiAdapter implements Harness {
             ...(event.result.estimatedTokensAfter === undefined ? {} : { tokensAfter: event.result.estimatedTokensAfter }) } : {}) } });
       // @spec Final compaction failure ends this invocation; the Operator owns whether to retain its session binding.
       // @why Do not continue this failed turn or permanently reject independent future inputs.
-      if (event.errorMessage && !event.aborted && !event.willRetry && turn && !turn.cancelled && !turn.compactionFailure) {
+      if (event.errorMessage && !event.aborted && !event.willRetry && turn && !turn.preparing && !turn.cancelled && !turn.compactionFailure) {
         turn.compactionFailure = `Pi compaction failed: ${event.errorMessage}`;
         void session.native.abort().catch(() => {});
       }

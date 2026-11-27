@@ -285,6 +285,7 @@ test("Secretary request creation retries a concurrent Chief completion without l
 
 test("Maintenance backoff reaches two hours even with a one-second base cooldown", async t => {
   const f = await secretaryFixture(t), advance = deadlineClock(t);
+  f.policy.dormantAfterSeconds = 10800;
   f.policy.maxUnfiledInput = 1; f.policy.capacityCooldownSeconds = 1;
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
   await reconcileChief(f.context, f.execution("business"), f.root(), f.policy);
@@ -296,4 +297,25 @@ test("Maintenance backoff reaches two hours even with a one-second base cooldown
   advance(7199_000); await reconcileSecretary(f.context, f.root(), f.policy); assert.equal(count(), 1);
   advance(2000); await reconcileSecretary(f.context, f.root(), f.policy); assert.equal(count(), 2);
   assert.equal(f.root().status.maintenanceRequests!["aide:organize"]!.attempts, 14);
+});
+
+test("inactive domain sleeps without inference, follows up while dormant, and wakes on external arrival", async t => {
+  const f = await secretaryFixture(t), advance = deadlineClock(t);
+  await reconcileSecretary(f.context, f.root(), f.policy);
+  assert.equal(f.root().status.phase, "active");
+  advance(901_000);
+  await reconcileSecretary(f.context, f.root(), f.policy);
+  assert.equal(f.root().status.phase, "dormant");
+  await f.resources.patchStatus(f.root(), { weaveRevision: 1 });
+  for (let i = 0; i < 3; i++) await reconcileSecretary(f.context, f.root(), f.policy);
+  assert.equal(f.aide.topics.inputStore.list().length, 0);
+  await f.input("due-check", InputAttention.Normal, "aide:followup");
+  await reconcileChief(f.context, f.execution("followup"), f.root(), f.policy);
+  assert.ok(f.aide.topics.inputStore.get("due-check")!.status.assess?.completedAt);
+  assert.equal(f.root().status.phase, "dormant");
+  assert.equal(f.root().status.lastInputAt, undefined);
+  await f.input("external-reply", InputAttention.Normal, "channel");
+  assert.equal(f.root().status.phase, "active");
+  assert.equal(f.root().status.compactOnWake, true);
+  assert.equal(f.calls(), 1);
 });

@@ -26,7 +26,7 @@ const maintenanceTask: Record<MaintenanceOrigin, string> = {
  * @link docs/personal/secretary.md#容量与维护请求
  */
 export async function createMaintenanceInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" | "ongoing_check_due" | "work_input" = "idle", preparation?: { notes?: NoteResource[]; ongoing?: OngoingResource; materials?: readonly Input[]; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" | "ongoing_check_due" | "work_input" = "idle", preparation?: { notes?: NoteResource[]; closeoutFor?: string; ongoing?: OngoingResource; materials?: readonly Input[]; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
   if (origin === "aide:followup" && (!preparation?.ongoing || !preparation.materials?.length && !followupInputId(preparation.ongoing))) throw new ObsoleteMaintenanceRequest();
   const target = resourceRef(topic);
   const maintenance = preparation?.plan, instructions = preparation?.instructions ?? "";
@@ -37,6 +37,8 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
       if (!fresh || fresh.metadata.resourceVersion !== preparation.ongoing.metadata.resourceVersion) throw new ObsoleteMaintenanceRequest();
     }
     if (!current || current.metadata.deletionTimestamp) throw new Error("Maintenance Topic no longer exists");
+    if (preparation?.closeoutFor && (current.status.closeoutFor === preparation.closeoutFor ||
+      (current.status.lastInputAt ?? current.metadata.creationTimestamp) !== preparation.closeoutFor)) throw new ObsoleteMaintenanceRequest();
     const pending = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
       matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
     if (pending.items[0]) return pending.items[0];
@@ -91,6 +93,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
       ...noteWrites,
       ...pressureWrites,
       { operation: "patchStatus", resource: current, options: { resourceVersion: current.metadata.resourceVersion }, patch: {
+        ...(preparation?.closeoutFor ? { closeoutFor: preparation.closeoutFor } : {}),
         ...(ownerPressure ? { notePressure: ownerPressure } : {}),
         maintenanceRequests: { [origin]: { checkedAt: at, inputId, fingerprint,
           attempts: current.status.maintenanceRequests?.[origin]?.fingerprint === fingerprint
@@ -138,7 +141,7 @@ export async function tryCreateMaintenanceInput(context: Pick<PluginContext, "re
   }
   try { return await createMaintenanceInput(context, current, dueAt, agenda, origin, trigger, preparation, fingerprint); }
   catch (error) {
-    if (error instanceof ObsoleteMaintenanceRequest) return;
+    if (error instanceof ObsoleteMaintenanceRequest || String(error).includes("Chief is dormant")) return;
     if (!String(error).includes("Resource capacity exhausted")) throw error;
     context.logger.warn("Topic maintenance deferred at resource capacity", { attributes: { topicUid: topic.metadata.uid, origin, error: String(error) } });
   }

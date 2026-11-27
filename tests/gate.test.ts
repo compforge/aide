@@ -188,12 +188,14 @@ test("Gate pages open Ongoings across domains by check time and clamps a disappe
     });
   assert.equal((await supplement(open.id, "  ")).status, 400);
   assert.equal((await supplement("missing", "An update")).status, 404);
+  await resources.patchStatus(aide.topics.resource("first")!, { execution: null, phase: "dormant" });
   const text = "审批已通过，可以关闭。";
   const submitted = await Promise.all([supplement(open.id, text), supplement(open.id, text)]);
   assert.deepEqual(submitted.map(reply => reply.status), [200, 200]);
   const [first, duplicate] = await Promise.all(submitted.map(reply => reply.json())) as [{ inputId: string }, { inputId: string }];
   assert.deepEqual(first, duplicate);
   const input = aide.topics.inputStore.get(first.inputId)!;
+  assert.equal(aide.topics.resource("first")!.status.phase, "active");
   assert.equal(input.spec.text, text);
   assert.equal(input.spec.origin, "channel");
   assert.equal(input.spec.originId, "web");

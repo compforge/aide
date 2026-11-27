@@ -1,4 +1,5 @@
 import { isRootTopic, isProcessingRoot } from "../topic/boundary.ts";
+import { externalActivity, externalInput } from "../topic/activity.ts";
 import { assignInput } from "../input/assignment.ts";
 import { commitStatus } from "../status.ts";
 import type { AgentCall } from "../observation/reference.ts";
@@ -34,7 +35,7 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
     try {
       await commitStatus(context.resources, [
         ...touched.map(c => ({ operation: "replace", resource: c, spec: { ...c.spec, name: c.spec.name || initialTopicName(input.spec.text) },
-          status: { ...c.status, lastInputAt: at } }) as ResourceCommit),
+          status: { ...c.status, ...(externalInput(input.spec) ? externalActivity(c, input.metadata.creationTimestamp) : {}) } }) as ResourceCommit),
         { operation: "patchStatus", resource: input, patch: { topic: resourceRef(topics[0]!), assess, route: { ...input.status.route, ...(completedBy ? { completedBy } : {}), completedAt: at,
           result: { topics: topics.map(resourceRef), reason } } } },
       ]);

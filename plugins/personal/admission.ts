@@ -1,6 +1,7 @@
 import { ONGOING_TYPE, type OngoingSpec } from "./ongoing/model.ts";
 import { composeMail, type MailDraft } from "./stream/writer.ts";
 import { statusPatch } from "./status.ts";
+import { isRootTopic } from "./topic/boundary.ts";
 import { topicSubtree } from "./topic/tree.ts";
 import { isDeepStrictEqual } from "node:util";
 import { TASK_TYPE, type TaskSpec } from "./task/model.ts";
@@ -18,10 +19,14 @@ export function personalAdmission(inputs: InputStore, outputs: OutputStore): Res
   return (type, init, writes) => {
     if (type.apiVersion === TOPIC_TYPE.apiVersion && type.kind === TOPIC_TYPE.kind) {
       const spec = init.spec as TopicSpec;
+      const status = init.status as TopicStatus | undefined;
       if (spec.id !== GATE_TOPIC_ID && !spec.parentRef) {
         const gate = inputs.resources.find<TopicSpec, TopicStatus>(TOPIC_TYPE, digest(GATE_TOPIC_ID))
           ?? writes.create(TOPIC_TYPE, { name: digest(GATE_TOPIC_ID), spec: { id: GATE_TOPIC_ID, name: "Gate", review: { enabled: false } }, status: { receipts: [] } });
-        return writes.create(type, { ...init, spec: { ...spec, parentRef: resourceRef(gate) } });
+        return writes.create(type, { ...init, spec: { ...spec, parentRef: resourceRef(gate) }, status: { phase: "active", ...status } });
+      }
+      if (isRootTopic({ spec })) {
+        return writes.create(type, { ...init, status: { phase: "active", ...status } });
       }
     }
     const isOngoing = type.kind === ONGOING_TYPE.kind && type.apiVersion === ONGOING_TYPE.apiVersion;

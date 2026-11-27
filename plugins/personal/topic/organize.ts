@@ -1,3 +1,4 @@
+import { externalInput } from "./activity.ts";
 import { ensureGateTopic } from "../gate/topic.ts";
 import { isRootTopic } from "./boundary.ts";
 import { commitStatus } from "../status.ts";
@@ -57,7 +58,7 @@ export async function moveMaterial(resources: ResourceClient, actor: TopicResour
   await commitStatus(resources, [
     { operation: "patchStatus", resource: material, patch: { topic: resourceRef(target), organization,
       ...(assessment && !assessment.executionId && !assessment.completedAt ? { assess: unassigned } : {}) } },
-    ...(args.kind === "Input" ? [{ operation: "patchStatus" as const, resource: target,
+    ...(args.kind === "Input" && externalInput(material.spec as InputSpec) ? [{ operation: "patchStatus" as const, resource: target,
       patch: { lastInputAt: [target.status.lastInputAt ?? target.metadata.creationTimestamp, material.metadata.creationTimestamp].sort().at(-1)! } }] : []),
   ]);
   return (await resources.get<InputSpec | WorkResource["spec"], InputStatus | WorkResource["status"]>(resourceRef(material)))!;

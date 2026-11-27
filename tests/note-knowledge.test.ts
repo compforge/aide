@@ -745,10 +745,12 @@ test("Note dispatch cooldown follows the material across overlapping batches and
     const saved = (await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, name: b.noteId, namespace: "v1" }))!;
     assert.equal(saved.status.curateAt, retryAt);
     const ctx = { ...f.context, resources };
-    assert.equal((await prepareNoteMaintenance(ctx, saved, policy, Date.parse(retryAt) - 1))?.requeueAfterMs, 1);
+    assert.equal(await prepareNoteMaintenance(ctx, saved, policy, Date.parse(retryAt) - 1), undefined);
     await prepareNoteMaintenance(ctx, saved, policy, Date.parse(retryAt));
     const retried = await resources.get<NoteSpec, NoteStatus>(resourceRef(saved));
-    assert.ok(Date.parse(retried!.status.curateAt!) > Date.parse(retryAt));
+    assert.equal(retried!.status.curateAt, retryAt);
+    assert.deepEqual(retried!.status.curationDelivery, saved.status.curationDelivery);
+    assert.equal(saved.status.curationDelivery?.inputUid, first.metadata.uid);
   } finally { await reopened.close(); }
 });
 
@@ -835,4 +837,24 @@ test("evidence that a matter is still ongoing settles the old check without aski
   assert.equal(updated.status.nextCheckAt, followup.checkAt);
   assert.equal(updated.spec.question, followup.question);
   assert.equal(f.aide.outputs().length, 0);
+});
+
+test("at the dormancy deadline one final Note batch supersedes an unclaimed routine review", async t => {
+  const { reconcileSecretary } = await import("../plugins/personal/secretary/reconcile.ts");
+  const f = await setup(t);
+  const draft = await f.note({ nature: "semantic", text: "New material for the next review" }, "closeout");
+  const at = new Date().toISOString(), policy = topicPolicy();
+  const review = await createMaintenanceInput(f.context, f.read(), at, await maintenanceAgenda(f.resources, []));
+  await f.resources.patchStatus(f.read(), { execution: null, lastInputAt: new Date(Date.now() - 901_000).toISOString() });
+  await reconcileSecretary(f.context, f.read(), policy);
+  const requests = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate");
+  assert.equal(requests.length, 2);
+  assert.equal(f.aide.topics.inputStore.get(review.metadata.name)!.status.assess?.result?.disposition, "cancelled");
+  const closeout = requests.find(i => i.spec.observation?.trigger === "notes_changed")!;
+  assert.deepEqual(closeout.spec.observation?.notes, [draft]);
+  await f.resources.patchStatus(f.read(), { execution: { id: "last", startedAt: at } });
+  await deliverInput(f.resources, f.read(), "last", closeout.metadata.name);
+  await f.resources.patchStatus(f.read(), { execution: null });
+  await reconcileSecretary(f.context, f.read(), policy);
+  assert.equal(f.read().status.phase, "dormant");
 });

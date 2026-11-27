@@ -1,3 +1,5 @@
+import { retryOnConflict } from "@compforge/aide-plugin";
+import { compactOnWake } from "./wake.ts";
 import { confirmCuratedNotes, type NoteConfirmation } from "../../note/confirm.ts";
 import { bindInputDelivery } from "../delivery.ts";
 import { readOngoing } from "../../ongoing/service.ts";
@@ -102,6 +104,14 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
       return result;
     }, beforeWorkMutation: () => { active(); } });
     bindInputDelivery(session, active, plugins.resourceClient("personal"), log);
-    return session;
+    return Object.assign(session, { async preparePrompt() {
+      const claimed = await retryOnConflict(async () => {
+        const current = active();
+        if (!current.status.compactOnWake) return false;
+        await plugins.resourceClient("personal").patchStatus(current, { compactOnWake: false }, { resourceVersion: current.metadata.resourceVersion });
+        return true;
+      });
+      if (claimed) await compactOnWake(session, policy.wakeCompactTokens, log);
+    } });
   };
 }
