@@ -71,22 +71,27 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     session.setActiveToolsByName(names);
   };
   // Pi's next-turn hook starts after the first assistant response; initialize before prompt as well.
-  const prompt = session.prompt.bind(session);
-  session.prompt = async (...args) => {
+  const begin = () => {
     // Preserve caller restrictions (for example replay isolation) across every later task switch.
     allowed ??= new Set(session.getActiveToolNames());
     select();
-    return prompt(...args);
+  };
+  const prompt = session.prompt.bind(session);
+  session.prompt = async (...args) => { begin(); return prompt(...args); };
+  const send = session.sendCustomMessage.bind(session);
+  session.sendCustomMessage = async (message, options) => {
+    if (options?.triggerTurn && !session.isStreaming) begin();
+    return send(message, options);
   };
   session.agent.prepareNextTurnWithContext = async (turn, signal) => {
     select();
     return prepare?.(turn, signal);
   };
-  // Switch the tool scope only when Pi actually appends the admitted user message.
+  // Switch tool scope when Pi appends the admitted Input.
   session.agent.subscribe(event => {
-    if (event.type !== "message_end" || event.message.role !== "user") return;
+    if (event.type !== "message_end" || (event.message.role !== "user" && event.message.role !== "custom")) return;
     taggedOrigin = undefined;
-    const id = deliveredMessageId(event.message.content);
+    const id = deliveredMessageId(event.message);
     if (!id) return;
     const inputs = binding.read().inputs.filter(input => (input.deliveryId ?? input.id) === id);
     for (const input of inputs) delivered.add(input.id);

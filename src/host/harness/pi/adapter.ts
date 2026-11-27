@@ -1,4 +1,4 @@
-import { inputDeliveryMarker } from "../../../../agents/pi/input.ts";
+import { deliveredMessageId, inputDeliveryMarker } from "../../../../agents/pi/input.ts";
 import { randomUUID } from "node:crypto";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type {
@@ -9,10 +9,10 @@ import { unsupportedPromptBlocks } from "../adapter.ts";
 import type { LogSink } from "../../logging.ts";
 
 /** The composition root binds tools; the adapter only speaks Pi's session API. */
-export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner"> & Partial<Pick<AgentSession, "steer" | "followUp" | "clearQueue">> & { preparePrompt?(): Promise<void> };
+export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner"> & Partial<Pick<AgentSession, "steer" | "followUp" | "clearQueue" | "sendCustomMessage" | "isStreaming">> & { preparePrompt?(): Promise<void> };
 export type PiSessionFactory = (options: { cwd: string; sessionId?: string }) => Promise<PiSession>;
 interface Turn {
-  steering: Map<string, string>;
+  steering: Map<string, string | undefined>;
   admissions: Set<Promise<unknown>>;
   closing?: boolean;
   preparing?: boolean;
@@ -98,15 +98,21 @@ export class PiAdapter implements Harness {
     const unsupported = unsupportedPromptBlocks(blocks, this.capabilities);
     if (unsupported.length) throw new Error(`Pi does not support prompt blocks: ${unsupported.join(", ")}`);
     const text = blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
+    const block = blocks.length === 1 && blocks[0]?.type === "text" ? blocks[0] : undefined;
+    const message = block?.message && { ...block.message, content: text, display: true };
+    if (message && !session.native.sendCustomMessage) throw new Error("Native Pi session cannot deliver application messages");
     if (session.active) {
       const turn = session.active;
       if (turn.preparing) return { accepted: false, effective: "rejected", reason: "not_running" };
       if (operation === "prompt" || turn.id !== input.invocationId || turn.cancelled || turn.compactionFailure || turn.settled || turn.closing || !session.native[operation] || !session.native.clearQueue) {
         return { accepted: false, effective: "rejected", reason: "Pi cannot accept this operation in the current invocation" };
       }
-      const marker = inputDeliveryMarker(input.messageId);
-      turn.steering.set(input.messageId, marker);
-      const admission = session.native[operation]!(`${marker}\n${text}`);
+      // sendCustomMessage starts a run when idle; a queued delivery must stay within the current run.
+      if (message && !session.native.isStreaming) return { accepted: false, effective: "rejected", reason: "not_running" };
+      turn.steering.set(input.messageId, message?.customType);
+      const admission = message
+        ? session.native.sendCustomMessage!({ ...message, details: { ...message.details, deliveryId: input.messageId } }, { deliverAs: operation }).then(() => "queued" as const)
+        : session.native[operation]!(`${inputDeliveryMarker(input.messageId)}\n${text}`);
       turn.admissions.add(admission);
       try {
         const receipt = await admission;
@@ -125,7 +131,9 @@ export class PiAdapter implements Harness {
       try {
         if (!turn.cancelled) await session.native.preparePrompt?.();
       } finally { turn.preparing = false; }
-      if (!turn.cancelled) return session.native.prompt(text, { expandPromptTemplates: false });
+      if (turn.cancelled) return;
+      if (message) return session.native.sendCustomMessage!(message, { triggerTurn: true });
+      return session.native.prompt(text, { expandPromptTemplates: false });
     }).then(() => {
       // Pi emits agent_settled before unwinding its prompt stack. Release the binding only after both boundaries.
       if (session.active === turn) return this.finish(session, turn.cancelled ? "cancelled" : turn.settled?.reason ?? "error",
@@ -181,10 +189,10 @@ export class PiAdapter implements Harness {
       }
     }
     if (!turn) return;
-    if (event.type === "message_start" && event.message.role === "user") {
-      const text = typeof event.message.content === "string" ? event.message.content : event.message.content.filter(p => p.type === "text").map(p => p.text).join("\n");
-      for (const [messageId, marker] of turn.steering) if (text.includes(marker)) {
-        turn.steering.delete(messageId);
+    if (event.type === "message_start") {
+      const customType = event.message.role === "custom" ? event.message.customType : undefined;
+      const messageId = deliveredMessageId(event.message, customType);
+      if (messageId && turn.steering.get(messageId) === customType && turn.steering.delete(messageId)) {
         session.sink({ kind: "input_delivery_update", invocationId: turn.id, payload: { messageId, state: "applied" } });
       }
     }

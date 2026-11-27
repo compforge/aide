@@ -1,3 +1,4 @@
+import { snapshotResult } from "../../messages.ts";
 import { isRootTopic } from "../../topic/boundary.ts";
 import { noteFields } from "../../execution/agent/context-tools.ts";
 import { summaryText, summaryReference } from "../../note/summary.ts";
@@ -46,7 +47,8 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
           const t = store.resources.page<TopicSpec, TopicStatus>(TOPIC_TYPE, { limit: 1, matchIndex: { name: "uid", value: uid } }).items[0];
           if (!t || t.metadata.deletionTimestamp || !isRootTopic(t) || t.spec.default) throw new Error("Root Topic unavailable");
           const text = JSON.stringify({ name: t.spec.name, persons: topicPersons(store, t), summary: summaryText(store.resources, t), summaryUid: summaryReference(store.resources, t)?.uid, summaryNote: summaryReference(store.resources, t), recent: notes(store.resources, t.metadata.uid, "subject"), organization: t.status.organization });
-          return result({ uid, version: understandingVersion(t, notes(store.resources, t.metadata.uid, "subject")), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
+          const version = understandingVersion(t, notes(store.resources, t.metadata.uid, "subject"));
+          return snapshotResult({ kind: "topic", uid, version }, { uid, version, text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } },
       { name: "group_topics", label: "Group topics", description: "Attach 1-8 roots to an existing parent, or create a new parent for 2-8 roots. For a new parent provide name and summary preserving long-lived connections, attribution, disagreements and confirmation state. Work retains progress; grouping retains a bounded combined Note window. Do not copy temporary facts into summary. Existing parents keep their own understanding for Chief to synthesize. Running agents may finish; data ownership stays unchanged.",
         parameters: Type.Object({ topics: Type.Array(Type.Object({ uid: Type.String(), version: Type.String() }), { minItems: 1, maxItems: 8 }),

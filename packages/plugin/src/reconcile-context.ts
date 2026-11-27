@@ -20,10 +20,17 @@ interface VerbInput {
   readonly timeoutMs: number;
 }
 
+/** Application identity attached to the text projection of a plugin prompt. */
+export interface ApplicationMessage {
+  readonly customType: string;
+  readonly details: Record<string, unknown>;
+}
+
 /** A Plugin request that creates a Core-owned HarnessInvocation. */
 export interface HarnessInvocationInput extends VerbInput {
   readonly operation?: "prompt";
   readonly prompt: string;
+  readonly message?: ApplicationMessage;
   readonly title: string;
   /** Native session identity supplied by the caller; the verb never reads resource status. */
   readonly sessionId?: string;
@@ -56,7 +63,7 @@ export type HarnessOperationInput = HarnessOperationOptions & (
   | { readonly operation: "close"; readonly sessionId: string }
   | { readonly operation: "abort"; readonly invocationId: string }
   | { readonly operation: "resume"; readonly sessionId: string }
-  | { readonly operation: "followUp" | "steer"; readonly invocationId: string; readonly messageId: string; readonly prompt: string }
+  | { readonly operation: "followUp" | "steer"; readonly invocationId: string; readonly messageId: string; readonly prompt: string; readonly message?: ApplicationMessage }
 );
 export type HarnessVerbInput = HarnessInvocationInput | HarnessOperationInput;
 export type HarnessOperationResult = Exclude<VerbResult<HarnessOperationValue>, { state: "failure" }> & { readonly agent?: import("./harness.ts").AgentStatus };

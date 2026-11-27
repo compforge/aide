@@ -1,3 +1,4 @@
+import { backgroundParts } from "../background.ts";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
 import type { ReadBackground } from "../background.ts";
@@ -15,11 +16,10 @@ export function bindBackground(session: AgentSession, read: ReadBackground): voi
     signal?.throwIfAborted();
     const current = await read();
     signal?.throwIfAborted();
-    const text = current.text();
-    const background = text ? [{
-      role: "custom" as const, customType: "aide.background", display: false,
-      content: `<aide_background>\n${text}\n</aide_background>`, timestamp: 0,
-    }] : [];
+    const background = backgroundParts(current).filter(part => part.content).map(part => ({
+      ...part, role: "custom" as const, display: false, timestamp: 0,
+      content: `<aide_background>\n${part.content}\n</aide_background>`,
+    }));
     const first = history.findIndex(message => message.role !== "system");
     const at = first < 0 ? history.length : first;
     return [...history.slice(0, at), ...background, ...history.slice(at)];

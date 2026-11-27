@@ -1,4 +1,4 @@
-import { inputDeliveryMarker } from "../../../agents/pi/input.ts";
+import { inputMessage, messagePrompt } from "../messages.ts";
 import { isProcessingRoot } from "../topic/boundary.ts";
 import { BATCH_TYPE, type Batch, type BatchSpec, type BatchStatus } from "../batch/model.ts";
 import { asHarnessError } from "@compforge/aide-plugin";
@@ -18,7 +18,7 @@ export interface LoopStatus { agent?: import("@compforge/aide-plugin").AgentStat
 export type LoopResource = Resource<unknown, LoopStatus>;
 /** @spec Role reconcilers select their work before entering this shared admission and execution lifecycle.
  * @spec Only the owning Reconcile invokes its Agent. All automatic input paths persist their admission before dispatch; version conflicts never dispatch stale batches. */
-export async function runInput(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>, target: string, prompt: string, inputId?: string, additionalInputIds: readonly string[] = [], batch?: Batch) {
+export async function runInput(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>, target: string, activation: string | (import("@compforge/aide-plugin").ApplicationMessage & { content: string }), inputId?: string, additionalInputIds: readonly string[] = [], batch?: Batch) {
   const current = await context.resources.get<unknown, LoopStatus>(resourceRef(owner));
   if (!current || current.metadata.deletionTimestamp || current.status.execution) return;
   if (current.kind === "Topic" && !isProcessingRoot(current as import("../topic/model.ts").TopicResource)) return;
@@ -54,6 +54,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
     throw error;
   }
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", inputIds, executionId: execution.executionId } });
+  let prompt = typeof activation === "string" ? activation : activation.content;
   let completed = false;
   let agent: AgentStatus | undefined;
   let failure: HarnessError | undefined;
@@ -77,8 +78,9 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
       streaming = stream.value.streaming;
       if (streaming) prompt += "\nA live Output is already bound to this Immediate Input. Your agent events are written to its Stream. Before finishing, call cite_output for all Notes used by this reply; external new facts need a classified Note first. Write the reply directly in assistant text; do not call say for this same reply. Use say only for a separately intended communication. Do not emit an internal final acknowledgement.";
     }
-    if (current.kind === "Topic") prompt = inputDeliveryMarker(execution.executionId) + "\n" + prompt;
-    const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : current.kind === "Topic" ? target === "gate" ? "Gate" : "Chief" : current.kind, prompt, timeoutMs: 172800_000 });
+    const material = inputIds.length ? inputMessage(prompt, execution.executionId, inputs as Input[], batch?.metadata.uid) : activation;
+    const request = typeof material === "string" ? { prompt } : messagePrompt(material);
+    const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : current.kind === "Topic" ? target === "gate" ? "Gate" : "Chief" : current.kind, ...request, timeoutMs: 172800_000 });
     completed = result.state === "success" && result.value.result.stopReason === "end_turn";
     if (result.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, result.agent);
     if (!completed) error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;

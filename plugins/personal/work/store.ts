@@ -27,7 +27,7 @@ export class Store {
     if (!topic) throw new Error(`Work Topic unavailable: ${ref.uid}`);
     return topic.spec.id;
   }
-  toWork(resource: WorkResource): Work { return toWork(resource, this.topicId(resource.status.topic), notes(this.resources, resource.metadata.uid, "subject"), summaryText(this.resources, resource), summaryReference(this.resources, resource)); }
+  toWork(resource: WorkResource) { return toWork(resource, this.topicId(resource.status.topic), notes(this.resources, resource.metadata.uid, "subject"), summaryText(this.resources, resource), summaryReference(this.resources, resource)); }
   constructor(readonly resources: PluginResourceStore, readonly client: ResourceClient, readonly topics: TopicStore) {}
 
   read(): { works: Work[]; outputs: OutputView[] } {

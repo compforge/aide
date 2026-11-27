@@ -67,13 +67,13 @@ export async function recordDelivery(resources: ResourceClient, owner: TopicReso
   }
 }
 
-/** @spec A queued message becomes delivered only when its admission marker enters the request context.
+/** @spec An admission is delivered when its identified Input enters native context. Queue acceptance alone leaves the receipt pending.
  * @link docs/personal/input.md
  */
 export function bindInputDelivery(session: AgentSession, owner: () => TopicResource, resources: ResourceClient, log: Logger) {
   session.agent.subscribe(async event => {
-    if (event.type !== "message_end" || event.message.role !== "user") return;
-    const id = deliveredMessageId(event.message.content);
+    if (event.type !== "message_end") return;
+    const id = deliveredMessageId(event.message);
     if (!id) return;
     const topic = owner();
     const executionId = topic.status.execution!.id;
@@ -82,7 +82,7 @@ export function bindInputDelivery(session: AgentSession, owner: () => TopicResou
   });
 }
 
-/** Reconcile the crash window between Pi persisting the user message and Personal committing delivery. */
+/** Reconcile the crash window between Pi persisting the Input and Personal committing delivery. */
 export async function recoverInputDeliveries(resources: ResourceClient, topic: TopicResource, readSession: ReadSession) {
   const execution = topic.status.execution;
   if (!execution) return;
@@ -104,7 +104,7 @@ export async function recoverInputDeliveries(resources: ResourceClient, topic: T
     const view = await readSession(agent);
     for (const node of view.nodes.filter((n): n is SessionInput => n.kind === "input")) {
       if (!node.started_at || node.started_at < execution.startedAt || !node.content || typeof node.content !== "object" || Array.isArray(node.content)) continue;
-      const id = deliveredMessageId(node.content.content);
+      const id = deliveredMessageId(node.content);
       if (id && messages.delete(id)) await recordDelivery(resources, topic, execution.id, id);
     }
   }

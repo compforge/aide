@@ -227,9 +227,9 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
     server.closeAllConnections(); server.close();
     rmSync(root, { recursive: true, force: true });
   });
-  async function run(text: string, turnId: string) {
+  async function run(text: string, turnId: string, message?: import("@compforge/aide-plugin").ApplicationMessage) {
     const terminal = new Promise<void>((resolve) => { finished = resolve; });
-    const receipt = await adapter.prompt(ref, { invocationId: turnId, messageId: `user-${turnId}`, blocks: [{ type: "text", text }] });
+    const receipt = await adapter.prompt(ref, { invocationId: turnId, messageId: `user-${turnId}`, blocks: [{ type: "text", text, message }] });
     assert.deepEqual(receipt, { accepted: true, effective: "new_turn" });
     await terminal;
     return session.summarizeInvocation(turnId);
@@ -237,6 +237,36 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   return { work, config, observation, session, adapter, events, requests, requestHeaders, run, personFile, persons, native: () => native!, ref: () => ref, binding: () => binding!,
     reopen: async () => { await adapter.close(ref); ref = await open(); return ref; } };
 }
+
+/** @case Native admission, provider projection and read-only recovery identify the same delivery. */
+for (const operation of ["steer", "followUp"] as const) test(`Pi preserves native Input identity through ${operation} and resume`, { timeout: 20_000 }, async t => {
+  let release!: () => void;
+  const pause = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  const f = await setup(t, (_request, i) => ({ text: "Processed", ...(i === 0 ? { pause } : {}) }));
+  const initial = { customType: "aide.input", details: { deliveryId: "first", batchId: "batch", inputs: [{ id: "a" }, { id: "b" }] } };
+  const running = f.run("first materials", "run", initial);
+  for (let i = 0; i < 200 && !f.requests.length; i++) await Bun.sleep(10);
+  assert.equal(f.requests.length, 1);
+  const queued = { customType: "aide.input", details: { deliveryId: "later", inputs: [{ id: "c" }] } };
+  const receipt = await f.adapter[operation]!(f.ref(), { invocationId: "run", messageId: "later",
+    blocks: [{ type: "text", text: "later materials", message: queued }] });
+  assert.equal(receipt.accepted, true);
+  const applied = () => f.events.filter(e => e.kind === "input_delivery_update" && e.payload.state === "applied");
+  assert.equal(applied().length, 0);
+  release();
+  await running;
+  assert.equal(applied().length, 1);
+  assert.match(JSON.stringify(f.requests.at(-1)!.messages), /later materials/);
+  assert.doesNotMatch(JSON.stringify(f.requests.at(-1)!.messages), /aide-input:|deliveryId/);
+  await f.reopen();
+  const view = await f.observation.read(f.config.cwd, f.config.config, f.binding().identity.id);
+  const inputs = view.nodes.filter((n): n is import("@compforge/agent-observation").Input => n.kind === "input");
+  assert.deepEqual(inputs.flatMap(n => {
+    const m = n.content;
+    return m && typeof m === "object" && !Array.isArray(m) && m.customType === "aide.input" ? [m.details] : [];
+  }), [initial.details, queued.details]);
+});
 
 test("Replay loadout rejects an invented call to a disabled native tool", { timeout: 20_000 }, async t => {
   const { restrictSession } = await import("../scripts/lark-replay/run.ts");

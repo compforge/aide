@@ -44,6 +44,7 @@ export interface ReconcileHarnessInvocation {
     readonly verb: "harness";
     readonly title: string;
     readonly prompt: string;
+    message?: import("@compforge/aide-plugin").ApplicationMessage;
     readonly runtimeId: string;
     readonly harnessName: string;
   };
@@ -139,7 +140,7 @@ function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
 
 function invocationBlocks(state: InvocationState): readonly PromptBlock[] {
   const recorded = state.recorded.payload;
-  return [{ type: "text", text: recorded.prompt }];
+  return [{ type: "text", text: recorded.prompt, ...(recorded.message && { message: recorded.message }) }];
 }
 
 function scheduledOf(
@@ -194,6 +195,7 @@ export class HarnessInvocations {
         verb: invocation.verb,
         title: invocation.title,
         prompt: invocation.prompt,
+        message: invocation.message,
         runtimeId: invocation.runtimeId,
         harnessName: invocation.harnessName,
       },

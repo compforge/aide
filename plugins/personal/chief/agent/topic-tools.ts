@@ -1,3 +1,4 @@
+import { snapshotResult } from "../../messages.ts";
 import { chiefInputs } from "../inputs.ts";
 import { batchForInput } from "../../batch/view.ts";
 import { noteDirectory } from "../../note/directory.ts";
@@ -79,7 +80,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
         const root = active(), topic = await readTopicInScope(store.client, root, uid);
         if (!topic) throw new Error("Topic is outside this root");
         const text = JSON.stringify({ ...topic.spec, persons: topicPersons(store, topic), conditions: topic.status.conditions, summary: summaryText(store.resources, topic), summaryUid: summaryReference(store.resources, topic)?.uid, summaryNote: summaryReference(store.resources, topic), notes: noteDirectory(store.resources.storage, topic.metadata.uid), organization: topic.status.organization });
-        return result({ ref: resourceRef(topic), uid: topic.metadata.uid, version: contentVersion(topic), reclamationVersion: reclamationVersion(topic, store.resources), understandingVersion: understandingVersion(topic, notes(store.resources, topic.metadata.uid, "subject")),
+        return snapshotResult({ kind: "topic", uid: topic.metadata.uid, version: contentVersion(topic) }, { ref: resourceRef(topic), uid: topic.metadata.uid, version: contentVersion(topic), reclamationVersion: reclamationVersion(topic, store.resources), understandingVersion: understandingVersion(topic, notes(store.resources, topic.metadata.uid, "subject")),
           text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
       } },
   ];

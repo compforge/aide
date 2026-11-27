@@ -1,3 +1,4 @@
+import { noteResult } from "../messages.ts";
 import { writeSummary } from "../note/summary.ts";
 import { listNotes } from "../note/query.ts";
 import { contentVersion } from "../context-write.ts";
@@ -30,7 +31,7 @@ export function workContextTools(kind: "task" | "routine", resources: ResourceCl
       parameters: Type.Object({ noteId: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
       async execute(_id, args) {
         read(); const note = await readNote(resources, args.noteId);
-        return result(note);
+        return noteResult(note);
       } }),
     tool({ name: `summarize_${kind}`, label: `Summarize ${kind}`, description: `${summaryDescription} Retain findings, constraints and conclusions that remain useful within this ${kind === "task" ? "task's lifetime" : "ongoing responsibility"}. The Host binds the target. Never changes the objective, schedule or business status.`,
       parameters: Type.Object({ version: Type.String({ minLength: 1 }), summary: Type.String({ maxLength: 16000 }), nature: noteFields.nature, maxChars: noteFields.maxChars, people: noteFields.people, sensitivity: noteFields.sensitivity, visibility: noteFields.visibility }, { additionalProperties: false }),

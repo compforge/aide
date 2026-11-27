@@ -404,6 +404,7 @@ export interface HarnessInvocationRecorded extends ExecutionAssociation {
   verb: "harness";
   title: string;
   prompt: string;
+  message?: import("@compforge/aide-plugin").ApplicationMessage;
   /** Ephemeral live call correlation; native identity is supplied by the caller. */
   runtimeId: string;
   harnessName: string;

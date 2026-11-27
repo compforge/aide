@@ -62,7 +62,10 @@ test("resource context pages all live candidates and isolate related Work", asyn
   const foreign = await aide.work("topic-2").create({ ...definition, title: "foreign-work-marker" });
   assert.deepEqual(relatedWork(store, "topic-0").map(w => w.uid), [own.uid]);
   const work = store.resources.get(ROUTINE_TYPE, own.id) as RoutineResource;
-  const context = new RoutineBackground(store, work).text();
+  const routineBackground = new RoutineBackground(store, work);
+  assert.deepEqual(routineBackground.messages.map(m => [m.customType, m.details.uid]),
+    [["aide.topic", work.status.topic.uid], ["aide.routine", work.metadata.uid]]);
+  const context = routineBackground.text();
   assert.match(context, /Inspect assigned evidence/);
   assert.match(context, /current-topic-understanding/);
   assert.match(context, /Related responsibility/);
@@ -72,6 +75,7 @@ test("resource context pages all live candidates and isolate related Work", asyn
   assert.equal(captured.text(), before, "A captured Background remains stable after resource changes");
   const task = await aide.work("topic-0").create({ kind: "task", title: "Finite goal", instruction: "task-objective-marker", trigger: null });
   const taskBackground = new TaskBackground(store, store.resources.get(TASK_TYPE, task.id) as TaskResource);
+  assert.deepEqual(taskBackground.messages.map(m => m.customType), ["aide.topic", "aide.task"]);
   assert.match(taskBackground.text(), /task-objective-marker/);
   assert.doesNotMatch(taskBackground.text(), /foreign-work-marker/);
   await resources.delete(TASK_TYPE, task.id);

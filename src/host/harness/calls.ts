@@ -79,6 +79,7 @@ export class HarnessCalls implements HarnessExecution {
         verb: request.verb,
         title: request.input.title,
         prompt: request.input.prompt,
+        message: request.input.message,
         runtimeId: runtimeId,
         harnessName,
       },

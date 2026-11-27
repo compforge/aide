@@ -1,3 +1,4 @@
+import { inputMessage, messagePrompt } from "./messages.ts";
 import { recoverInputDeliveries } from "./chief/delivery.ts";
 import type { ReadSession } from "./observation/session.ts";
 import { chiefSession } from "./chief/agent/session.ts";
@@ -148,7 +149,7 @@ export class Personal {
     const message = `New Input:\n${JSON.stringify({ inputId })}\n${inputPreview(input)}\nUse read_input for full facts. Submit the business receipt when handled.`;
     try {
       const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
-        operation, invocationId, messageId: `input:${input.metadata.uid}`, prompt: message, timeoutMs: 30_000,
+        operation, invocationId, messageId: `input:${input.metadata.uid}`, ...messagePrompt(inputMessage(message, `input:${input.metadata.uid}`, [input])), timeoutMs: 30_000,
       });
       if (result.state !== "success") throw new Error(`Harness ${operation} ${result.state}`);
       const outcome = { accepted: result.value.outcome === "accepted", reason: result.value.reason };
@@ -216,7 +217,7 @@ export class Personal {
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
           operation: args.operation, invocationId: invocation.invocationId,
-          messageId: deliveryId, prompt, timeoutMs: 30_000,
+          messageId: deliveryId, ...messagePrompt(inputMessage(prompt, deliveryId, batch, scheduled?.metadata.uid)), timeoutMs: 30_000,
         });
         if (result.state !== "success") throw new Error(`Chief notification failed: ${result.state}`);
         const accepted = result.value.outcome === "accepted";

@@ -131,8 +131,9 @@ test("Gate read tools discover multiple roots and enforce the active owner on ev
   const first = await aide.topics.ensure("first"), second = await aide.topics.ensure("second");
   let active = true;
   const tools = gateReadTools(aide.personal.store, () => { if (!active) throw new Error("Inactive owner"); });
+  const execute = (name: string, args: unknown) => tools.find(tool => tool.name === name)!.execute("test", args, undefined, undefined, {} as never);
   const call = async (name: string, args: unknown) => {
-    const value = await tools.find(t => t.name === name)!.execute("test", args, undefined, undefined, {} as never);
+    const value = await execute(name, args);
     return JSON.parse((value.content[0] as { text: string }).text);
   };
   assert.deepEqual((await call("list_topics", {})).items.map((t: { uid: string }) => t.uid).sort(), [first.metadata.uid, second.metadata.uid].sort());
@@ -142,9 +143,18 @@ test("Gate read tools discover multiple roots and enforce the active owner on ev
   const resources = aide.personal.store.client;
   const writer = await resources.patchStatus(second, { execution: { id: "seed", startedAt: new Date().toISOString() } });
   const { upsertOngoing } = await import("../plugins/personal/ongoing/service.ts");
+  const original = await upsertNote(resources, writer, { text: "Verify rc.7" }, "target");
+  const snapshot = await execute("read_note", { noteId: original.noteId });
+  const revised = await upsertNote(resources, writer, { noteId: original.noteId, version: original.version, text: "Verify rc.8" }, "revised");
+  assert.notEqual(original.version, revised.version);
+  assert.deepEqual(snapshot.details, { customType: "aide.note", details: { kind: "note", uid: original.uid, version: original.version } });
+  assert.equal(JSON.parse((snapshot.content[0] as { text: string }).text).text, "Verify rc.7");
+  assert.equal((await call("read_note", { noteId: original.noteId })).version, revised.version);
   const matter = await upsertOngoing(resources, writer, { title: "Awaiting the approval" }, "approval");
   assert.equal((await call("list_work", { kind: "ongoing", topicUid: second.metadata.uid })).items[0].id, matter.id);
   assert.equal(JSON.parse((await call("read_work", { id: matter.id })).text).title, matter.title);
+  assert.deepEqual((await execute("read_work", { id: matter.id })).details,
+    { customType: "aide.ongoing", details: { kind: "ongoing", uid: matter.uid, version: matter.version } });
   assert.ok(!tools.some(tool => tool.name === "upsert_work"));
   assert.equal((await call("list_work", { kind: "routine", q: "domain" })).items[0].id, work.id);
   await assert.rejects(aide.work("gate").create({ kind: "routine", title: "Forbidden Gate work", instruction: "Must delegate", trigger: { cron: null, timezone: "UTC", event: "check" } }), /cannot own new Work/);

@@ -280,7 +280,7 @@ test("Channel promotion preserves fixed Batch membership without granting steer"
   assert.deepEqual(new Set((await batchMembers(f.resources, ready)).map(i => i.metadata.name)), new Set([original.metadata.name, "b"]));
 });
 
-test("Recovery restores delivery from the admitted native user message exactly once", async t => {
+for (const format of ["legacy", "custom"] as const) test(`Recovery restores ${format} delivery exactly once`, async t => {
   const f = await secretaryFixture(t);
   await f.input("a"); await f.input("b");
   await prepareInputs(f.context, f.root(), f.policy);
@@ -289,7 +289,8 @@ test("Recovery restores delivery from the admitted native user message exactly o
     const session = { source: "pi", id: "session" };
     const view = { schema_version: "agent-ledger/session@1" as const, session,
       nodes: [{ id: "user", kind: "input" as const, started_at: f.root().status.execution!.startedAt,
-        content: { role: "user", content: [{ type: "text", text: "[aide-input:recover]\nmaterials" }] } }] };
+        content: format === "legacy" ? { role: "user", content: [{ type: "text", text: "[aide-input:recover]\nmaterials" }] }
+          : { role: "custom", customType: "aide.input", details: { deliveryId: "recover" }, content: "materials" } }] };
     await recoverInputDeliveries(f.resources, f.root(), async () => view);
     await recoverInputDeliveries(f.resources, f.root(), async () => view);
   }), f.root(), f.policy);

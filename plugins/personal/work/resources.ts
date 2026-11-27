@@ -13,7 +13,7 @@ export function workType(kind: Work["kind"]) {
 }
 
 /** @spec Task and Routine share the delegated execution view. Chief tracks Ongoing through its own resource. */
-export function toWork(resource: WorkResource, topicId: string, recent: import("../note/model.ts").Note[] = [], summary = "", summaryNote?: import("../note/model.ts").NoteReference): Work {
+export function toWork(resource: WorkResource, topicId: string, recent: import("../note/model.ts").Note[] = [], summary = "", summaryNote?: import("../note/model.ts").NoteReference) {
   if (resource.kind !== TASK_TYPE.kind && resource.kind !== ROUTINE_TYPE.kind) {
     throw new Error(`Not personal work: ${resource.kind}/${resource.metadata.name}`);
   }
@@ -22,5 +22,5 @@ export function toWork(resource: WorkResource, topicId: string, recent: import("
   const trigger = "trigger" in resource.spec ? resource.spec.trigger : null;
   const work = WorkSchema.parse({ id: resource.metadata.name, uid: resource.metadata.uid, ...resource.spec, ...observation, summary, summaryUid: summaryNote?.uid ?? "", summaryNote, recent, topicId, kind, trigger, revision: resource.metadata.generation, status: workPhase(resource), nextAt: workDueAt(resource), question: resource.status.waiting?.question ?? null });
   validateTrigger(kind, work.trigger, new Date());
-  return work;
+  return { ...work, uid: resource.metadata.uid };
 }

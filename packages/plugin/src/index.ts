@@ -34,6 +34,7 @@ export type {
 
 export type {
   CompletedHarnessValue,
+  ApplicationMessage,
   HarnessInvocationInput,
   HarnessVerbInput,
   HarnessOperationInput,

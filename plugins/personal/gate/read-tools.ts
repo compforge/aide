@@ -1,3 +1,4 @@
+import { snapshotResult, noteResult } from "../messages.ts";
 import { ONGOING_TYPE, ongoingView, type OngoingSpec, type OngoingStatus } from "../ongoing/model.ts";
 import { workKindField } from "../work/agent/tools.ts";
 import { batchForInput } from "../batch/view.ts";
@@ -45,7 +46,7 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
       parameters: Type.Object({ uid: text, offset }),
       async execute(_id, { uid, offset = 0 }) {
         const value = topic(uid);
-        return result({ uid, url: topicURL(value.spec.id), ...pageText({ ...value.spec,
+        return snapshotResult({ kind: "topic", uid, version: value.metadata.resourceVersion }, { uid, url: topicURL(value.spec.id), ...pageText({ ...value.spec,
           summary: summaryText(store.resources, value), summaryNote: summaryReference(store.resources, value),
           notes: noteDirectory(store.resources.storage, uid), lastInputAt: value.status.lastInputAt }, offset) });
       } }),
@@ -54,7 +55,8 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
       async execute(_id, args) { return result(await listNotes(store.client, args)); } }),
     tool({ name: "read_note", label: "Read Note", description: "Read a complete Note with provenance, nature and uid/version for citations. The returned URL opens the evidence in Gate.",
       parameters: Type.Object({ noteId: text }),
-      async execute(_id, { noteId }) { return result({ ...await readNote(store.client, noteId), url: `/gate?note=${encodeURIComponent(noteId)}` }); } }),
+      async execute(_id, { noteId }) { const note = await readNote(store.client, noteId);
+        return noteResult({ ...note, url: `/gate?note=${encodeURIComponent(noteId)}` }); } }),
     tool({ name: "list_inputs", label: "Find Topic inputs", description: "Page retained Inputs for one Topic. Read full original evidence with read_input; foreign Inputs cannot be assessed or assigned by Gate.",
       parameters: Type.Object({ topicUid: text, continue: Type.Optional(text) }),
       async execute(_id, args) {
@@ -94,11 +96,11 @@ export function gateReadTools(store: Store, active: () => unknown): ToolDefiniti
       parameters: Type.Object({ id: text, offset }),
       async execute(_id, { id, offset = 0 }) {
         const matter = store.resources.find<OngoingSpec, OngoingStatus>(ONGOING_TYPE, id);
-        if (matter && !matter.metadata.deletionTimestamp) return result({ id, ...pageText(ongoingView(matter), offset) });
+        if (matter && !matter.metadata.deletionTimestamp) return snapshotResult({ kind: "ongoing", uid: matter.metadata.uid, version: matter.metadata.resourceVersion }, { id, ...pageText(ongoingView(matter), offset) });
         const work = DELEGATED_WORK_TYPES.map(type => store.resources.find<WorkSpec, WorkAgentStatus>(type, id)).find(Boolean);
         if (!work || work.metadata.deletionTimestamp) throw new Error("Work is unavailable");
         const value = store.toWork(work);
-        return result({ id, url: topicURL(value.topicId), ...pageText(value, offset) });
+        return snapshotResult({ kind: value.kind, uid: work.metadata.uid, version: value.revision }, { id, url: topicURL(value.topicId), ...pageText(value, offset) });
       } }),
   ];
   return tools.map(t => ({ ...t, execute: (...args: Parameters<typeof t.execute>) => { active(); return t.execute(...args); } }));

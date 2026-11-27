@@ -1,3 +1,4 @@
+import { withIdentity } from "../../../../agents/background.ts";
 import { bindChiefInputs, type ChiefInputBinding, type ChiefToolDefinition } from "./input-tools.ts";
 import { assistantInstructions, attributionInstructions } from "../../execution/agent/identity.ts";
 import type { Persons } from "../../person/service.ts";
@@ -17,7 +18,7 @@ export interface ChiefAgentOptions extends Omit<PiAgentOptions, "systemPrompt" |
   work: WorkService;
   persons?: Persons;
   beforeWorkMutation?: () => void;
-  readNote?: (id: string) => Promise<unknown>;
+  readNote?: (id: string) => Promise<import("../../note/model.ts").Note>;
   topicNote?: (input: TopicNoteUpdate, callId: string) => Promise<unknown>;
 }
 
@@ -68,7 +69,7 @@ export async function createChiefAgent(options: ChiefAgentOptions): Promise<Agen
     background: async () => {
       const current = await options.background?.();
       const me = persons ? await personContext(persons) : undefined;
-      return { text: () => [current?.text(), me ? `<me>\n${me}\n</me>` : ""].filter(Boolean).join("\n\n") };
+      return withIdentity(current, me ? `<me>\n${me}\n</me>` : "");
     },
     tools: capabilities.map(({ inputOrigins, ...tool }) => tool) });
   if (inputBinding) bindChiefInputs(session, capabilities, inputBinding);

@@ -1,6 +1,7 @@
 export interface TextBlock {
   type: "text";
   text: string;
+  message?: import("@compforge/aide-plugin").ApplicationMessage;
 }
 
 export interface ImageBlock {
