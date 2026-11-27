@@ -61,6 +61,10 @@ test("Usage HTTP serves the role dashboard, scoped SessionView and per-call deta
   const report = await (await get("/usage/report?window=7d&role=route")).json();
   assert.equal(report.roles.length,6);
   assert.equal(report.routeInputs, 1);
+  assert.equal(report.minutes.reduce((sum: number, m: {tokens: number}) => sum + m.tokens, 0), 15);
+  assert.ok(report.minutes.every((m: {at: number}) => m.at % 60_000 === 0));
+  const filtered = await (await get("/usage/report?role=chief")).json();
+  assert.deepEqual(filtered.minutes, []);
   const route = report.roles.find((r: {role: string}) => r.role==="route");
   assert.deepEqual([route.calls,route.total,route.auxiliaryTokens,route.p95],[1,15,5,8]);
   const query = "?role=route&id=session-1";
