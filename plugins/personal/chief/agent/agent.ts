@@ -1,3 +1,4 @@
+import { chiefZoneCompactor } from "./zone-compactor.ts";
 import { withIdentity } from "../../../../agents/background.ts";
 import { bindChiefInputs, type ChiefInputBinding, type ChiefToolDefinition } from "./input-tools.ts";
 import { assistantInstructions, attributionInstructions } from "../../execution/agent/identity.ts";
@@ -65,6 +66,7 @@ export async function createChiefAgent(options: ChiefAgentOptions): Promise<Agen
   });
   const capabilities = [...workCapabilities, ...chiefNoteTools(topicNote, beforeWorkMutation, readNote), ...(persons ? personTools(persons) : []), ...tools];
   const session = await createPiAgent({ ...pi, scope: options.scope ?? "chief", systemPrompt: [assistantInstructions, attributionInstructions, systemPrompt, persons ? personInstructions : ""].filter(Boolean).join("\n\n"),
+    extensionFactories: [chiefZoneCompactor],
     extensionPaths: [fileURLToPath(import.meta.resolve("pi-hermes-memory"))],
     background: async () => {
       const current = await options.background?.();

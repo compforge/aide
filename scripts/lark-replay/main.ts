@@ -78,7 +78,7 @@ export async function main(args = process.argv.slice(2)) {
       for (const sub of ["pi", "workspace", "state"]) mkdirSync(join(directory, sub), { mode: 0o700 });
       process.env.PI_CODING_AGENT_DIR = join(directory, "pi");
       writeFileSync(join(directory, "pi", "hermes-memory-config.json"), JSON.stringify({
-        reviewEnabled: false, correctionDetection: false, flushOnCompact: false, flushOnShutdown: false,
+        userMessageCustomTypes: ["aide.input"], reviewEnabled: false, correctionDetection: false, flushOnCompact: false, flushOnShutdown: false,
       }));
       const { resolvePiConfig, PiModelConfigSchema } = await import("../../src/host/harness/pi/config.ts");
       const selection = PiModelConfigSchema.parse(modelInput);

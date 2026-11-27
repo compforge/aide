@@ -711,6 +711,47 @@ test("Chief uses bundled Hermes memory across fresh native sessions while generi
   assert.match(JSON.stringify(router.requests[1]!.messages), new RegExp(marker));
 });
 
+/** @case The provider and Hermes see one user message while the native session retains delivery identity. */
+test("Hermes session search indexes a native Input as a user message after close", { timeout: 30_000 }, async t => {
+  const token = `Zircon${Date.now()}`;
+  const text = `The field receipt for ${token} is violet quartz.`;
+  const deliveryId = `private-delivery-${token}`;
+  const writer = await setup(t, () => ({ text: "Recorded." }), "chief");
+  await writer.run(text, "incoming", { customType: "aide.input", details: { deliveryId, inputs: [{ id: "material" }] } });
+  const provider = writer.requests[0]!.messages as { role: string; content: unknown }[];
+  assert.equal(provider.filter(m => m.role === "user" && JSON.stringify(m.content).includes(text)).length, 1);
+  assert.ok(!JSON.stringify(provider).includes(deliveryId));
+  await writer.reopen();
+  const file = SessionManager.findById(writer.config.cwd, writer.binding().identity.id, join(writer.config.agentDir, "sessions"))!;
+  const entries = SessionManager.open(file).getEntries();
+  assert.equal(entries.filter(e => e.type === "custom_message" && e.customType === "aide.input" && e.content === text).length, 1);
+  assert.ok(!entries.some(e => e.type === "message" && e.message.role === "user" && JSON.stringify(e.message.content).includes(text)));
+  const reader = await setup(t, (_request, index) => index === 0
+    ? { tool: "session_search", args: { query: token, role: "user" } } : { text: "Found it." }, "chief");
+  await reader.run("Look up the receipt.", "lookup");
+  const result = (reader.requests[1]!.messages as { role: string; content: unknown }[]).find(m => m.role === "tool");
+  assert.match(JSON.stringify(result), /violet quartz/);
+  assert.ok(!JSON.stringify(result).includes(deliveryId));
+});
+
+test("Hermes correction detection reads a native Input and its raw branch history", { timeout: 20_000 }, async t => {
+  const configPath = join(memoryAgentDir, "hermes-memory-config.json");
+  const saved = readFileSync(configPath, "utf8");
+  const fixture = await (async () => {
+    writeFileSync(configPath, JSON.stringify({ ...JSON.parse(saved), correctionDetection: true, reviewTransport: "direct" }));
+    try {
+      return await setup(t, (_request, index) => ({ text: index === 0 ? "Acknowledged." : '{"operations":[]}' }), "chief");
+    } finally { writeFileSync(configPath, saved); }
+  })();
+  const text = "Actually, use the violet ticket instead.";
+  await fixture.run(text, "correction", { customType: "aide.input", details: { deliveryId: "hidden-correction-id" } });
+  const correction = fixture.requests.find(request => JSON.stringify(request.messages).includes("--- User Correction to Save ---"));
+  assert.ok(correction, "native Input should trigger the Hermes correction handler");
+  const messages = JSON.stringify(correction.messages);
+  assert.ok(messages.includes(`[USER]: ${text}`));
+  assert.ok(!messages.includes("hidden-correction-id"));
+});
+
 /** @case Explicit Pi extensions initialize on open and finish shutdown even when startup fails. */
 test("Pi adapter completes extension lifecycle and reports startup failures", async (t) => {
   const fixture = await setup(t, () => ({ text: "ok" }));
@@ -1468,7 +1509,11 @@ test("Chief restores the same session with the new execution's Input tools", { t
   };
   const first = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding });
   const sessionId = first.sessionId;
-  try { await first.prompt("Review input"); } finally { first.dispose(); }
+  try {
+    await first.sendCustomMessage({ customType: "aide.input", content: "Review input", display: true,
+      details: { deliveryId: "review", inputs: [{ id: "review", origin: "aide:curate" }] } }, { triggerTurn: true });
+    assert.equal(first.sessionManager.getEntries().filter(entry => entry.type === "compaction").length, 1);
+  } finally { first.dispose(); }
   task = { executionId: "business", origin: "channel", inputs: [{ id: "business", origin: "channel", text: "Respond now" }] };
   const resumed = await createChiefAgent({ ...fixture.config, sessionId, work: fixture.work, inputBinding });
   try {
@@ -1478,7 +1523,8 @@ test("Chief restores the same session with the new execution's Input tools", { t
     assert.ok(names(0).includes("memory_add")); assert.ok(names(0).includes("upsert_work"));
     assert.ok(names(1).includes("upsert_work")); assert.ok(!names(1).includes("memory_add"));
     const transcript = JSON.stringify(fixture.requests[1]!.messages);
-    assert.match(transcript, /Review input/); assert.match(transcript, /Business input/);
+    assert.doesNotMatch(transcript, /Review input/); assert.match(transcript, /Business input/);
+    assert.match(transcript, /Use list_inputs and list_notes/);
     assert.match(transcript, /Current Input origin: channel/);
     assert.doesNotMatch(transcript, /Current Input origin: aide:curate/);
   } finally { resumed.dispose(); }
@@ -1513,7 +1559,9 @@ test(`Chief changes tools only when Pi delivers ${origin} followUp after ${initi
       async execute() { said++; return { content: [{ type: "text", text: "Accepted" }], details: {} }; } },
   ] });
   try {
-    await session.prompt("Review input");
+    await session.sendCustomMessage({ customType: "aide.input", content: "Review input", display: true,
+      details: { deliveryId: "initial", inputs: [{ id: "initial", origin: initialOrigin }] } }, { triggerTurn: true });
+    assert.ok(!session.sessionManager.getEntries().some(entry => entry.type === "compaction"));
     assert.equal(fixture.requests.length, 4); assert.equal(reviewed, 1); assert.equal(said, 1);
     const names = (index: number) => (fixture.requests[index]!.tools as { function: { name: string } }[]).map(t => t.function.name);
     for (const index of [0, 1]) { assert.ok(names(index).includes("maintenance_action")); assert.ok(!names(index).includes(action)); }
@@ -1589,4 +1637,65 @@ test("Chief wake compacts before business delivery and keeps the session usable 
   assert.ok(summaries > afterWake);
   assert.equal(topic().status.agent!.sessionId, session);
   assert.equal(topic().status.compactOnWake, false);
+});
+
+test("Chief can retrieve an earlier Input after curate compacts its history", { timeout: 30_000 }, async t => {
+  let recall = false, lookup = 0;
+  const fixture = await setup(t, () => {
+    if (recall) {
+      lookup++;
+      if (lookup === 1) return { tool: "list_inputs", args: {} };
+      if (lookup === 2) return { tool: "read_input", args: { inputId: "zone-evidence" } };
+    }
+    return { text: "Done" };
+  });
+  const aide: Aide = new Aide(join(fixture.config.cwd, "zone-home"), { cwd: fixture.config.cwd, timezone: "UTC",
+    defaultHarnessConfig: { id: "default", harness: "pi" },
+    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
+      chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }),
+  }, pino({ level: "silent" }));
+  t.after(() => aide.close());
+  await aide.start();
+  await aide.topics.ensure("zone");
+  const send = async (id: string, origin: "source" | "aide:curate", text: string) => {
+    await aide.topics.submit(id, { topicId: "zone", origin, originId: "fixture", text });
+    await aide.settled();
+    assert.ok(aide.topics.inputStore.get(id)!.status.assess?.completedAt);
+  };
+  await send("zone-open", "source", "Receipt tracking");
+  await send("zone-evidence", "source", "The original receipt was ZC746.");
+  const sessionId = aide.topics.resource("zone")!.status.agent!.sessionId;
+  const beforeReview = fixture.requests.length;
+  await send("zone-review", "aide:curate", "Review receipt records");
+  assert.equal(fixture.requests.length, beforeReview + 1);
+  const review = JSON.stringify(fixture.requests.at(-1)!.messages);
+  assert.match(review, /ZC746/);
+  assert.match(review, /Review receipt records/);
+  recall = true;
+  const start = fixture.requests.length;
+  await send("find-record", "source", "Find the original receipt");
+  const transcript = (offset: number) => JSON.stringify(fixture.requests[start + offset]!.messages);
+  assert.match(transcript(0), /Use list_inputs and list_notes/);
+  assert.match(transcript(0), /<aide_background>/);
+  assert.match(transcript(0), /Find the original receipt/);
+  assert.doesNotMatch(transcript(0), /ZC746|zone-evidence|Review receipt records/);
+  assert.match(transcript(1), /zone-evidence/);
+  assert.match(transcript(2), /ZC746/);
+  assert.equal(aide.topics.resource("zone")!.status.agent!.sessionId, sessionId);
+});
+
+test("A truncated curate answer keeps the Chief transcript", async t => {
+  const fixture = await setup(t, () => ({ text: "Partial review", stop: "length" }));
+  const config = fixture.config.config;
+  const session = await createChiefAgent({ ...fixture.config, work: fixture.work, config: {
+    ...config, settings: { ...config.settings, compaction: { enabled: false }, retry: { enabled: false } },
+  } });
+  try {
+    await session.sendCustomMessage({ customType: "aide.input", content: "Unfinished review", display: true,
+      details: { deliveryId: "review", inputs: [{ origin: "aide:curate" }] } }, { triggerTurn: true });
+    const entries = session.sessionManager.getBranch();
+    assert.ok(entries.some(e => e.type === "message" && e.message.role === "assistant" && e.message.stopReason === "length"));
+    assert.ok(!entries.some(e => e.type === "compaction"));
+    assert.match(JSON.stringify(session.messages), /Unfinished review/);
+  } finally { session.dispose(); }
 });

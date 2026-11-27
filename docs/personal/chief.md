@@ -149,6 +149,8 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 原生会话通过 Harness 支持的方式初始化、持久化与恢复。新父 Topic 的 Chief 读取子主题认识，不拼接、改写子 Chief 的原生会话文件，不重放已完成 Input。模型请求前的业务背景使用 [Background](../harness/pi.md#当前业务背景) 通道；完整的知识维护和回收约束见 [Topic](topic.md#主题认识与汇总)。
 
+Chief 独立处理一条原生 `aide:curate` Input 并正常收尾时，zone compactor 在同一会话写入 Pi checkpoint。fixed 区域的系统指令与当前 Topic 背景继续由原有机制提供。history 收敛为一条定长回查提示，Chief 可按 Topic 用 `list_inputs`、`list_notes` 找回业务材料。下一条 Input 及其工具调用组成 active 区域。curate 中途收到其它 Input、仍有排队消息，或最终答复失败、取消、截断时保留现场。checkpoint 写入原生会话，重启按同一边界恢复，原始事件仍可观察。整个过程无需模型生成摘要。
+
 Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-hermes-memory](https://github.com/chandra447/pi-hermes-memory)，由 Pi 的扩展加载器显式加载。
 事实与方法由 Note 承载，主题、人物、场合和工作的长期认识由各自 summary 承载，Topic tree 保存主题组织关系；Hermes 提供通用记忆与检索。职责与沉淀主线见 [Personal](README.md#从-input-到认识与成果)。
 
@@ -191,6 +193,14 @@ Chief 使用上游记忆工具维护有长期价值的信息，保留足以理�
 ├── projects-memory/<project>/      # Hermes 按工作目录识别的项目记忆
 └── sessions/                       # Pi 原生会话
 ```
+
+要让 Hermes 把 Aide 的原生 Input 计入用户轮次、纠错和会话索引，在上述 `hermes-memory-config.json` 的 `userMessageCustomTypes` 数组中加入 `aide.input`，保留已有类型和其它配置，然后重启 Aide。最小配置为：
+
+```json
+{ "userMessageCustomTypes": ["aide.input"] }
+```
+
+Hermes 默认的类型列表为空。启用后，符合保留策略的已有会话会由增量回填更新，也可以运行 `/memory-index-sessions` 手动重建索引。
 
 `hermes-memory-config.json` 中的 `memoryDir` 可单独更改全局记忆目录；其它选项和文件由 [上游配置文档](https://github.com/chandra447/pi-hermes-memory#configuration) 定义。依赖随 `npm install` 安装，不需要另运行 `pi install` 或 `aide sync`。
 
