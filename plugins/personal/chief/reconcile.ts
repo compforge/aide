@@ -59,7 +59,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     const result = latest && await collectTopic(context, latest, execution);
     return { ...result, requeueAfterMs: Math.min(result?.requeueAfterMs ?? Infinity, selected.requeueAfterMs) };
   }
-  if (isInternalInput(input.spec) && !inWorkWindow(initial, policy)) return { requeueAfterMs: selected.requeueAfterMs };
+  if (isInternalInput(input.spec) && !inWorkWindow(initial)) return { requeueAfterMs: selected.requeueAfterMs };
   const items = chiefPreviews(inputs, policy.contextChars - 3000);
   const prompt = `${instructions}\nActivation: ${JSON.stringify({ kind: "input", topicId: initial.spec.id,
     inputId: items[0]!.inputId, inputIds: items.map(i => i.inputId), inputs: items, at: new Date().toISOString() })}\nRead full evidence with read_input.`;

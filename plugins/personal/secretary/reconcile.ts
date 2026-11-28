@@ -43,7 +43,7 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
   let next = policy.trigger.intervalSeconds * 1000;
   let topic = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(initial));
   if (!topic || topic.metadata.deletionTimestamp || topic.status.execution || !isRootTopic(topic)) return { requeueAfterMs: next };
-  const open = inWorkWindow(topic, policy);
+  const open = inWorkWindow(topic);
   const schedule = idleReviewSchedule(topic, policy.review);
   if (open && Object.keys(schedule.patch).length) topic = await context.resources.patchStatus(topic, schedule.patch);
   const ready = await preparedIntake(context.resources, topic, !open, next);
@@ -92,7 +92,7 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
   }
   const gate = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(topic.spec.parentRef!);
   if (gate) {
-    const summary = await checkSummary(context, gate, Date.now(), topic, policy);
+    const summary = await checkSummary(context, gate, Date.now(), topic);
     if (summary.input) return { intake: { inputs: [summary.input] }, requeueAfterMs: next };
     next = Math.min(next, summary.requeueAfterMs);
   }
@@ -105,7 +105,7 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
  */
 export async function prepareSecretary(context: PluginContext, topic: TopicResource, policy: TopicPolicy) {
   if (topic.metadata.deletionTimestamp) return;
-  if (isGateTopic(topic)) return checkSummary(context, topic, Date.now(), undefined, policy);
+  if (isGateTopic(topic)) return checkSummary(context, topic);
   await refreshNotePressure(context, topic);
   if (isRootTopic(topic)) return { requeueAfterMs: await prepareInputs(context, topic, policy) };
   await reconcileBatches(context, topic);

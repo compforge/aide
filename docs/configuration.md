@@ -279,7 +279,6 @@ Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖�
 plugins:
   personal:
     topic:
-      workWindowSeconds: 1800  # 最近外部 Input 到来后，允许安排内部工作的时长
       stowPromptTokens: 128000 # 实测输入 token 数严格超过此值时，Stow 可以参选
       deferred:
         count: 10

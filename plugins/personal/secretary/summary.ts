@@ -1,5 +1,4 @@
 import { inWorkWindow } from "../topic/activity.ts";
-import { topicPolicy, type TopicPolicy } from "../topic/config.ts";
 import type { PluginContext, ResourceReader } from "@compforge/aide-plugin";
 import { ADDRESS_TYPE } from "../address/model.ts";
 import { PERSON_TYPE } from "../person/model.ts";
@@ -22,18 +21,18 @@ const reviewQuestions = {
   Address: "When entering this communication place again, what do you need to know to decide whether it suits the discussion and how to communicate here? Read the Address and Notes associated through addresses. Keep its recurring purpose, audience and communication conventions. A conversation held here is evidence about the place only when it establishes a lasting use or convention. Known participants are partial evidence of audience and grant no disclosure authority.",
 } as const;
 
-async function oldestWithNotes(reader: ResourceReader, type: typeof TOPIC_TYPE | typeof PERSON_TYPE | typeof ADDRESS_TYPE, policy: TopicPolicy, now: number) {
+async function oldestWithNotes(reader: ResourceReader, type: typeof TOPIC_TYPE | typeof PERSON_TYPE | typeof ADDRESS_TYPE, now: number) {
   const association = type.kind === "Person" ? "recentPeople" : type.kind === "Address" ? "recentAddresses" : "recentSubject";
   if (type.kind !== "Topic") {
     const shared = await reader.page<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, { matchIndex: { name: "default", value: "default" }, limit: 1 });
-    if (!inWorkWindow(shared.items[0], policy, now)) return;
+    if (!inWorkWindow(shared.items[0], now)) return;
   }
   let cursor: string | undefined;
   do {
     const page = await reader.page<unknown, SummaryResource["status"]>(type, { namespace: "v1", limit: 32, continue: cursor,
       matchIndex: { name: "summaryReview", value: "owner" }, direction: "asc" });
     for (const owner of page.items) {
-      if (owner.kind === "Topic" && !inWorkWindow(await readTopicRoot(reader, resourceRef(owner)), policy, now)) continue;
+      if (owner.kind === "Topic" && !inWorkWindow(await readTopicRoot(reader, resourceRef(owner)), now)) continue;
       if (owner.status.summaryRevision) return owner;
       for (const name of new Set(["recentSubject", association])) {
         const notes = await reader.page(NOTE_TYPE, { matchIndex: { name, value: owner.metadata.uid }, limit: 1 });
@@ -49,13 +48,13 @@ async function oldestWithNotes(reader: ResourceReader, type: typeof TOPIC_TYPE |
  * @link docs/personal/secretary.md#摘要复核
  * @case tests/summary-review.test.ts
  */
-export async function checkSummary(context: Pick<PluginContext, "resources" | "logger">, gate: TopicResource, now = Date.now(), dispatchRoot?: TopicResource, policy = topicPolicy()) {
+export async function checkSummary(context: Pick<PluginContext, "resources" | "logger">, gate: TopicResource, now = Date.now(), dispatchRoot?: TopicResource) {
   const slot = Math.floor(now / interval) * interval;
   const next = slot + interval - now;
   if (Date.parse(gate.status.summaryCheckAt ?? gate.metadata.creationTimestamp) >= slot) return { requeueAfterMs: next };
   const at = new Date(slot).toISOString();
   const clock = { operation: "patchStatus" as const, resource: gate, patch: { summaryCheckAt: at } };
-  const candidates = await Promise.all([TOPIC_TYPE, PERSON_TYPE, ADDRESS_TYPE].map(type => oldestWithNotes(context.resources, type, policy, now)));
+  const candidates = await Promise.all([TOPIC_TYPE, PERSON_TYPE, ADDRESS_TYPE].map(type => oldestWithNotes(context.resources, type, now)));
   const [owner] = candidates.filter(item => !!item).sort((a, b) =>
     (a.status.summaryReviewedAt ?? "").localeCompare(b.status.summaryReviewedAt ?? "") || a.metadata.uid.localeCompare(b.metadata.uid));
   const chief = owner && (owner.kind === "Topic" ? await readTopicRoot(context.resources, resourceRef(owner)) : await ensureDefaultTopic(context.resources));

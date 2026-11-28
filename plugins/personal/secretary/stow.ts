@@ -15,7 +15,7 @@ import { commitStatus } from "../status.ts";
 export async function selectStow(context: Pick<PluginContext, "resources" | "logger">, root: TopicResource, policy: TopicPolicy) {
   const ref = resourceRef(root);
   const topic = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(ref);
-  if (!topic || topic.status.execution || !inWorkWindow(topic, policy)) return;
+  if (!topic || topic.status.execution || !inWorkWindow(topic)) return;
   const pending = (await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
     matchIndex: { name: "internalPending", value: JSON.stringify([ref.uid, "aide:stow"]) }, limit: 1 })).items[0];
   if (pending) return !pending.status.assess?.executionId && deliveryRetryDue(pending.status.assess, policy.trigger.intervalSeconds * 1000) ? pending : undefined;

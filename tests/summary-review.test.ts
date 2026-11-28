@@ -17,13 +17,13 @@ const interval = 15 * 60_000;
 function schedule(f: Awaited<ReturnType<typeof secretaryFixture>>) {
   const gate = () => f.aide.topics.resource("gate")!;
   const start = Math.floor(Date.parse(gate().metadata.creationTimestamp) / interval) * interval;
-  f.policy.workWindowSeconds = 7200;
   return {
+    atMinute: (minutes: number) => new Date(start + minutes * 60_000).toISOString(),
     tick: async (minutes: number) => {
       const now = start + minutes * 60_000;
-      await checkSummary(f.context, gate(), now, undefined, f.policy);
-      for (const root of [f.root(), await ensureDefaultTopic(f.resources)]) await checkSummary(f.context, gate(), now, root, f.policy);
-      return (await checkSummary(f.context, gate(), now, undefined, f.policy)).requeueAfterMs;
+      await checkSummary(f.context, gate(), now);
+      for (const root of [f.root(), await ensureDefaultTopic(f.resources)]) await checkSummary(f.context, gate(), now, root);
+      return (await checkSummary(f.context, gate(), now)).requeueAfterMs;
     },
     requests: () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:summary"),
   };
@@ -51,6 +51,7 @@ test("Secretary skips a busy quarter-hour, ignores mid-slot wakeups and complete
   assert.ok(receipt.completedAt);
   assert.equal(f.root().status.summaryReviewedAt, receipt.completedAt);
   assert.equal(f.root().status.summaryRevision, version);
+  await f.resources.patchStatus(f.root(), { lastInputAt: s.atMinute(80) });
   await s.tick(90);
   assert.equal(s.requests().length, 2, "only the current slot is checked after missed ticks");
 });
@@ -68,6 +69,7 @@ test("Assigned Inputs and prepared Batches each make an idle Chief unavailable",
   await reconcileChief(f.context, f.execution("batch"), f.root(), f.policy);
   await s.tick(31);
   assert.equal(s.requests().length, 0);
+  await f.resources.patchStatus(f.root(), { lastInputAt: s.atMinute(40) });
   await s.tick(45);
   assert.equal(s.requests().length, 1);
 });

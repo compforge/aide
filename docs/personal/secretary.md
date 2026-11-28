@@ -50,7 +50,7 @@ Gate 保存全局的 15 分钟时钟。每到整刻钟，优先选有 Summary �
 
 ### 工作窗口
 
-每棵领域树按 root 的 `status.lastInputAt` 和 `topic.workWindowSeconds` 推断工作窗口，默认 30 分钟。Channel、Source、Gate 转交和用户对 Ongoing 的补充都属于外部活动。内部 Input 保留原来的活动时间。领域从未收到外部 Input 时，窗口关闭。
+每棵领域树的工作窗口从 root 最近一次外部 Input 的到达时间（`status.lastInputAt`）起持续 30 分钟。Channel、Source、Gate 转交和用户对 Ongoing 的补充都属于外部活动。内部 Input 保留原来的活动时间。领域从未收到外部 Input 时，窗口关闭。
 
 窗口内，各类内部工作按自身条件参与选单。窗口外，秘书继续封批和投递就绪业务，暂停新派内部 Input。Ongoing 的预约即使已到期，也留到下次外部 Input 到来后再判断。已经开始的执行继续完成，窗口结束本身不会派单。
 

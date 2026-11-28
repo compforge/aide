@@ -292,7 +292,6 @@ test("Maintenance backoff reaches two hours even with a one-second base cooldown
   const f = await secretaryFixture(t), advance = deadlineClock(t);
   f.policy.review.idleSeconds = 10800;
   f.policy.review.backoff = null;
-  f.policy.workWindowSeconds = 10800;
   f.policy.maxUnfiledInput = 1; f.policy.capacityCooldownSeconds = 1;
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
   await reconcileChief(f.context, f.execution("first"), f.root(), f.policy);
@@ -302,7 +301,9 @@ test("Maintenance backoff reaches two hours even with a one-second base cooldown
   const request = f.root().status.maintenanceChecks!["aide:organize"]!;
   await f.resources.patchStatus(f.root(), { maintenanceChecks: { "aide:organize": { ...request, attempts: 14 } } });
   const count = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize").length;
-  advance(7199_000); await reconcileSecretary(f.context, f.root(), f.policy); assert.equal(count(), 1);
+  advance(7199_000);
+  await f.resources.patchStatus(f.root(), { lastInputAt: new Date(Date.now()).toISOString() });
+  await reconcileSecretary(f.context, f.root(), f.policy); assert.equal(count(), 1);
   advance(2000); await reconcileSecretary(f.context, f.root(), f.policy); assert.equal(count(), 2);
   assert.equal(f.root().status.maintenanceChecks!["aide:organize"]!.attempts, 14);
 });
