@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkSummary } from "../plugins/personal/secretary/summary.ts";
+import { checkSummary } from "./maintenance-fixture.ts";
 import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 import { SummaryOwnerSchema } from "../plugins/personal/input/review.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
@@ -29,7 +29,7 @@ function schedule(f: Awaited<ReturnType<typeof secretaryFixture>>) {
   };
 }
 
-test("Secretary skips a busy quarter-hour, ignores mid-slot wakeups and completes a no-op with the owner's receipt", async t => {
+test("Secretary retains a busy quarter-hour until the Chief is available and completes a no-op with the owner's receipt", async t => {
   const f = await secretaryFixture(t), s = schedule(f);
   await patchSummary(f.resources, f.root(), { summary: "Supported scope" });
   const version = f.root().status.summaryRevision;
@@ -37,7 +37,7 @@ test("Secretary skips a busy quarter-hour, ignores mid-slot wakeups and complete
   await s.tick(15);
   await f.resources.patchStatus(f.root(), { execution: null });
   assert.equal(await s.tick(18), 12 * 60_000);
-  assert.equal(s.requests().length, 0);
+  assert.equal(s.requests().length, 1);
   await s.tick(30);
   await s.tick(31);
   assert.equal(s.requests().length, 1);
@@ -56,22 +56,19 @@ test("Secretary skips a busy quarter-hour, ignores mid-slot wakeups and complete
   assert.equal(s.requests().length, 2, "only the current slot is checked after missed ticks");
 });
 
-test("Assigned Inputs and prepared Batches each make an idle Chief unavailable", async t => {
+test("An overdue Summary competes at High while a Normal Batch remains ready", async t => {
   const f = await secretaryFixture(t), s = schedule(f);
   await patchSummary(f.resources, f.root(), { summary: "Current understanding" });
   await f.input("first", InputAttention.Deferred);
-  await s.tick(15);
-  assert.equal(s.requests().length, 0);
   await f.input("second", InputAttention.Deferred);
   await prepareInputs(f.context, f.root(), f.policy);
-  await s.tick(30);
+  await f.resources.patchStatus(f.root(), { execution: { id: "busy", startedAt: s.atMinute(15) } });
+  await s.tick(15);
   assert.equal(s.requests().length, 0);
-  await reconcileChief(f.context, f.execution("batch"), f.root(), f.policy);
-  await s.tick(31);
-  assert.equal(s.requests().length, 0);
-  await f.resources.patchStatus(f.root(), { lastInputAt: s.atMinute(40) });
+  await f.resources.patchStatus(f.root(), { execution: null, lastInputAt: s.atMinute(40) });
   await s.tick(45);
   assert.equal(s.requests().length, 1);
+  assert.equal(s.requests()[0]?.spec.attention, InputAttention.High);
 });
 
 test("Shared Person and Address become eligible from ordinary Notes and rotate independently of the source Topic", async t => {
@@ -114,5 +111,5 @@ test("A business arrival during Summary selection wins the scheduling transactio
   } };
   await checkSummary({ resources, logger: f.context.logger }, gate, due, f.root());
   assert.equal(s.requests().length, 0);
-  assert.equal(f.aide.topics.resource("gate")!.status.summaryCheckAt, new Date(due).toISOString());
+  assert.equal(f.aide.topics.resource("gate")!.status.summaryCheckAt, gate.status.summaryCheckAt);
 });

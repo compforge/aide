@@ -8,9 +8,10 @@
 
 1. **唤醒。** 资源变化、定时到期，或 root Topic 清除本轮执行状态，都会让秘书重新检查。
 2. **看闲忙。** 秘书重读 root 的 `status.execution`。已有执行时，Chief 继续手头的事，秘书可以独立封批、更新 Note 的容量信息。
-3. **选一件。** Chief 空闲时，秘书先看已经就绪的 Input 和 Batch，再在工作窗口内检查 Ongoing 和领域维护需求。选中一个内部事项时，才根据当前材料创建对应的 Input。本轮没有合适的工作，就等下次唤醒。
+3. **列出候选。** 在工作窗口内，秘书根据各项规则观察事件、条件和经过的时间，给满足规则的内部事项指定 Attention 和等待起点。
+4. **选择并投递。** Chief 空闲时，待投递 Input、就绪 Batch 和内部候选按同一顺序选单。已有 Input 或 Batch 直接复用；选中的内部候选才创建 Input、登记本轮材料并投递。其余需求留在原资源上，下次按最新事实判断。
 
-例如，Chief 正在处理别的事，一条跟进交付的 Ongoing 到了 `nextCheckAt`。这时用户又发来一条普通 Input：“对方已经确认收货。”下轮秘书先递交这条消息。Chief 据此记录结论并关闭 Ongoing。再下一轮，秘书看到事项已关闭，这次到期检查就无需生成 `aide:followup`。[对应的调度用例](../../tests/topic-secretary.test.ts)
+外部业务 Input 到达已有运行中的 Chief 时可以直接投递。Immediate 使用 `steer`，High 和 Normal 使用 `followUp`。例如，用户确认已经收货，Chief 可据此关闭 Ongoing。秘书下次查看这个事项时，已经无需为它生成跟进 Input。
 
 ## Deferred 归组
 
@@ -22,17 +23,15 @@ Chief 忙时，秘书仍可为它准备下一批材料。兼容的 Deferred Inpu
 
 ## Chief 空闲时如何选单
 
-秘书在同一 root 内按下表从上往下检查，选到一件便结束本轮。尚未选中的维护需求仍由相应的 Ongoing、Note 或 Topic 表达，下一轮重新判断。
+先比较 **Immediate > High > Normal > Deferred**，同档取较早者。已存在的 Input 和 Batch 使用各自的创建时间。内部候选使用本轮需求的起点，下表给出默认规则。High 的等待时间直接从需求起点计算，首次检查时就可能满足。冷却、已投递记录和工作窗口仍决定候选资格。
 
-| 观察对象 | 何时可以选 | 交给 Chief 的工作 |
+| 内部 Input | 事件或条件 | 时间与 Attention |
 | --- | --- | --- |
-| 已就绪的 Input 或 Batch | 有可投递的材料，或已明确投递失败的材料到了重试时间。先按 attention 取 Immediate，再取 Normal。同级比较各自的创建时间，Batch 采用批次自身的创建时间 | 一条原 Input 或一个已封的 Batch |
-| 开放的 Ongoing | 已到核实时间，或收到尚待处理的关联材料 | `aide:followup`，带事项及相关材料，由 Chief 核实现状、决定下一步。[核实与收尾](work.md#核实与收尾) |
-| 有变化的普通 Note | 待整理材料达到批量或最早等待时限 | `aide:curate`，从这批 Note 出发整理，并核对相关 Work。[Note 梳理](note.md#梳理与提炼) |
-| 子树中各 Topic 的直属材料 | 某个 Topic 的未归集 Input、受托 Work 或直属子 Topic 数量超限 | `aide:organize`，带上超限的 Topic 和材料，请 Chief 调整归属 |
-| 整个领域的认识 | Chief 的工作量达到回顾条件、Weave 通知结构变化，或 Note 数量与篇幅需要整理 | `aide:curate`，带本轮回顾依据，请 Chief 结合已有 Note 和 Work 重新梳理 |
-| Topic、Person 或 Address 的摘要 | 到了全局复核时刻，轮到的对象有相关材料，且负责的 Chief 空闲、没有排队工作 | `aide:summary`，复核这个对象下次被读到时应提供的默认背景，按需修订。[Summary Note](note.md#作为-summary-的-note) |
-| Chief 会话 | 最近一次实测 prompt 超过阈值，且当前没有更高优先级的候选 | `aide:stow`，由运行时执行会话维护。 |
+| `aide:curate` | 8 条待整理 Note、10 次待回顾工作量、Weave 结构变化或 Note 容量压力均可触发 Normal | 零散 Note 或工作量等满 15 分钟也可触发 Normal。需求满对应时间阈值的两倍升 High，默认 30 分钟 |
+| `aide:organize` | Topic 的直属未归集 Input、受托 Work 或子 Topic 数量超限时为 Normal | 从首次观察到持续超限开始计时，默认满 30 分钟为 High |
+| `aide:summary` | 全局每 15 分钟检查有摘要或普通 Note 的 Topic、Person、Address | 到复核时刻为 Normal，从本轮复核计时起点满 30 分钟为 High |
+| `aide:followup` | 开放的 Ongoing 收到补充材料，或到了 `nextCheckAt` | Normal，等待起点取到期时间与材料挂入时间中较早的一项 |
+| `aide:stow` | 当前 Chief 会话实测 prompt 严格超过 `stowPromptTokens` | Normal，以本轮首次超阈值为起点，与其他 Normal 按时间排序 |
 
 ### 工作量与时间窗口
 
@@ -42,7 +41,7 @@ Chief 忙时，秘书仍可为它准备下一批材料。兼容的 Deferred Inpu
 
 ### 摘要复核
 
-Gate 保存全局的 15 分钟时钟。每到整刻钟，优先选有 Summary 或相关普通 Note、且尚未复核的对象，其次选最久未复核的对象。Topic 交给当前领域的 root Chief，Person 和 Address 交给默认领域的 Chief。负责的 Chief 忙或有待办时，跳过本次，下个整刻钟重新选择。复核完成可以保留原文。[摘要复核实现](../../plugins/personal/secretary/summary.ts)
+Gate 保存全局的 15 分钟时钟。每到整刻钟，优先选有 Summary 或相关普通 Note、且尚未复核的对象，其次选最久未复核的对象。Topic 交给当前领域的 root Chief，Person 和 Address 交给默认领域的 Chief。Chief 忙或其他候选胜出时保留本轮复核机会。派单成功或检查确无对象，Gate 才推进时钟。复核完成可以保留原文。[摘要复核实现](../../plugins/personal/secretary/summary.ts)
 
 ## 一轮结束与工作窗口
 
@@ -56,6 +55,6 @@ Gate 保存全局的 15 分钟时钟。每到整刻钟，优先选有 Summary �
 
 ### Stow
 
-`status.agent.promptTokens` 是当前 Chief session 最近一次普通模型调用的完整输入 token 数，包含缓存读写。默认严格超过 128,000 时，Stow 具备触发条件。秘书选完业务、跟进、整理和摘要候选后才检查它。同一窗口可以有多个空档，每份实测值最多派一次。
+`status.agent.promptTokens` 是当前 Chief session 最近一次普通模型调用的完整输入 token 数，包含缓存读写。默认严格超过 128,000 时，Stow 具备触发条件。它以 Normal 与其他候选共同参选。同一窗口可以有多个空档，每份实测值最多派一次。
 
-运行时接到 Stow 后核对工作窗口、session、预留该观测的 Input 和现有待办，直接调用 Pi compact。Stow 的压缩用量归入 Usage 的辅助调用；投递 Stow 不增加 Curate 工作量。失败保留原读数与此次尝试记录；新的普通调用提供新的观测，压缩成功和会话更换清除旧读数。[Stow 选单](../../plugins/personal/secretary/stow.ts) · [Chief 会话](../../plugins/personal/chief/agent/session.ts)
+运行时接到 Stow 后核对工作窗口、session、预留该观测的 Input 与当前读数，直接调用 Pi compact。Stow 的压缩用量归入 Usage 的辅助调用；投递 Stow 不增加 Curate 工作量。失败保留原读数与此次尝试记录；新的普通调用提供新的观测，压缩成功和会话更换清除旧读数。[Stow 选单](../../plugins/personal/secretary/stow.ts) · [Chief 会话](../../plugins/personal/chief/agent/session.ts)

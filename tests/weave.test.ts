@@ -1,6 +1,6 @@
 import { topicTools } from "../plugins/personal/chief/agent/topic-tools.ts";
 import { reclamationVersion } from "../plugins/personal/topic/retention.ts";
-import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
+import { selectChiefIntake } from "../plugins/personal/chief/intake.ts";
 import { isRootTopic } from "../plugins/personal/topic/boundary.ts";
 import { newHarnessError } from "@compforge/aide-plugin";
 import { summaryText } from "../plugins/personal/note/summary.ts";
@@ -86,7 +86,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
       await deliverInput(f.resources, f.refresh(b), "root-chief", "second");
       return { state: "success", value: { result: { stopReason: "end_turn" } } };
     } } };
-    await reconcileSecretary(f.context, f.refresh(b));
+    await selectChiefIntake(f.context, f.refresh(b));
     await reconcileChief(f.context, rootExecution, f.refresh(b));
     await deliverInput(f.resources, f.refresh(a), "old-chief", "first");
     const current = f.refresh(a);
@@ -271,15 +271,15 @@ test("Unfinished synthesis retries one review Input without refreshing business 
     prompts++;
     throw newHarnessError("harness_execution_failed", "unavailable");
   } } };
-  await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
+  await selectChiefIntake(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
-  await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
+  await selectChiefIntake(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 1);
   assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceChecks?.["aide:curate"]?.attempts, 1);
   const pending = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   await f.resources.patchStatus(pending, { assess: { ...pending.status.assess, errorAt: "2000-01-01T00:00:00.000Z" } });
-  await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
+  await selectChiefIntake(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 2);
   assert.equal(f.aide.topics.resource(root.id)!.status.lastInputAt, lastInputAt);

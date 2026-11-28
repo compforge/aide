@@ -1,7 +1,7 @@
 import { confirmCuratedNotes } from "../plugins/personal/note/confirm.ts";
 import { deliverInput, routeTo } from "./input-state-fixture.ts";
 import { upsertOngoing, readOngoing } from "../plugins/personal/ongoing/service.ts";
-import { prepareOngoingCheck } from "../plugins/personal/secretary/ongoing.ts";
+import { prepareOngoingCheck } from "./maintenance-fixture.ts";
 import { topicPolicy } from "../plugins/personal/topic/config.ts";
 import { fixtureMe } from "./address-fixture.ts";
 import { fixtureGateRef } from "./summary-fixture.ts";
@@ -465,7 +465,7 @@ test("Note renaming preserves pressure identity and backoff while text changes r
 });
 
 test("Secretary separates curation from one-shot followup and fences stale questions on closure", async t => {
-  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { prepareNoteMaintenance } = await import("./maintenance-fixture.ts");
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
   const f = await setup(t);
   const policy = topicPolicy();
@@ -723,7 +723,7 @@ test("retrospective decisions reuse sourced Work across rounds and retain the No
 
 test("two stale-only assessments defer that material behind other pending drafts", async t => {
   const { pendingCuration } = await import("../plugins/personal/note/model.ts");
-  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { prepareNoteMaintenance } = await import("./maintenance-fixture.ts");
   const f = await setup(t);
   const policy = topicPolicy({ curation: { count: 1 } });
   const draft = await f.note({ nature: "semantic", text: "Waiting for the receipt" }, "first");
@@ -743,7 +743,7 @@ test("two stale-only assessments defer that material behind other pending drafts
 });
 
 test("Note dispatch cooldown follows the material across overlapping batches and survives reopening", async t => {
-  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { prepareNoteMaintenance } = await import("./maintenance-fixture.ts");
   const f = await setup(t), policy = topicPolicy({ curation: { count: 1 } });
   const a = await f.note({ nature: "semantic", text: "A" }, "a");
   const b = await f.note({ nature: "semantic", text: "B" }, "b");
@@ -788,7 +788,7 @@ test("Note dispatch cooldown follows the material across overlapping batches and
 });
 
 test("curate batches classified drafts and acknowledges only final versions it actually reviewed", async t => {
-  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { prepareNoteMaintenance } = await import("./maintenance-fixture.ts");
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
   const { pendingCuration } = await import("../plugins/personal/note/model.ts");
   const f = await setup(t);
@@ -828,7 +828,7 @@ test("curate batches classified drafts and acknowledges only final versions it a
 
 test("an unclassified draft stays pending through edits until its classified version is acknowledged", async t => {
   const { pendingCuration } = await import("../plugins/personal/note/model.ts");
-  const { prepareNoteMaintenance } = await import("../plugins/personal/secretary/note.ts");
+  const { prepareNoteMaintenance } = await import("./maintenance-fixture.ts");
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
   const f = await setup(t), policy = topicPolicy();
   const draft = await f.note({ text: "Prepare oncall metrics and document the process" }, "draft");
@@ -870,12 +870,12 @@ test("evidence that a matter is still ongoing settles the old check without aski
 });
 
 test("window expiry preserves pending Notes without forcing a final curation", async t => {
-  const { reconcileSecretary } = await import("../plugins/personal/secretary/reconcile.ts");
+  const { selectChiefIntake } = await import("../plugins/personal/chief/intake.ts");
   const f = await setup(t);
   await f.note({ nature: "semantic", text: "Evidence for a later review" }, "draft");
   const policy = topicPolicy({ curation: { count: 1 } });
   await f.resources.patchStatus(f.read(), { execution: null, lastInputAt: new Date(Date.now() - 1801_000).toISOString() });
-  assert.equal((await reconcileSecretary(f.context, f.read(), policy)).intake, undefined);
+  assert.equal((await selectChiefIntake(f.context, f.read(), policy)).intake, undefined);
   await f.resources.patchStatus(f.read(), { lastInputAt: new Date().toISOString() });
-  assert.equal((await reconcileSecretary(f.context, f.read(), policy)).intake?.inputs[0]?.spec.origin, "aide:curate");
+  assert.equal((await selectChiefIntake(f.context, f.read(), policy)).intake?.inputs[0]?.spec.origin, "aide:curate");
 });

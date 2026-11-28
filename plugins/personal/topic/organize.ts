@@ -1,3 +1,4 @@
+import { changedTree } from "./model.ts";
 import { externalInput } from "./activity.ts";
 import { ensureGateTopic } from "../gate/topic.ts";
 import { isRootTopic } from "./boundary.ts";
@@ -81,9 +82,9 @@ export async function moveTopic(resources: ResourceClient, actor: TopicResource,
   await commitStatus(resources, [
     { operation: "replace", resource: topic, spec: { ...spec, parentRef: resourceRef(parent ?? await ensureGateTopic(resources)) },
       status: { ...topic.status, organization, reviewCheckedAt: null, idleReviewCount: 0, idleReviewReset: null, idleSince: organization.at,
-        weaveRevision: (topic.status.weaveRevision ?? 0) + 1 } },
+        ...changedTree(topic.status, organization.at) } },
     // Notify the old root of changed responsibility and reject admissions prepared against its previous tree.
-    { operation: "patchStatus", resource: root, patch: { weaveRevision: (root.status.weaveRevision ?? 0) + 1 } },
+    { operation: "patchStatus", resource: root, patch: changedTree(root.status, organization.at) },
   ]);
   return (await resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(topic)))!;
 }

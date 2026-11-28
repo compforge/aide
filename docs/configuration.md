@@ -301,7 +301,7 @@ plugins:
 
 定时唤醒不会直接调用模型。Secretary 按 deferred 的数量和等待阈值将 Deferred 积压组成 Batch；回顾检查待梳理 Note、工作量和结构变化，容量检查关注材料和直属子节点；需要判断时生成已绑定 root 的维护 Input，无事可做时只记录检查时间并增加退避次数。默认配置的空检查依次等待 15、30、60、120 分钟，之后保持 120 分钟；期间的 Reconcile 唤醒间隔仍为 60 秒。
 
-Immediate／Normal Input 直接复用 Chief 的接纳与执行路径；Secretary 根据处理量、等待时间和 pressure 生成维护 Input。Deferred 达到 count 条或最老等待 maxWaitSeconds 后归为独立 Batch，按 Normal 交给 Chief；Batch 计一次工作量。Task／Routine 的状态变化不计 Chief 工作量。没有待回顾活动时只做退避检查；Review 自身计数但不独自启动下一轮定时需求。维护遇到容量不足会推迟，已持久化业务仍可处理。窗口、去重与退避契约见 [Secretary](personal/secretary.md)。
+Immediate／High／Normal Input 直接复用 Chief 的接纳与执行路径；Secretary 根据处理量、等待时间和 pressure 生成维护 Input。Deferred 达到 count 条或最老等待 maxWaitSeconds 后归为独立 Batch，按 Normal 交给 Chief；Batch 计一次工作量。Task／Routine 的状态变化不计 Chief 工作量。没有待回顾活动时只做退避检查；Review 自身计数但不独自启动下一轮定时需求。维护遇到容量不足会推迟，已持久化业务仍可处理。窗口、去重与退避契约见 [Secretary](personal/secretary.md)。
 
 `topic.curation.count` 指定触发梳理的普通 Note 数（1–8，默认 8），`topic.curation.maxWaitSeconds` 指定最早待梳理变更的等待时间（默认 900 秒）。满足任一条件即可调度。关闭 Topic 的工作量回顾后，普通 Note 的梳理与约定跟进仍可独立调度。
 
@@ -401,7 +401,7 @@ harnesses:
 
 ## Topic 整理与 root 软目标
 
-[Topic 阈值](#topic-定时协调与回顾)只统计直属材料。maxUnfiledInput 包含已研判、无 topicKey 的业务 Input。maxInput 保留配置，当前策略使用 maxUnfiledInput。超限后 Secretary 通过 `aide:organize` 请求空闲 Chief 整理，同种请求去重并按 capacityCooldownSeconds 冷却。`aide:summary` 每 15 分钟检查一次，忙时跳过。[容量与维护请求](personal/secretary.md#容量与维护请求)
+[Topic 阈值](#topic-定时协调与回顾)只统计直属材料。maxUnfiledInput 包含已研判、无 topicKey 的业务 Input。maxInput 保留配置，当前策略使用 maxUnfiledInput。超限后 Secretary 通过 `aide:organize` 请求空闲 Chief 整理，同种请求去重并按 capacityCooldownSeconds 冷却。`aide:summary` 每 15 分钟检查一次，本轮需求持续等待可升 High。[容量与维护请求](personal/secretary.md#容量与维护请求)
 
 [Weave 的 maxRoots](#weave-主题整理)统计 Default 以外的领域 root。独立子树有 15 分钟观察期；没有合适归组时可以超过软目标。已有来源 topicKey 继续定位到原来的主题。[Topic](personal/topic.md)
 

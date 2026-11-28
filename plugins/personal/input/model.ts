@@ -10,6 +10,7 @@ export interface InputReceipt { inputId: string; at: string }
  */
 export enum InputAttention {
   Immediate = "immediate",
+  High = "high",
   Normal = "normal",
   Deferred = "deferred",
 }
@@ -20,7 +21,11 @@ export const INPUT_ORIGINS = [...BUSINESS_INPUT_ORIGINS, ...maintenanceOrigins] 
 export type InputOrigin = typeof INPUT_ORIGINS[number];
 export const isInternalInput = (input: Pick<InputSpec, "origin">): boolean =>
   maintenanceOrigins.some(origin => origin === input.origin);
-export const inputQueue = (input: InputSpec): string => isInternalInput(input) ? input.origin : inputAttention(input);
+export interface InputPriority { attention: InputAttention; createdAt: string }
+const rank = { immediate: 0, high: 1, normal: 2, deferred: 3 };
+export function compareInputPriority(a: InputPriority, b: InputPriority): number {
+  return rank[a.attention] - rank[b.attention] || a.createdAt.localeCompare(b.createdAt);
+}
 
 export type InputRelation = "sent" | "received" | "observed";
 

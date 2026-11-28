@@ -7,12 +7,11 @@ import { collectTopic, releaseTopicAgent } from "./session.ts";
 import { assignmentWatch, resourceRef } from "../input/state.ts";
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
-import { reconcileSecretary } from "../secretary/reconcile.ts";
 import { ongoingMaterialWatch, ongoingWatch } from "../secretary/ongoing.ts";
 import { batchWatch } from "../batch/reconcile.ts";
 import { chiefPreviews } from "./inputs.ts";
 import { finalizeExecution, runInput } from "../execution/loop.ts";
-import { submitGatePending } from "../gate/intake.ts";
+import { selectChiefIntake, submitTopicPending } from "./intake.ts";
 import { isInternalInput } from "../input/model.ts";
 import { inWorkWindow } from "../topic/activity.ts";
 import { topicPolicy, type TopicPolicy } from "../topic/config.ts";
@@ -27,12 +26,12 @@ function boundedPrompt(prompt: string, limit: number): string {
   return prompt.length <= limit ? prompt : prompt.slice(0, limit - suffix.length) + suffix;
 }
 
-/** @spec Input ownership converges while the domain agent is busy. Only Gate accepts conversational interruptions. */
+/** @spec Input ownership converges while the domain agent is busy. Active business invocations can admit compatible business Inputs directly. */
 export async function reconcileChiefIntake(context: PluginContext, execution: ReconcileContext, c: Readonly<TopicResource>) {
   if (c.metadata.deletionTimestamp) { await releaseTopicAgent(context, execution, c); return; }
   if (await reconcileAssignments(context, c)) return { requeueAfterMs: 1 };
   c = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(c)))!;
-  if (isGateTopic(c)) return submitGatePending(context, execution, c);
+  if (isGateTopic(c) || (c.status.execution && isProcessingRoot(c))) return submitTopicPending(context, execution, c);
   const result = await collectTopic(context, c);
   return { ...result, requeueAfterMs: Math.min(result?.requeueAfterMs ?? Infinity, topicPolicy(context.instance.config.topic).trigger.intervalSeconds * 1000) };
 }
@@ -51,7 +50,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     return { requeueAfterMs: 1 };
   }
   if (!isProcessingRoot(initial)) { await releaseTopicAgent(context, execution, initial); return; }
-  const selected = await reconcileSecretary(context, initial, policy);
+  const selected = await selectChiefIntake(context, initial, policy);
   const { inputs, batch } = selected.intake ?? { inputs: [] };
   const input = inputs[0];
   if (!input) {

@@ -15,8 +15,9 @@ import { assignInput, registerInputs } from "../plugins/personal/input/assignmen
 import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../plugins/personal/input/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
-import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
-import { ensureOrganizationInput, type maintenanceAgenda } from "../plugins/personal/secretary/maintenance.ts";
+import { selectChiefIntake } from "../plugins/personal/chief/intake.ts";
+import { ensureOrganizationInput } from "./maintenance-fixture.ts";
+import { type maintenanceAgenda } from "../plugins/personal/secretary/maintenance.ts";
 import { topicPolicy } from "../plugins/personal/topic/config.ts";
 import { deliverInput } from "./input-state-fixture.ts";
 import { runInput } from "../plugins/personal/execution/loop.ts";
@@ -181,8 +182,25 @@ test("Concurrent material and child pressure share one root assignment until all
   assert.equal((await nextInputs(f.resources, f.read(f.root), 8))[0]!.spec.origin, "source");
   assert.equal(f.aide.topics.inputStore.query("unfiled", f.child.metadata.uid).length, 2);
 
-  const selected = await reconcileSecretary(f.context, f.read(f.root));
+  const selected = await selectChiefIntake(f.context, f.read(f.root));
   assert.equal(selected.intake?.inputs[0]?.spec.origin, "source");
+});
+
+test("Capacity pressure ages independently of Chief availability and clears with the excess", async t => {
+  const { organizationCandidate } = await import("../plugins/personal/secretary/maintenance.ts");
+  const f = await fixture(t);
+  await f.input("one");
+  await f.input("two");
+  const candidate = () => organizationCandidate(f.context, f.read(f.child));
+  assert.equal((await candidate())?.attention, InputAttention.Normal);
+  const since = new Date(Date.now() - 30 * 60000).toISOString();
+  await f.resources.patchStatus(f.read(f.child), { organizeSince: since });
+  const due = await candidate();
+  assert.equal(due?.attention, InputAttention.High);
+  assert.equal(due?.createdAt, since);
+  assert.ok(!f.aide.topics.inputStore.list().some(i => i.spec.origin === "aide:organize"));
+  assert.equal(await organizationCandidate(f.context, f.read(f.child), topicPolicy({ maxUnfiledInput: 2 })), undefined);
+  assert.equal(f.read(f.child).status.organizeSince, undefined);
 });
 
 test("maxInput is inert and exactly-at-threshold material does not trigger organization", async t => {

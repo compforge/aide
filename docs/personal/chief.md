@@ -30,7 +30,7 @@ Secretary 在领域 root 空闲时选择一条业务 Input、一个就绪 Batch 
 
 运行时在同一事务中占用 root execution 并接纳所选 Input 或 Batch。材料进入原生上下文时写入投递回执。执行结束后清除 execution，Topic Watch 触发秘书重新选单。会话和投递恢复见 [Input](input.md#归属与-chief-通知)。
 
-Chief 忙时，新到的独立 Input 留在所属 Topic，Immediate 在下一次选单时优先。Secretary 同期可以封好 Deferred Batch；封批和派单分别见 [Secretary](secretary.md#deferred-归组)。
+Chief 运行中直接接收业务 Input，Immediate 使用 `steer`，High 和 Normal 使用 `followUp`。每份投递进入原生上下文时，Chief 按其 origin 与材料重新绑定工具和任务说明。上一条 Input 的实时回复流在此结束，新的 Immediate Channel 消息使用自己的回复流和收件地址。等待接纳的 Input 保留原回执。Secretary 同期可以封好 Deferred Batch；封批和派单见 [Secretary](secretary.md#deferred-归组)。
 
 普通待办查询按明确负责人索引，不发现责任树。处理当前任务时，按需工具可读取责任子树内的知识；待办查询边界不限制知识读取。
 

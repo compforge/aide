@@ -15,7 +15,7 @@ import { guardInputTopic } from "../topic/ownership.ts";
 import { z } from "zod";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { ResourceVersionConflict, type ResourceDefinition } from "@compforge/aide-plugin";
-import { deliveryFinished, INPUT_TYPE, INPUT_ORIGINS, InputAttention, isInternalInput, inputQueue, type InputSpec, type InputStatus } from "./model.ts";
+import { deliveryFinished, INPUT_TYPE, INPUT_ORIGINS, InputAttention, isInternalInput, inputAttention, type InputSpec, type InputStatus } from "./model.ts";
 import { AddressRefSchema } from "../address/model.ts";
 import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { inputPrinter } from "./printer.ts";
@@ -38,7 +38,7 @@ const ref = z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.st
  * @case tests/topic-review.test.ts
  */
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
-  type: INPUT_TYPE, indexVersion: 4,
+  type: INPUT_TYPE, indexVersion: 5,
   schema: { spec: InputSpecSchema, status: z.object({
     batchId: z.string().min(1).optional(), batchAt: z.iso.datetime().optional(),
     retention: InputPolicySchema.shape.retention.optional(), conditions: ConditionsSchema, topic: ResourceRefSchema.optional(), organization: OrganizationSchema.optional(),
@@ -97,7 +97,7 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
       ? [{ value: r.status.assess.topic.uid, order: r.metadata.creationTimestamp }] : [],
     assessReadyArrival: r => !r.status.batchId && !r.metadata.deletionTimestamp && r.status.assess?.topic
       && !deliveryFinished(r.status.assess) && !r.status.assess.executionId
-      ? [{ value: JSON.stringify([r.status.assess.topic.uid, inputQueue(r.spec)]), order: r.metadata.creationTimestamp }] : [],
+      ? [{ value: JSON.stringify([r.status.assess.topic.uid, inputAttention(r.spec)]), order: r.metadata.creationTimestamp }] : [],
     topicActivity: r => !r.metadata.deletionTimestamp && r.status.topic
     ? [{ value: r.status.topic.uid, order: r.metadata.creationTimestamp }] : [] },
   retention: { collectOnRelease: true, expiresAt: inputHardExpiry, pressure: inputPressure,

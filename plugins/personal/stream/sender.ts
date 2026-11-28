@@ -25,13 +25,13 @@ export class MailSender {
     private readonly executions: ExecutionService, private readonly log: Logger) {
     this.unsubscribe = executions.subscribeEvents(event => this.observe(event));
   }
-  async begin(topicId: string, executionId: string, inputIds: string[]): Promise<boolean> {
+  async begin(topicId: string, executionId: string, inputIds: string[], deliveryId = executionId): Promise<boolean> {
     if (this.writers.has(executionId)) return true;
     const candidates = inputIds.map(id => this.inputs.get(id)).filter(i => i?.spec.origin === "channel" && inputAttention(i.spec) === InputAttention.Immediate);
     const input = candidates[0];
     if (!input?.spec.source || candidates.some(i => i!.spec.source?.uid !== input.spec.source!.uid)) return false;
     const receipt = await this.topics.say(topicId, input.metadata.name, "", executionId,
-      { idempotencyKey: `stream:${executionId}`, respondToInputId: input.metadata.name, inputIds, contentKind: "agent" });
+      { idempotencyKey: `stream:${deliveryId}`, respondToInputId: input.metadata.name, inputIds, contentKind: "agent" });
     const output = this.outputs.get(receipt.outputId)!;
     if (this.outputs.streams.get(output.spec.stream).status.phase !== "open") return false;
     this.writers.set(executionId, { outputId: receipt.outputId, stream: output.spec.stream, chunks: [] });

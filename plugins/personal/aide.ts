@@ -6,7 +6,7 @@ import { routeSession } from "./route/agent/session.ts";
 import { isGateInput } from "./gate/input.ts";
 import { ensureGateTopic } from "./gate/topic.ts";
 import { chiefPreviews } from "./chief/inputs.ts";
-import { isGateTopic } from "./topic/boundary.ts";
+import { isGateTopic, isProcessingRoot } from "./topic/boundary.ts";
 import { MailSender } from "./stream/sender.ts";
 import { Addresses } from "./address/service.ts";
 import { invalidateAssignment } from "./input/assignment.ts";
@@ -174,7 +174,7 @@ export class Personal {
     const resources = this.plugins.resourceClient("personal");
     for (let n = 0; ; n++) {
       const topic = await resources.get<TopicSpec, TopicStatus>(ref);
-      if (!topic || topic.metadata.deletionTimestamp || !isGateTopic(topic) || !topic.status.execution) return { accepted: false, reason: "not_running" };
+      if (!topic || topic.metadata.deletionTimestamp || !isProcessingRoot(topic) || !topic.status.execution) return { accepted: false, reason: "not_running" };
       const invocation = this.plugins.listHarnessInvocations().find(i => i.executionId === topic.status.execution!.id && i.phase === "running");
       if (!invocation) return { accepted: false, reason: "not_running" };
       const ids = [...new Set(args.inputIds ?? [args.inputId])];
@@ -184,6 +184,9 @@ export class Personal {
       const batch = inputs as NonNullable<typeof inputs[number]>[];
       const input = batch[0]!;
       if (batch.some(i => isInternalInput(i.spec))) return { accepted: false, reason: "maintenance_waits_for_idle" };
+      if (batch.some(i => inputAttention(i.spec) === InputAttention.Deferred)) return { accepted: false, reason: "deferred" };
+      if (!isGateTopic(topic) && batch.length !== 1) throw new Error("Domain direct delivery requires one business Input");
+      if (topic.status.execution.inputOrigin === "aide:stow") return { accepted: false, reason: "not_running" };
       if (args.operation === "steer" && batch.some(i => !immediate(i.spec))) throw new Error("Only Immediate Inputs may steer Chief");
       const deliveryId = `${topic.status.execution.id}:${input.metadata.uid}`;
       const startedAt = new Date().toISOString();
@@ -205,7 +208,9 @@ export class Personal {
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
       const budget = topicPolicy(this.options.topic).contextChars;
       const items = chiefPreviews(batch, budget - 2000);
-      const prompt = `New Inputs:\n${JSON.stringify({ inputId: items[0]!.inputId, inputIds: items.map(i => i.inputId) })}\n${items.map(i => i.description).join("\n\n")}`;
+      let prompt = `New Inputs:\n${JSON.stringify({ inputId: items[0]!.inputId, inputIds: items.map(i => i.inputId) })}\n${items.map(i => i.description).join("\n\n")}`;
+      if (!isGateTopic(topic) && input.spec.origin === "channel" && immediate(input.spec) && input.spec.source)
+        prompt += "\nReply in the live Output for this Input. Use cite_output for Notes used by this reply.";
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
           operation: args.operation, invocationId: invocation.invocationId,

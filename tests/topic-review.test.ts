@@ -23,7 +23,7 @@ import { idleReviewSchedule } from "../plugins/personal/secretary/review.ts";
 import { topicReview } from "../plugins/personal/topic/review.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/personal/topic/model.ts";
 import { reconcileAssignments } from "../plugins/personal/topic/assignment.ts";
-import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
+import { selectChiefIntake } from "../plugins/personal/chief/intake.ts";
 import { reconcileChief, reconcileChiefIntake } from "../plugins/personal/chief/reconcile.ts";
 import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../plugins/personal/input/model.ts";
 import { finalizeExecution } from "../plugins/personal/execution/loop.ts";
@@ -70,9 +70,9 @@ async function fixture(t: import("node:test").TestContext, lastInputAgeMs = 16 *
       await hooks.afterAssess?.();
       return { state: "success", value: { result: { stopReason: "end_turn" } } };
     } } } as unknown as ReconcileContext;
-    await reconcileSecretary(context, read(), config.topic);
+    await selectChiefIntake(context, read(), config.topic);
     const result = await reconcileChief(context, execution, read(), config.topic);
-    await reconcileSecretary(context, read(), config.topic);
+    await selectChiefIntake(context, read(), config.topic);
     return result;
   };
   const due = () => resources.patchStatus(read(), { reviewCheckedAt: null, idleReviewReset: null, idleSince: new Date(Date.now() - 910_000).toISOString() });
@@ -234,7 +234,7 @@ test("Arrival racing an empty decision invalidates the inspected root and retrie
     }
     return f.resources.commit(writes);
   };
-  assert.equal((await reconcileSecretary(f.context, f.read()))!.requeueAfterMs, 1);
+  assert.equal((await selectChiefIntake(f.context, f.read()))!.requeueAfterMs, 1);
   assert.equal(f.read().status.idleReviewCount ?? 0, 0);
   await f.run(); assert.equal(f.calls.length, 1);
   assert.equal(f.aide.topics.inputStore.list().length, 1);
@@ -242,7 +242,7 @@ test("Arrival racing an empty decision invalidates the inspected root and retrie
 
 test("Review creation is fenced; reopening before admission consumes the existing Input once", async t => {
   const f = await fixture(t); await f.input("deferred"); await childWithPendingReview(f); await f.due();
-  await reconcileSecretary(f.context, f.read());
+  await selectChiefIntake(f.context, f.read());
   const topic = f.read(), due = idleReviewSchedule(topic, backoff).dueAt;
   const agenda = await maintenanceAgenda(f.resources, [topic]);
   await createMaintenanceInput(f.context, topic, due, agenda);
@@ -264,7 +264,7 @@ for (const mode of ["failure", "missing_receipt", "interrupted"] as const)
 test(`${mode} finalizes review waiting without replaying uncertain inputs`, async t => {
   const f = await fixture(t); await f.input("deferred"); await childWithPendingReview(f); await f.due();
   if (mode === "interrupted") {
-    await reconcileSecretary(f.context, f.read());
+    await selectChiefIntake(f.context, f.read());
     await f.resources.patchStatus(f.read(), { execution: { id: "interrupted", startedAt: past() } });
     const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
     await f.resources.patchStatus(request, { assess: { ...request.status.assess, executionId: "interrupted", startedAt: past() } });
@@ -414,7 +414,7 @@ test("Business Inputs precede capacity maintenance even when idle review is disa
   assert.ok(request.status.assess?.completedAt);
 });
 
-test("Immediate intake waits for a running organization pass", async t => {
+test("Immediate business steers a running organization pass", async t => {
   const f = await fixture(t);
   for (const name of ["a", "b"]) await createWithSummary(f.resources, TOPIC_TYPE, { name, spec: { id: name, parentRef: resourceRef(f.read()) }, status: { summary: "", receipts: [] } });
   const requests: unknown[] = [];
@@ -426,7 +426,7 @@ test("Immediate intake waits for a running organization pass", async t => {
     } } } as unknown as ReconcileContext, f.read());
   };
   await f.run({ maxChildren: 1 });
-  assert.deepEqual(requests, []);
+  assert.deepEqual(requests, [{ name: "submit_topic", args: { inputId: "arrival", inputIds: ["arrival"], operation: "steer" } }]);
   f.hooks.beforeAssess = undefined;
   await f.run();
   assert.ok(f.aide.topics.inputStore.get("arrival")!.status.assess?.completedAt);
@@ -629,7 +629,7 @@ test("business inputs run ahead of Note pressure and resolved pressure requests 
   for (let i = 0; i < 2; i++) references.push(await upsertTopicNote(f.resources, f.read(), "write", { nature: "semantic", text: `n-${i}` }, String(i)));
   await f.resources.patchStatus(f.read(), { execution: null });
   await f.input("business", InputAttention.Immediate);
-  assert.equal((await reconcileSecretary(f.context, f.read())).intake?.inputs[0]?.metadata.name, "business");
+  assert.equal((await selectChiefIntake(f.context, f.read())).intake?.inputs[0]?.metadata.name, "business");
   await f.resources.patchStatus(f.read(), { execution: { id: "reduce", startedAt: new Date().toISOString() } });
   await retireNote(f.resources, f.read(), { noteId: references[0]!.noteId, version: references[0]!.version, reason: "duplicate" });
   await f.resources.patchStatus(f.read(), { execution: null });

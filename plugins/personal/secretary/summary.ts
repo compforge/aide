@@ -1,18 +1,18 @@
 import { inWorkWindow } from "../topic/activity.ts";
-import type { PluginContext, ResourceReader } from "@compforge/aide-plugin";
+import { isResourceVersionConflict, type PluginContext, type ResourceReader } from "@compforge/aide-plugin";
 import { ADDRESS_TYPE } from "../address/model.ts";
 import { PERSON_TYPE } from "../person/model.ts";
 import { NOTE_TYPE } from "../note/model.ts";
 import type { SummaryResource } from "../note/summary.ts";
 import { SummaryOwnerSchema } from "../input/review.ts";
-import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
+import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { inputRef, resourceRef } from "../input/state.ts";
-import { BATCH_TYPE } from "../batch/model.ts";
+import { reviewAttention } from "./candidate.ts";
 import { digest } from "../identity.ts";
 import { commitStatus } from "../status.ts";
 import { ensureDefaultTopic } from "../topic/default.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
-import { readTopicRoot, readTopicSubtree } from "../topic/tree.ts";
+import { readTopicRoot } from "../topic/tree.ts";
 
 const interval = 15 * 60_000;
 const reviewQuestions = {
@@ -43,58 +43,46 @@ async function oldestWithNotes(reader: ResourceReader, type: typeof TOPIC_TYPE |
   } while (cursor);
 }
 
-/** @spec One global quarter-hour check. A busy or queued Chief consumes this slot. Repeated wakes and restarts never replay earlier slots.
- * @why Gate owns the singleton clock; the selected domain Chief owns the Input and its execution.
+/** Gate owns the quarter-hour clock. Only an empty check or a committed dispatch consumes a slot.
  * @link docs/personal/secretary.md#摘要复核
  * @case tests/summary-review.test.ts
  */
-export async function checkSummary(context: Pick<PluginContext, "resources" | "logger">, gate: TopicResource, now = Date.now(), dispatchRoot?: TopicResource) {
+export async function summaryCandidate(context: Pick<PluginContext, "resources" | "logger">, gate: TopicResource, now = Date.now(), dispatchRoot?: TopicResource) {
   const slot = Math.floor(now / interval) * interval;
   const next = slot + interval - now;
-  if (Date.parse(gate.status.summaryCheckAt ?? gate.metadata.creationTimestamp) >= slot) return { requeueAfterMs: next };
+  const last = Date.parse(gate.status.summaryCheckAt ?? gate.metadata.creationTimestamp);
+  if (last >= slot) return { requeueAfterMs: next };
   const at = new Date(slot).toISOString();
   const clock = { operation: "patchStatus" as const, resource: gate, patch: { summaryCheckAt: at } };
   const candidates = await Promise.all([TOPIC_TYPE, PERSON_TYPE, ADDRESS_TYPE].map(type => oldestWithNotes(context.resources, type, now)));
   const [owner] = candidates.filter(item => !!item).sort((a, b) =>
     (a.status.summaryReviewedAt ?? "").localeCompare(b.status.summaryReviewedAt ?? "") || a.metadata.uid.localeCompare(b.metadata.uid));
-  const chief = owner && (owner.kind === "Topic" ? await readTopicRoot(context.resources, resourceRef(owner)) : await ensureDefaultTopic(context.resources));
-  if (!chief || !owner || chief.status.execution) {
-    if (dispatchRoot) return { requeueAfterMs: next };
-    await commitStatus(context.resources, [clock]);
-    context.logger.debug?.("Secretary skipped Summary check", { attributes: { at, reason: chief ? "chief_busy" : "no_candidate", chiefUid: chief?.metadata.uid ?? null } });
+  if (!owner) {
+    if (!dispatchRoot) await commitStatus(context.resources, [clock]);
     return { requeueAfterMs: next };
   }
-  if (dispatchRoot?.metadata.uid !== chief.metadata.uid) {
-    if (!dispatchRoot) {
-      // The global clock consumes busy slots even while the domain controller is awaiting inference.
-      const pending = (await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "assignedPending", value: chief.metadata.uid }, limit: 2 })).items.some(item => item.spec.origin !== "aide:stow")
-        || (await context.resources.page(BATCH_TYPE, { matchIndex: { name: "open", value: chief.metadata.uid }, limit: 1 })).items.length;
-      let occupied = !!pending;
-      if (!occupied) for (const member of await readTopicSubtree(context.resources, resourceRef(chief))) {
-        if ((await context.resources.page(INPUT_TYPE, { matchIndex: { name: "unassigned", value: member.metadata.uid }, limit: 1 })).items.length) {
-          occupied = true;
-          break;
-        }
-      }
-      if (occupied) await commitStatus(context.resources, [clock]);
-    }
-    return { requeueAfterMs: next };
-  }
+  const chief = owner.kind === "Topic" ? await readTopicRoot(context.resources, resourceRef(owner)) : await ensureDefaultTopic(context.resources);
+  if (!chief || dispatchRoot?.metadata.uid !== chief.metadata.uid || chief.status.execution) return { requeueAfterMs: next };
+  const pending = await context.resources.page(INPUT_TYPE, { matchIndex: { name: "internalPending", value: JSON.stringify([chief.metadata.uid, "aide:summary"]) }, limit: 1 });
+  if (pending.items.length) return { requeueAfterMs: next };
+  const createdAt = new Date(Math.max(last, Date.parse(owner.status.summaryReviewedAt ?? owner.metadata.creationTimestamp))).toISOString();
+  const attention = reviewAttention(createdAt, interval, now);
   const topic = resourceRef(chief), target = SummaryOwnerSchema.parse(resourceRef(owner));
   const name = `summary-${digest([gate.metadata.uid, at])}`;
-  try {
-    await commitStatus(context.resources, [clock, { operation: "create", type: INPUT_TYPE, name,
-      spec: { origin: "aide:summary", originId: "personal.topic", originRef: topic, topicId: chief.spec.id, attention: InputAttention.Normal,
-        text: `Review the Summary for ${JSON.stringify(target)}. ${reviewQuestions[target.kind]} Use read_note and list_notes to compare the whole Summary with related evidence. Record completion even if the Summary stays unchanged.`,
-        observation: { summaryOwner: target, checkedAt: at } },
-      status: { topic, route: { completedAt: at, result: { topics: [topic], reason: "Idle Summary review" } }, assess: { topic } } }]);
-  } catch (error) {
-    if (!String(error).includes("Chief has queued work") && !String(error).includes("Resource capacity exhausted")) throw error;
-    await commitStatus(context.resources, [clock]);
-    context.logger.debug?.("Secretary skipped Summary check", { attributes: { at, chiefUid: topic.uid, reason: String(error) } });
-    return { requeueAfterMs: next };
-  }
-  context.logger.info("Secretary scheduled Summary review", { attributes: { at, inputId: name, chiefUid: topic.uid, ownerKind: target.kind, ownerUid: target.uid } });
-  const input = await context.resources.get<InputSpec, InputStatus>(inputRef(name));
-  return { requeueAfterMs: next, input };
+  const dispatch = async () => {
+    try {
+      await commitStatus(context.resources, [clock, { operation: "create", type: INPUT_TYPE, name,
+        spec: { origin: "aide:summary", originId: "personal.topic", originRef: topic, topicId: chief.spec.id, attention,
+          text: `Review the Summary for ${JSON.stringify(target)}. ${reviewQuestions[target.kind]} Use read_note and list_notes to compare the whole Summary with related evidence. Record completion even if the Summary stays unchanged.`,
+          observation: { summaryOwner: target, checkedAt: at, candidateSince: createdAt } },
+        status: { topic, route: { completedAt: at, result: { topics: [topic], reason: "Idle Summary review" } }, assess: { topic } } }]);
+    } catch (error) {
+      if (!isResourceVersionConflict(error) && !String(error).includes("Chief has queued work") && !String(error).includes("Resource capacity exhausted")) throw error;
+      context.logger.debug?.("Secretary skipped Summary check", { attributes: { at, chiefUid: topic.uid, reason: String(error) } });
+      return;
+    }
+    context.logger.info("Secretary scheduled Summary review", { attributes: { at, inputId: name, attention, candidateSince: createdAt, chiefUid: topic.uid, ownerKind: target.kind, ownerUid: target.uid } });
+    return context.resources.get<InputSpec, InputStatus>(inputRef(name));
+  };
+  return { requeueAfterMs: next, candidate: { attention, createdAt, dispatch } };
 }

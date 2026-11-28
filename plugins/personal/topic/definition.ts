@@ -68,6 +68,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     people: PersonRefsSchema(1000).optional(), review: TopicReviewSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
     status: z.object({ conditions: ConditionsSchema, organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
       weaveReview: z.object({ version: z.string(), at: z.string().datetime() }).strict().optional(),
+      organizeSince: z.iso.datetime().optional(), weaveSince: z.iso.datetime().optional(),
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
       chiefWorkload: ChiefWorkloadSchema.optional(),
@@ -84,7 +85,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       phase: z.enum(["active", "dormant"]).optional(), compactOnWake: z.boolean().optional(), closeoutFor: z.iso.datetime().optional(),
       lastInputAt: z.string().datetime().optional(),
       summaryCheckAt: z.iso.datetime().optional(),
-      reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.extend({ promptTokens: z.number().int().nonnegative().optional(), stowInputId: z.string().optional() }).optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict().transform(({ phase: _phase, compactOnWake: _wake, closeoutFor: _closeout, noteReviewQueue: _queue, maintenanceRequests: _requests, ...status }) => status) },
+      reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.extend({ promptTokens: z.number().int().nonnegative().optional(), stowSince: z.iso.datetime().optional(), stowInputId: z.string().optional() }).optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict().transform(({ phase: _phase, compactOnWake: _wake, closeoutFor: _closeout, noteReviewQueue: _queue, maintenanceRequests: _requests, ...status }) => status) },
   validator: { create: (resource, context) => { validateSummary(resource, context); validateDefault(resource, context); guardTopicOrganization(resource, context); }, update: (previous, current, context) => {
     guardContext(previous, current, context);
     if (current.status.reclamation && !isDeepStrictEqual(previous.status.reclamation, current.status.reclamation)) {
