@@ -40,18 +40,18 @@ async function until(check: () => boolean) {
   for (let i = 0; i < 200; i++) { if (check()) return; await Bun.sleep(20); }
   assert.ok(check(), "condition did not become true");
 }
-async function fixture(t: import("node:test").TestContext) {
+async function fixture(t: import("node:test").TestContext, lastInputAgeMs = 16 * 60_000) {
   const advance = deadlineClock(t);
   const home = mkdtempSync(join(tmpdir(), "aide-topic-review-"));
   const options = fakeOptions({ notify: false, async execute() { throw new Error("Unexpected work"); } }, home);
-  const config = { topic: topicPolicy({ workWindowSeconds: 24 * 3600 }) };
+  const config = { topic: topicPolicy() };
   options.config.plugins.personal!.topic = config.topic;
   const aide = new Aide(home, options, log);
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
   await aide.topics.ensure("root");
   const resources = aide.runtime.plugins.resourceClient("personal");
   const read = () => aide.topics.resource("root")!;
-  const activityAt = new Date(Date.now() - 3 * 3600_000).toISOString();
+  const activityAt = new Date(Date.now() - lastInputAgeMs).toISOString();
   await resources.patchStatus(read(), { lastInputAt: activityAt });
   const context = { resources: { ...resources }, logger: { info() {}, warn() {}, error() {} }, instance: { config } } as unknown as PluginContext;
   const calls: { prompt: string; sessionId: string }[] = [];
@@ -75,7 +75,7 @@ async function fixture(t: import("node:test").TestContext) {
     await reconcileSecretary(context, read(), config.topic);
     return result;
   };
-  const due = () => resources.patchStatus(read(), { reviewCheckedAt: null, idleReviewReset: null, idleSince: new Date(Date.now() - 7201_000).toISOString() });
+  const due = () => resources.patchStatus(read(), { reviewCheckedAt: null, idleReviewReset: null, idleSince: new Date(Date.now() - 910_000).toISOString() });
   const input = async (id: string, attention = InputAttention.Deferred) => {
     const fact = await aide.topics.submit(id, { topicId: "root", origin: "source", originId: "personal.events", attention, text: id });
     await routeTo(resources, read().metadata, fact);
@@ -107,12 +107,13 @@ test("Topic owns independent trigger and review policies; Harness and misplaced 
 
 test("Empty due checks back off without Inputs or inference; fixed wakeups do not advance the count", async t => {
   const f = await fixture(t);
-  for (const [count, delay] of [[1, 1800_000], [2, 3600_000], [3, 7200_000], [4, 7200_000]]) {
+  const review = TopicReviewPolicySchema.parse({ idleSeconds: 15, backoff: { factor: 2, maxIdleSeconds: 120 } });
+  for (const [count, delay] of [[1, 30_000], [2, 60_000], [3, 120_000], [4, 120_000]]) {
     await f.due();
-    const result = await f.run({ trigger: { intervalSeconds: 17 }, review: backoff });
+    const result = await f.run({ trigger: { intervalSeconds: 17 }, review });
     assert.equal(result!.requeueAfterMs, 17000);
     assert.equal(f.read().status.idleReviewCount, count);
-    assert.equal(Date.parse(idleReviewSchedule(f.read(), backoff).dueAt) - Date.parse(f.read().status.reviewCheckedAt!), delay);
+    assert.equal(Date.parse(idleReviewSchedule(f.read(), review).dueAt) - Date.parse(f.read().status.reviewCheckedAt!), delay);
     const saved = f.read();
     await f.run();
     assert.equal(f.read().metadata.resourceVersion, saved.metadata.resourceVersion, "Intermediate ticks do not move the deadline or write state");
@@ -131,10 +132,10 @@ for (const scenario of [
   { name: "raise base", elapsed: 45, count: 2, idle: 15, factor: 2, max: 120, due: false },
 ]) test(`Current review policy applies to elapsed waiting: ${scenario.name}`, async t => {
   const f = await fixture(t);
-  const since = new Date(Date.now() - scenario.elapsed * 60_000).toISOString();
+  const since = new Date(Date.now() - scenario.elapsed * 1000).toISOString();
   await f.resources.patchStatus(f.read(), { idleSince: since, reviewCheckedAt: since, idleReviewCount: scenario.count });
-  const policy = TopicReviewPolicySchema.parse({ idleSeconds: scenario.idle * 60,
-    backoff: { factor: scenario.factor, maxIdleSeconds: scenario.max * 60 } });
+  const policy = TopicReviewPolicySchema.parse({ idleSeconds: scenario.idle,
+    backoff: { factor: scenario.factor, maxIdleSeconds: scenario.max } });
   await f.run({ review: policy });
   assert.equal(f.read().status.idleReviewCount, scenario.count + Number(scenario.due));
   const saved = f.read(); await f.run();
@@ -346,9 +347,9 @@ test(`${origin} deduplicates queued, active and retryable requests until complet
 
 test("Restart preserves empty-check backoff and recalculates it from new policy", async t => {
   const f = await fixture(t);
-  const checked = new Date(Date.now() - 2700_000).toISOString();
+  const checked = new Date(Date.now() - 950_000).toISOString();
   await f.resources.patchStatus(f.read(), { idleSince: checked, reviewCheckedAt: checked, idleReviewCount: 3 });
-  f.options.config.plugins.personal!.topic = topicPolicy({ ...f.config.topic, review: { backoff: { factor: 2, maxIdleSeconds: 1800 } } });
+  f.options.config.plugins.personal!.topic = topicPolicy({ ...f.config.topic, review: { backoff: { factor: 2, maxIdleSeconds: 930 } } });
   await f.aide.close();
   const restarted = new Aide(f.home, f.options, log);
   try {
@@ -501,8 +502,9 @@ test("Acknowledging only the review backs off and unchanged material skips infer
   assert.equal(f.read().status.idleReviewCount ?? 0, 0);
   assert.ok(f.read().status.chiefWorkload?.reviewed);
   assert.equal(Date.parse(idleReviewSchedule(f.read(), backoff).dueAt) - Date.parse(f.read().status.reviewCheckedAt!), 900_000);
+  const review = TopicReviewPolicySchema.parse({ idleSeconds: 30 });
   for (const count of [1, 2, 3]) {
-    await f.due(); await f.run();
+    await f.due(); await f.run({ review });
     assert.equal(f.read().status.idleReviewCount, count);
     assert.equal(f.calls.length, 1);
   }
@@ -585,7 +587,7 @@ test("Internal review completion preserves accumulated backoff", async t => {
 });
 
 test("note pressure runs with idle review disabled, aggregates pending requests and stops on unchanged material", async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, 0);
   const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
   const { refreshNotePressure } = await import("../plugins/personal/note/pressure.ts");
   await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false }, maxNotes: 1 }, f.read().status);
@@ -638,7 +640,7 @@ test("business inputs run ahead of Note pressure and resolved pressure requests 
 
 /** @case Updating a Note during scheduled review cannot schedule another immediate review. */
 test("curation can revise child Notes and summaries without scheduling another review", async t => {
-  const f = await fixture(t), child = await childWithPendingReview(f);
+  const f = await fixture(t, 0), child = await childWithPendingReview(f);
   const { upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
   f.hooks.beforeAssess = async () => {
     await upsertTopicNote(f.resources, f.read(), f.read().status.execution!.id,

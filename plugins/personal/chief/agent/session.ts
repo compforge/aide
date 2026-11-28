@@ -132,7 +132,7 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
       if (input?.spec.origin !== "aide:stow") throw new Error("Stow requires its admitted Input");
       const ready = await preparedIntake(resources, topic, false, policy.trigger.intervalSeconds * 1000);
       const current = active();
-      const eligible = inWorkWindow(current, policy) && !ready.inputs.length
+      const eligible = inWorkWindow(current) && !ready.inputs.length
         && input.spec.observation?.sessionId === session.sessionId && current.status.agent?.sessionId === session.sessionId
         && input.spec.observation?.lastInputAt === current.status.lastInputAt && current.status.agent.stowInputId === input.metadata.name
         && (current.status.agent.promptTokens ?? 0) > policy.stowPromptTokens;
