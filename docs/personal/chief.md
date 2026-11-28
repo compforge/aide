@@ -26,17 +26,11 @@ Chief 有两个研判时机。**业务 Input 受理**从刚收到的消息、观
 
 ### 接纳与连续执行
 
-Chief 从当前 root 的已准备待办中选择独立 Input 或 Batch；一个 Batch 对 Chief 是一项工作。Secretary 负责何时生成维护 Input 和 Deferred Batch，Chief 负责当前待办如何执行。
+Secretary 在领域 root 空闲时选择一条业务 Input、一个就绪 Batch 或一项内部维护。选中维护才生成对应 Input。Chief 接收所选事项，按 origin 装配工具并办理。
 
-Chief 的接收 Reconcile 先按祖先指纹分批刷新直属待办的负责人缓存、补齐缺失分派，再分别查询独立 Input 的负责人索引和 Batch 的就绪索引，具名 agent Reconcile 驱动 root Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 由 Secretary 聚合提级后按 Normal 激活；内部维护不消费业务回执。
+运行时在同一事务中占用 root execution 并接纳所选 Input 或 Batch。材料进入原生上下文时写入投递回执。执行结束后清除 execution，Topic Watch 触发秘书重新选单。会话和投递恢复见 [Input](input.md#归属与-chief-通知)。
 
-启动 Chief 时可以一次接纳已经排队、工具范围兼容的业务 Input，Immediate 优先，保留逐条投递回执。直接处理已有积压，无需等待新材料凑批。Secretary 对 Deferred 的组批窗口另见 [Batch](input.md#batch)。Topic Reconcile 先按 executionId 接纳本次 Input 或 Batch，再交给 Pi。投递确认和恢复见 [Input](input.md#归属与-chief-通知)。
-
-明确拒绝 steer / followUp 时恢复待通知状态。status.agent 保存 harness 和原生 sessionId，恢复由 SDK 承担。旧 Chief 自然结束后再释放成为子节点的原生句柄，不修改历史。
-
-root 按 Immediate → 已准备的 Deferred Batch → Normal → aide:organize → aide:followup → aide:curate → aide:summary 选择。Secretary 可在业务执行期间准备维护 Input；维护请求保持独立。Deferred 组批策略见 [Secretary](secretary.md#deferred-归组)，成员及准备契约见 [Batch](input.md#batch)。
-
-维护只接纳本轮内部 Input，不消费业务回执。Immediate 可在维护期间 steer 同一 Chief，下一模型轮次切换工具；其它准备好的业务 Input 或 Batch 通过 followUp 排队，在实际取出时切换任务范围。工具与共享 session 的取舍见 [按 Input 选择工具](#按-input-选择工具)。运行中的 Batch 使用一个 deliveryId、一个原生消息和自身的接纳回执；成员通过 batchId 查询执行事实。
+Chief 忙时，新到的独立 Input 留在所属 Topic，Immediate 在下一次选单时优先。Secretary 同期可以封好 Deferred Batch；封批和派单分别见 [Secretary](secretary.md#deferred-归组)。
 
 普通待办查询按明确负责人索引，不发现责任树。处理当前任务时，按需工具可读取责任子树内的知识；待办查询边界不限制知识读取。
 
@@ -54,11 +48,11 @@ Chief 按 `plugins.personal.topic.idleMs` 释放静默的原生会话，保留 T
 
 ### 与 Reconciler 的协作
 
-Route 确定归属。Chief 的接收 Controller 和 agent Controller 分别负责投递材料和运行会话。Chief 按需维护 Note、Work 或创建 Output。
+Route 确定归属。接收 Controller 刷新材料归属，agent Controller 按 root 串行选单并运行会话。Chief 按需维护 Note、Work 或创建 Output。
 
 所有 Topic 共用 Chief 配置。Chief 的 Host session 工厂根据调用 scope 的 ResourceRef 校验 Topic UID，装配限定该会话范围的 WorkService 与工具。工具每次执行都重新确认当前 execution，不捕获过期 verbs。
 
-原生会话由 Pi SDK 管理持久化；Chief scope 使用 Topic UID，防止同名重建后恢复旧会话。Operator 在 status.agent 保存配置名和 sessionId，后续原样传给 Harness verb；底座不读写这个字段。用户通过 say 收到问题，后续答复以新的 Input 进入。空闲时 prompt，运行中普通输入 followUp、紧急输入 steer；一个 invocation 可以处理多个 Input，运行时按投递标识记录当前办理项。
+原生会话由 Pi SDK 持久化。Chief scope 使用 Topic UID，Operator 将配置名和 sessionId 保存在 status.agent。用户回复作为新的 Input 参与下次选单。
 
 ### 按 Input 选择工具
 
@@ -74,9 +68,9 @@ Route 确定归属。Chief 的接收 Controller 和 agent Controller 分别负�
 | aide:organize | 创建或移动 Topic，归位 Input、Work 和 Note。跨 Topic 的 Note 先写目标再削减或退役来源。|
 | aide:summary | 复核指定 Topic、Person 或 Address 的默认认识，按需修订其摘要 |
 
-同一批次可以包含工具能力相同的业务 Input；维护 Input 独立接纳，不与业务取工具并集。业务 Input 优先于内部维护，Immediate 可通过 steer 在下一次安全模型请求边界接入；已经开始的模型调用或工具不会被瞬间撤销。运行中仅 Immediate 使用 steer，其他可投递的业务 Input 使用 followUp；例行维护留待 Chief 空闲后单独接纳；工具范围在 Pi 实际取出 followUp 开始处理时切换，排队本身不会打断当前任务。FollowUp 每次取一条，不同 origin 不合并工具列表。未确认完成的 Input 在执行结束后释放占用，记录可重试错误，等待角色 trigger 间隔后继续；已有终态结果保持不变。
+一个 Deferred Batch 包含来源与授权范围兼容的成员。每轮接纳一件，工具范围随当前 Input 确定。投递已确认后，后续执行失败保留原回执。
 
-Pi 的 `setActiveToolsByName` 替换可用工具，Chief 在首轮 prompt 前初始化，在后续模型轮次准备时更新。Pi 负责生成下一请求的工具声明；当前任务指令通过不持久化的 context projection 注入，原生历史继续共享。日志记录 executionId、origin、Input IDs、实际工具名与数量。
+Pi 的 `setActiveToolsByName` 替换可用工具，Chief 在首轮 prompt 前初始化，在下一次业务或维护执行开始时重新选择。Pi 负责生成下一请求的工具声明；当前任务指令通过不持久化的 context projection 注入，原生历史继续共享。日志记录 executionId、origin、Input IDs、实际工具名与数量。
 
 另一种选择是每类任务一个 Agent，各自有工具与 session。它能直接分隔工具，但多个 Agent 写同一 Topic tree 需要 root Reconcile 协调；互斥会让 Immediate 等待维护结束，独立 session 还需补传上下文。单 Chief 复用串行 loop，避免这组 Agent 之间的并行写入与上下文交接；Note、Topic 的版本和事务校验仍处理 Web、Work、Weave 等其他写入方的竞争。
 
@@ -167,7 +161,7 @@ sent 提供本人表达的线索，仍需辨别引用与代发；received 和 ob
 
 人物资料的唯一存储来源是 Person CRD，Web Persons 提供编辑入口。人物维护使用专用工具，普通文件工具和 Hermes 不承担这份资料的维护。
 
-连续上下文由 Pi SDK 管理历史、压缩与恢复。新输入只提供本次预览，普通输入 followup，immediate 使用 steer。upsert_note 在维护 Input 中按需修订话题认识。常规静默观察不复制进 summary、recent 或长期记忆，持续事项通过同一 Note 维护，恶化或恢复时更新；主题、人物与工作的长期认识通过各自 summary 维护，Task / Routine 保存工作状态。原生会话或调用结束不能代替业务确认。
+连续上下文由 Pi SDK 管理历史、压缩与恢复。每轮只提供选中事项的预览，Chief 可按需回读。
 
 Hermes 提供 `memory_add`、`memory_replace`、`memory_remove`、`memory_search`、`session_search` 等工具。默认 policy-only 模式注入使用策略，按需检索记忆；固定用户要求、后台学习、纠错捕获、压缩前和退出时整理均沿用扩展自己的实现与配置。Topic summary 承载主题的长期认识，并作为判断新输入的背景；Hermes 的记忆与检索由扩展维护。Personal 通过 Harness 调用 Agent，由 Agent 使用相应工具维护认识。
 

@@ -60,7 +60,7 @@ Input Reconcile 负责确定投递归属、投影 Batch 回执和解析保留策
 
 ### 内容、身份与调度
 
-Immediate 在 Chief 空闲时启动处理，运行中通过 steer 加入；Normal 在空闲时启动处理，运行中通过 followUp 排队。Deferred 先路由和挂载，等待 Secretary 按数量或等待时间提级；普通业务到达不自动带入未达阈值的 Deferred。attention 与 origin 分开：调度提级不改变来源、工具范围或外发授权。
+领域 Chief 空闲时一次接纳一条业务 Input 或一个就绪 Batch，Immediate 优先。Chief 忙时业务 Input 保留在 CRD 中，Deferred 可继续按数量或最早等待时间封批。
 
 未填写 attention 时，Channel 默认 Immediate，Source / Chief / 内置 Input 默认 Normal。attention 不限制 Route 分类，也不阻止明确交给 Task / Routine 的办理。Secretary 的时间检查独立于 review 开关、退避与 Chief 是否空闲。
 
@@ -89,13 +89,13 @@ Input Reconcile 监听 Batch 终态，按 batchId 将完成或失败回执投影
 
 Batch.status.phase 表达准备与调度阶段，status.assess 与 Input 使用同一执行、完成及错误回执结构；不另设 summary、error 或 finishedAt 同义字段。
 
-Chief 的首次 prompt、followUp、`list_inputs` 与 `read_input` 共用一个 inputId。普通项沿用 Input name，组批项使用 Batch UID，列表按项分页，详情按页展开成员证据。向已有委托转交材料时，以成员 inputId 指明原始来源。原生投递明确拒绝时仅将尚未完成的 Batch 退回 ready；结果不明时核对原生投递事实；已提交的 Batch 完成回执不会被覆盖。领域 root 拥有 Batch，由该领域的 Chief Reconcile 触发 Agent。
+Chief 的首次 prompt、`list_inputs` 与 `read_input` 共用一个 inputId。普通项沿用 Input name，组批项使用 Batch UID，列表按项分页，详情按页展开成员证据。向已有委托转交材料时，以成员 inputId 指明原始来源。原生投递明确拒绝时仅将尚未完成的 Batch 退回 ready；结果不明时核对原生投递事实；已提交的 Batch 完成回执不会被覆盖。领域 root 拥有 Batch，由该领域的 Chief Reconcile 触发 Agent。
 
 #### 保留与恢复
 
 Batch 未终结或成员尚未回填时，成员不能删除或被容量回收。Batch 在成员回填完成前也不能删除，避免执行事实丢失。成员持有对 Batch 的引用；正常回收在终结、投影完成并满足引用与保留规则后进行。
 
-Secretary 协调未接纳 Batch，Chief 负责运行中 Batch 的执行恢复，Input Reconcile 负责成员结果投影。实现位于 `plugins/personal/batch/`；独立 Input 与 Batch 的选择位于 `chief/intake.ts`。验证见 `tests/input-batch.test.ts` 与 `tests/input-admission.test.ts`。
+Secretary 协调未接纳 Batch，Chief 负责运行中 Batch 的执行恢复，Input Reconcile 负责成员结果投影。实现位于 `plugins/personal/batch/`；独立 Input 与 Batch 的选择位于 `secretary/intake.ts`。验证见 `tests/input-batch.test.ts` 与 `tests/input-admission.test.ts`。
 
 ### 路由、投递与办理
 
@@ -107,7 +107,7 @@ Secretary 协调未接纳 Batch，Chief 负责运行中 Batch 的执行恢复，
 
 ### 投递与办理
 
-首次 prompt 可以携带多条独立 Input。steer 和 followUp 先进入 Pi 队列。运行时按本次 execution 的消息标识确认材料已进入 Chief 上下文，在同一事务中更新投递回执和 Topic 工作量。一个 Batch 按一项计数，成员从 Batch 投影回执。回执写入后即可出队，来源材料与工具权限在当前 execution 内继续有效。
+首次 prompt 携带一条独立 Input 或一个 Batch。运行时按本次 execution 的消息标识确认材料进入 Chief 上下文，同时更新投递回执和 Topic 工作量。一个 Batch 按一项计数，成员从 Batch 投影回执。
 
 Input 生成时记录原文和来源。是否需要答复、行动或继续跟进，由 Chief 收到材料后结合内容与上下文判断。同一个 Batch 里，有的材料读过即可，有的可能需要稍后回应。因此，调度以材料进入 Chief 上下文为处理完成的依据。有下文、需要持续跟进的事项由 Ongoing 承载，实际答复由 Output 记录。
 
@@ -125,9 +125,9 @@ Task / Routine Watch Input.handle 并按自身 UID 索引读取未完成记录�
 
 Input 由 Route 确定初始 Topic，Chief 可在树内调整当前归属。明确规则允许直接绑定子 Topic；无规则时 Route 只选择当前 root。Weave 不迁移绑定或研判记录。
 
-root Chief 直接通过 `assessReadyAttention` 按 status.assess.topic、来源优先级与 attention 分页查询未接纳待办，不遍历责任树。`status.topic` 仍供材料检索、归集和容量判断；`assessPending` 保留直属材料待办索引，`assignedPending` 查询分派给某个 Chief 的待办；两者均排除完成和失败终态。
+秘书通过 `assessReadyArrival` 按负责人、attention 和顺序查询未接纳 Input，跳过仍在重试冷却期的条目。
 
-独立 Input 的初始 prompt、steer 和 followUp 在发送前，用同一资源事务检查当前 Topic 的版本与 execution，并写入 `Input.status.assess.executionId`、`startedAt`。executionId 指向实际 Chief 执行，不是接收 Reconcile 的执行。竞争失败者重读后忽略已接纳的 Input；初始批次有冲突时整批回滚，下一轮重新选择剩余 Input 并生成 prompt。接纳之后仍可被其它 Topic 的 Chief 主动读取为材料，但不会再次自动提交。Deferred 归组前不占接纳标记，主动读取也不占标记。归组后只由 Batch 接纳和完成，成员通过 Batch 获得投递回执。
+初始 prompt 在发送前检查当前 Topic 版本与 execution，并在同一事务写入 Input 或 Batch 的接纳回执。竞争失败时重新选单。归组后由 Batch 接纳和完成，所有成员可追溯到这次投递。
 
 投递明确失败时，原条目按 Topic 的 trigger 间隔重试。Batch 冷却期间其他就绪 Batch 可以先行。已投递的条目保留首次时间，后续 provider 异常只影响 execution。重启恢复先核对资源回执和原生会话中的投递标识。已派发且缺少确认依据的条目保留结果未知的错误记录，供核查。
 

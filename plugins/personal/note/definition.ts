@@ -3,7 +3,7 @@ import { INPUT_TYPE } from "../input/model.ts";
 import type { InputSpec, InputStatus } from "../input/model.ts";
 import { isGateTopic } from "../topic/boundary.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
-import { requireOrganization, requireTopic } from "../topic/ownership.ts";
+import { requireOrganization, requireProcessingRoot, requireTopic } from "../topic/ownership.ts";
 import { clearCurationSchedule, pendingCuration, noteMaterial, noteVersion, noteMaxChars } from "./model.ts";
 import { requireContentWriter } from "../context-write.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
@@ -73,6 +73,14 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
     if (!after.spec.summaryOf && !after.spec.nature && (before.spec.nature || (!before.spec.text && after.spec.text)))
       throw new Error("An ordinary Note must retain its nature");
     if (!equalResourceValue(before.status.splitFrom, after.status.splitFrom)) throw new Error("Split provenance is immutable");
+    if (before.status.curationRoot !== after.status.curationRoot && equalResourceValue(before.spec, after.spec)
+        && equalResourceValue({ ...before.status, curationRoot: after.status.curationRoot }, after.status)) {
+      const subject = context.get<unknown, { topic?: import("@compforge/aide-plugin").ResourceRef }>(before.spec.subject, before.spec.subject.uid);
+      const ref = subject?.kind === "Topic" ? before.spec.subject : subject?.status.topic ?? before.status.writer?.resource;
+      if (!pendingCuration(before) || ref?.kind !== "Topic" || after.status.curationRoot !== requireProcessingRoot(ref, context).metadata.uid)
+        throw new Error("Curation index requires the current responsible root");
+      return;
+    }
     // Secretary schedules the next dispatch independently of the historical content writer.
     if (after.status.curateAt && after.status.curateAt !== before.status.curateAt
       && pendingCuration(before) && equalResourceValue(before.spec, after.spec)

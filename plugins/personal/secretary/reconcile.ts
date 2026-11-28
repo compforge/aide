@@ -1,24 +1,24 @@
 import { settleDomain } from "./dormancy.ts";
 import { checkSummary } from "./summary.ts";
-import { ONGOING_TYPE, type OngoingResource } from "../ongoing/model.ts";
+import { selectOngoing } from "./ongoing.ts";
+import { readTopicSubtree } from "../topic/tree.ts";
+import { preparedIntake, type PreparedIntake } from "./intake.ts";
+import { NOTE_TYPE, type NoteResource } from "../note/model.ts";
+import { prepareNoteMaintenance } from "./note.ts";
 import { topicWatch, materialWatch } from "../topic/watch.ts";
-import { assignmentWatch } from "../input/state.ts";
-import { batchWatch } from "../batch/reconcile.ts";
 import { notePressureWatch } from "../note/reconcile.ts";
 import { digest } from "../identity.ts";
 import { chiefWorkload } from "../topic/workload.ts";
 import { tryCreateMaintenanceInput } from "./input.ts";
 import { isResourceVersionConflict, type PluginContext } from "@compforge/aide-plugin";
-import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
-import { reconcileBatches } from "../batch/reconcile.ts";
+import { batchWatch, reconcileBatches } from "../batch/reconcile.ts";
 import { prepareInputs } from "./batching.ts";
-import { resourceRef } from "../input/state.ts";
+import { assignmentWatch, resourceRef } from "../input/state.ts";
 import { dueNotePressure, refreshNotePressure } from "../note/pressure.ts";
 import { commitStatus } from "../status.ts";
 import { isGateTopic, isRootTopic } from "../topic/boundary.ts";
 import { topicPolicy, type TopicPolicy } from "../topic/config.ts";
 import { maintenanceAgenda, ensureOrganizationInput } from "./maintenance.ts";
-import { reviewEvidence } from "../input/review.ts";
 import type { ReviewPreparation } from "./review.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 import { idleReviewSchedule } from "./review.ts";
@@ -33,72 +33,45 @@ function maintenanceInstructions(plan: ReviewPreparation, maxChars: number): str
   ].filter(Boolean).join("\n");
 }
 
-async function cancelObsolete(context: PluginContext, topic: TopicResource, policy: TopicPolicy) {
-  for (const origin of ["aide:curate", "aide:followup", "aide:organize"] as const) {
-    const pending = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
-      matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
-    const input = pending.items[0];
-    if (!input || input.status.assess?.executionId) continue;
-    let obsolete = origin === "aide:curate" && !isRootTopic(topic);
-    const evidence = reviewEvidence(input.spec);
-    const work = chiefWorkload(topic);
-    const workloadDue = topicReview(topic.spec.review).enabled && (work.completed - work.reviewed >= policy.review.completedInputs
-      || !!work.pendingSince && Date.parse(work.pendingSince) + policy.review.idleSeconds * 1000 <= Date.now());
-    if (evidence?.pressure.length && !workloadDue && evidence.weaveRevision <= (topic.status.notifiedWeaveRevision ?? 0)) {
-      const targets = await Promise.all(evidence.pressure.map(entry => context.resources.page<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
-        { matchIndex: { name: "uid", value: entry.uid }, limit: 1 })));
-      obsolete ||= targets.every(page => !page.items[0]?.status.notePressure);
-    }
-    if (origin === "aide:followup") {
-      const matter = await context.resources.get<OngoingResource["spec"], OngoingResource["status"]>({
-        ...ONGOING_TYPE, namespace: "v1", name: String(input.spec.observation?.ongoingId) });
-      obsolete = !matter || matter.metadata.uid !== input.spec.observation?.ongoingUid || !!matter.status.closure || !Array.isArray(input.spec.observation?.inputIds) && matter.status.followupInputId !== input.metadata.name;
-    } else if (origin === "aide:organize") {
-      const facts = (await maintenanceAgenda(context.resources, [topic], policy)).topics[0];
-      obsolete = !facts;
-    }
-    if (!obsolete) continue;
-    await commitStatus(context.resources, [{ operation: "patchStatus", resource: input, patch: { assess: { ...input.status.assess,
-      completedAt: new Date().toISOString(), result: { summary: "Prepared maintenance no longer needed", disposition: "cancelled" } } } }]);
-    context.logger.info("Secretary obsolete Input cancelled", { attributes: { topicUid: topic.metadata.uid, inputId: input.metadata.name } });
-  }
-}
-
-/** @spec Secretary prepares work using resource facts only; it never invokes Harness or admits an execution.
- * @why Chief must remain responsive while deterministic count/age and maintenance checks run independently.
- * @case tests/topic-secretary.test.ts
+/** @spec The serial root reconcile selects one dispatch from live CRDs, then admits that selection.
  * @link docs/personal/secretary.md#reconciler
+ * @case tests/topic-secretary.test.ts
  */
-export async function reconcileSecretary(context: PluginContext, initial: Readonly<TopicResource>, policy: TopicPolicy = topicPolicy(context.instance.config.topic)) {
-  if (initial.metadata.deletionTimestamp) return;
-  let topic = initial;
-  if (!isRootTopic(topic)) await reconcileBatches(context, topic);
-  const next = isRootTopic(topic) ? await prepareInputs(context, topic, policy) : policy.trigger.intervalSeconds * 1000;
-  if (isGateTopic(topic)) return { requeueAfterMs: Math.min(next, await checkSummary(context, topic)) };
-  await refreshNotePressure(context, topic);
-  await cancelObsolete(context, topic, policy);
-  if (!isRootTopic(topic)) {
-    await ensureOrganizationInput(context, topic, policy);
-    return { requeueAfterMs: next };
-  }
-  topic = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(topic)))!;
+export async function reconcileSecretary(context: PluginContext, initial: Readonly<TopicResource>, policy: TopicPolicy = topicPolicy(context.instance.config.topic)):
+    Promise<{ requeueAfterMs: number; intake?: PreparedIntake }> {
+  let next = policy.trigger.intervalSeconds * 1000;
+  let topic = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(initial));
+  if (!topic || topic.metadata.deletionTimestamp || topic.status.execution || !isRootTopic(topic)) return { requeueAfterMs: next };
+  const schedule = idleReviewSchedule(topic, policy.review);
+  if (Object.keys(schedule.patch).length) topic = await context.resources.patchStatus(topic, schedule.patch);
+  const ready = await preparedIntake(context.resources, topic, false, policy.trigger.intervalSeconds * 1000);
+  if (ready.inputs.length) return { intake: ready, requeueAfterMs: next };
+  const topics = await readTopicSubtree(context.resources, resourceRef(topic));
+  const followup = await selectOngoing(context, topics, policy);
+  next = Math.min(next, followup.requeueAfterMs);
+  if (followup.input) return { intake: { inputs: [followup.input] }, requeueAfterMs: next };
   if (topic.status.phase === "dormant") return { requeueAfterMs: next };
   const since = topic.status.lastInputAt ?? topic.metadata.creationTimestamp;
   const remaining = Date.parse(since) + policy.dormantAfterSeconds * 1000 - Date.now();
   if (remaining <= 0) {
-    await settleDomain(context, topic, policy, since);
-    return { requeueAfterMs: next };
+    const input = await settleDomain(context, topic, policy, since);
+    return { intake: input ? { inputs: [input] } : undefined, requeueAfterMs: next };
   }
   if (!topic.status.phase) {
     topic = await context.resources.patchStatus(topic, { phase: "active" }, { resourceVersion: topic.metadata.resourceVersion });
   }
-  await ensureOrganizationInput(context, topic, policy);
-  const schedule = idleReviewSchedule(topic, policy.review);
-  if (Object.keys(schedule.patch).length) topic = await context.resources.patchStatus(topic, schedule.patch);
+  const pending = await context.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, {
+    matchIndex: { name: "pendingCuration", value: topic.metadata.uid }, direction: "asc", limit: 1 });
+  if (pending.items[0]) {
+    const result = await prepareNoteMaintenance(context, pending.items[0], policy, Date.now(), false, topic.metadata.uid);
+    if (result?.input) return { intake: { inputs: [result.input] }, requeueAfterMs: next };
+    if (result) next = Math.min(next, result.requeueAfterMs);
+  }
+  for (const member of topics) {
+    const input = await ensureOrganizationInput(context, member, policy);
+    if (input) return { intake: { inputs: [input] }, requeueAfterMs: next };
+  }
   const due = topicReview(topic.spec.review).enabled && Date.parse(schedule.dueAt) <= Date.now();
-  const outstanding = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
-    matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, "aide:curate"]) }, limit: 1 });
-  if (outstanding.items.length) return { requeueAfterMs: next };
   const notePressure = await dueNotePressure(context.resources, topic, Date.now(), Math.max(1, Math.min(8, Math.floor((policy.contextChars - 3000) / 600))));
   const work = chiefWorkload(topic);
   const countDue = work.completed - work.reviewed >= policy.review.completedInputs;
@@ -111,9 +84,10 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
     if (notePressure.length) agenda.reason = "note_pressure";
     const fingerprint = digest([weave ? plan.weaveRevision : 0,
       notePressure.map(entry => [entry.uid, entry.pressure.version]), workloadDue ? work.completed : null]);
-    await tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:curate",
+    const input = await tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:curate",
       notePressure.length ? "note_pressure" : weave ? "understanding" : countDue ? "workload" : "idle",
       { plan, instructions: maintenanceInstructions(plan, policy.maxChars), cooldownSeconds: policy.capacityCooldownSeconds }, policy, fingerprint);
+    if (input) return { intake: { inputs: [input] }, requeueAfterMs: next };
   } else if (due && !topic.status.execution) {
     const patch = { reviewCheckedAt: new Date().toISOString(), idleReviewReset: null,
       idleReviewCount: policy.review.backoff ? Math.min(Number.MAX_SAFE_INTEGER, schedule.count + 1) : 0 };
@@ -123,11 +97,29 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
       reason: "no_review_demand", completed: work.completed, reviewed: work.reviewed, idleReviewCount: patch.idleReviewCount,
       nextAt: idleReviewSchedule({ ...topic, status: { ...topic.status, ...patch } }, policy.review).dueAt } });
   }
+  const gate = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(topic.spec.parentRef!);
+  if (gate) {
+    const summary = await checkSummary(context, gate, Date.now(), topic);
+    if (summary.input) return { intake: { inputs: [summary.input] }, requeueAfterMs: next };
+    next = Math.min(next, summary.requeueAfterMs);
+  }
   return { requeueAfterMs: Math.min(next, remaining) };
+}
+
+/** @spec Deferred aggregation follows material count and oldest arrival even during an active Chief execution.
+ * @case tests/input-batch.test.ts
+ */
+export async function prepareSecretary(context: PluginContext, topic: TopicResource, policy: TopicPolicy) {
+  if (topic.metadata.deletionTimestamp) return;
+  if (isGateTopic(topic)) return checkSummary(context, topic);
+  await refreshNotePressure(context, topic);
+  if (isRootTopic(topic)) return { requeueAfterMs: await prepareInputs(context, topic, policy) };
+  await reconcileBatches(context, topic);
 }
 
 export function registerSecretary(context: PluginContext): void {
   const policy = topicPolicy(context.instance.config.topic);
-  context.controllers.register({ name: "secretary", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [batchWatch(), notePressureWatch(context), topicWatch(context), materialWatch(), assignmentWatch("assess", "Topic")],
-    reconcile: (_execution, topic: Readonly<TopicResource>) => reconcileSecretary(context, topic, policy) });
+  context.controllers.register({ name: "secretary", resourceType: TOPIC_TYPE, maxConcurrency: 4,
+    watches: [batchWatch(), notePressureWatch(context), topicWatch(context), materialWatch(), assignmentWatch("assess", "Topic")],
+    reconcile: (_execution, topic: Readonly<TopicResource>) => prepareSecretary(context, topic, policy) });
 }

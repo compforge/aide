@@ -7,11 +7,11 @@ import { test } from "node:test";
 import { secretaryFixture } from "./secretary-fixture.ts";
 import { cancelBatch } from "../plugins/personal/batch/reconcile.ts";
 import { prepareInputs } from "../plugins/personal/secretary/batching.ts";
-import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
+import { prepareSecretary, reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
 import { batchById, batchMembers } from "../plugins/personal/batch/members.ts";
 import { recordDelivery, recoverInputDeliveries } from "../plugins/personal/chief/delivery.ts";
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
-import { preparedIntake } from "../plugins/personal/chief/intake.ts";
+import { preparedIntake } from "../plugins/personal/secretary/intake.ts";
 import { commitStatus } from "../plugins/personal/status.ts";
 import { INPUT_TYPE, InputAttention } from "../plugins/personal/input/model.ts";
 import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
@@ -69,7 +69,7 @@ for (const attention of [InputAttention.Normal, InputAttention.Immediate]) test(
   const f = await secretaryFixture(t); const first = await f.input("a", attention); await f.input("b", attention);
   await prepareInputs(f.context, f.root(), f.policy, Date.parse(first.metadata.creationTimestamp) + 700_000);
   assert.equal((await f.resources.list(BATCH_TYPE)).length, 0);
-  assert.equal((await preparedIntake(f.resources, f.root())).inputs.length, 2);
+  assert.equal((await preparedIntake(f.resources, f.root())).inputs.length, 1);
 });
 
 test("Gate accepts individual Inputs even when Deferred materials reach the batch threshold", async t => {
@@ -88,8 +88,13 @@ test("Gate accepts individual Inputs even when Deferred materials reach the batc
 
 test("Single Deferred ages into a Batch independently of Chief activity", async t => {
   const f = await secretaryFixture(t); const first = await f.input("old");
+  const { deadlineClock } = await import("./fixtures/clock.ts");
+  const advance = deadlineClock(t);
   await f.resources.patchStatus(f.root(), { execution: { id: "busy", startedAt: new Date().toISOString() } });
-  await prepareInputs(f.context, f.root(), f.policy, Date.parse(first.metadata.creationTimestamp) + 600_001);
+  await prepareSecretary(f.context, f.root(), f.policy);
+  assert.equal((await f.resources.list(BATCH_TYPE)).length, 0);
+  advance(600_001);
+  await prepareSecretary(f.context, f.root(), f.policy);
   const batch = (await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE))[0]!;
   assert.equal(batch.spec.oldestAt, first.metadata.creationTimestamp); assert.equal(f.calls(), 0);
 });
@@ -272,11 +277,12 @@ test("Channel promotion preserves fixed Batch membership without granting steer"
   await prepareInputs(f.context, f.root(), f.policy);
   await f.resources.patchStatus(f.root(), { execution: { id: "busy", startedAt: new Date().toISOString() } });
   const calls: { operation: string; batchId?: string }[] = [];
-  const { submitChiefPending: submitPending } = await import("../plugins/personal/chief/intake.ts");
+  const { submitGatePending: submitPending } = await import("../plugins/personal/gate/intake.ts");
   await submitPending(f.context, { verbs: { action: async (_: string, args: { operation: string; batchId?: string }) => {
     calls.push(args); return { state: "success", value: { accepted: true } };
   } } } as unknown as import("@compforge/aide-plugin").ReconcileContext, f.root());
-  assert.equal(calls[0]!.operation, "followUp"); assert.equal(calls[0]!.batchId, ready.metadata.uid);
+  assert.deepEqual(calls, []);
+  assert.equal(ready.status.phase, "ready");
   assert.deepEqual(new Set((await batchMembers(f.resources, ready)).map(i => i.metadata.name)), new Set([original.metadata.name, "b"]));
 });
 

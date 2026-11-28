@@ -239,7 +239,7 @@ test("Root Chief admits urgent and observed business as separate bounded tasks w
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
     prompts++;
     const activation = JSON.parse(args.prompt.split("Activation: ")[1].split("\n")[0]);
-    assert.equal(activation.inputs.length, prompts === 1 ? 1 : 10);
+    assert.equal(activation.inputs.length, 1);
     if (prompts === 1) assert.equal(activation.inputs[0].inputId, "urgent");
     for (const item of activation.inputs) {
       const fact = f.aide.topics.inputStore.get(item.inputId)!;
@@ -252,8 +252,8 @@ test("Root Chief admits urgent and observed business as separate bounded tasks w
   assert.equal(prompts, 1);
   assert.equal(f.aide.topics.pending(root.metadata.uid).length, 10);
   assert.ok(f.aide.topics.pending(root.metadata.uid).every(i => !i.status.assess!.executionId));
-  await reconcileChief(f.context, execution, f.refresh(root));
-  assert.equal(prompts, 2);
+  for (let i = 0; i < 10; i++) await reconcileChief(f.context, execution, f.refresh(root));
+  assert.equal(prompts, 11);
   assert.equal(f.aide.topics.pending(root.metadata.uid).length, 0);
 });
 
@@ -275,13 +275,13 @@ test("Unfinished synthesis retries one review Input without refreshing business 
   await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 1);
-  assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceRequests?.["aide:curate"]?.attempts, 1);
+  assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceChecks?.["aide:curate"]?.attempts, 1);
   const pending = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   await f.resources.patchStatus(pending, { assess: { ...pending.status.assess, errorAt: "2000-01-01T00:00:00.000Z" } });
   await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 2);
-  assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceRequests?.["aide:curate"]?.attempts, 1);
+  assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceChecks?.["aide:curate"]?.attempts, 1);
   assert.equal(f.aide.topics.inputStore.list().length, 1);
   assert.equal(f.aide.topics.inputStore.list()[0]!.metadata.uid, pending.metadata.uid);
   assert.ok(f.aide.topics.inputStore.list().every(i => i.spec.origin === "aide:curate"));

@@ -4,13 +4,14 @@ import { PERSON_TYPE } from "../person/model.ts";
 import { NOTE_TYPE } from "../note/model.ts";
 import type { SummaryResource } from "../note/summary.ts";
 import { SummaryOwnerSchema } from "../input/review.ts";
-import { INPUT_TYPE, InputAttention } from "../input/model.ts";
-import { resourceRef } from "../input/state.ts";
+import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
+import { inputRef, resourceRef } from "../input/state.ts";
+import { BATCH_TYPE } from "../batch/model.ts";
 import { digest } from "../identity.ts";
 import { commitStatus } from "../status.ts";
 import { ensureDefaultTopic } from "../topic/default.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
-import { readTopicRoot } from "../topic/tree.ts";
+import { readTopicRoot, readTopicSubtree } from "../topic/tree.ts";
 
 const interval = 15 * 60_000;
 const reviewQuestions = {
@@ -46,10 +47,10 @@ async function oldestWithNotes(reader: ResourceReader, type: typeof TOPIC_TYPE |
  * @link docs/personal/secretary.md#摘要复核
  * @case tests/summary-review.test.ts
  */
-export async function checkSummary(context: Pick<PluginContext, "resources" | "logger">, gate: TopicResource, now = Date.now()) {
+export async function checkSummary(context: Pick<PluginContext, "resources" | "logger">, gate: TopicResource, now = Date.now(), dispatchRoot?: TopicResource) {
   const slot = Math.floor(now / interval) * interval;
   const next = slot + interval - now;
-  if (Date.parse(gate.status.summaryCheckAt ?? gate.metadata.creationTimestamp) >= slot) return next;
+  if (Date.parse(gate.status.summaryCheckAt ?? gate.metadata.creationTimestamp) >= slot) return { requeueAfterMs: next };
   const at = new Date(slot).toISOString();
   const clock = { operation: "patchStatus" as const, resource: gate, patch: { summaryCheckAt: at } };
   const candidates = await Promise.all([TOPIC_TYPE, PERSON_TYPE, ADDRESS_TYPE].map(type => oldestWithNotes(context.resources, type)));
@@ -57,9 +58,26 @@ export async function checkSummary(context: Pick<PluginContext, "resources" | "l
     (a.status.summaryReviewedAt ?? "").localeCompare(b.status.summaryReviewedAt ?? "") || a.metadata.uid.localeCompare(b.metadata.uid));
   const chief = owner && (owner.kind === "Topic" ? await readTopicRoot(context.resources, resourceRef(owner)) : await ensureDefaultTopic(context.resources));
   if (!chief || !owner || chief.status.execution) {
+    if (dispatchRoot) return { requeueAfterMs: next };
     await commitStatus(context.resources, [clock]);
     context.logger.debug?.("Secretary skipped Summary check", { attributes: { at, reason: chief ? "chief_busy" : "no_candidate", chiefUid: chief?.metadata.uid ?? null } });
-    return next;
+    return { requeueAfterMs: next };
+  }
+  if (dispatchRoot?.metadata.uid !== chief.metadata.uid) {
+    if (!dispatchRoot) {
+      // The global clock consumes busy slots even while the domain controller is awaiting inference.
+      const pending = (await context.resources.page(INPUT_TYPE, { matchIndex: { name: "assignedPending", value: chief.metadata.uid }, limit: 1 })).items.length
+        || (await context.resources.page(BATCH_TYPE, { matchIndex: { name: "open", value: chief.metadata.uid }, limit: 1 })).items.length;
+      let occupied = !!pending;
+      if (!occupied) for (const member of await readTopicSubtree(context.resources, resourceRef(chief))) {
+        if ((await context.resources.page(INPUT_TYPE, { matchIndex: { name: "unassigned", value: member.metadata.uid }, limit: 1 })).items.length) {
+          occupied = true;
+          break;
+        }
+      }
+      if (occupied) await commitStatus(context.resources, [clock]);
+    }
+    return { requeueAfterMs: next };
   }
   const topic = resourceRef(chief), target = SummaryOwnerSchema.parse(resourceRef(owner));
   const name = `summary-${digest([gate.metadata.uid, at])}`;
@@ -73,8 +91,9 @@ export async function checkSummary(context: Pick<PluginContext, "resources" | "l
     if (!String(error).includes("Chief is dormant") && !String(error).includes("Chief has queued work") && !String(error).includes("Resource capacity exhausted")) throw error;
     await commitStatus(context.resources, [clock]);
     context.logger.debug?.("Secretary skipped Summary check", { attributes: { at, chiefUid: topic.uid, reason: String(error) } });
-    return next;
+    return { requeueAfterMs: next };
   }
   context.logger.info("Secretary scheduled Summary review", { attributes: { at, inputId: name, chiefUid: topic.uid, ownerKind: target.kind, ownerUid: target.uid } });
-  return next;
+  const input = await context.resources.get<InputSpec, InputStatus>(inputRef(name));
+  return { requeueAfterMs: next, input };
 }

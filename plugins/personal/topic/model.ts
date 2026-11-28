@@ -27,7 +27,7 @@ export interface TopicStatus extends ResourceContext {
   agent?: import("@compforge/aide-plugin").AgentStatus;
   chiefWorkload?: import("./workload.ts").ChiefWorkload;
   /** Secretary retains request identity and no-progress backoff independently of Input retention. */
-  maintenanceRequests?: Partial<Record<"aide:curate" | "aide:followup" | "aide:organize", { checkedAt: string; inputId: string; fingerprint: string; attempts: number }>>;
+  maintenanceChecks?: Partial<Record<"aide:curate" | "aide:organize", { checkedAt: string; fingerprint: string; attempts: number }>>;
   yieldToInput?: boolean;
   summaryCheckAt?: string;
   reviewCheckedAt?: string | null;

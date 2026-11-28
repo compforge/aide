@@ -1,5 +1,4 @@
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../plugins/personal/batch/model.ts";
-import { recordDelivery } from "../plugins/personal/chief/delivery.ts";
 import { reconcileBatchMember } from "../plugins/personal/input/assignment.ts";
 import { prepareInputs } from "../plugins/personal/secretary/batching.ts";
 import { topicPolicy } from "../plugins/personal/topic/config.ts";
@@ -60,7 +59,7 @@ test("Routing requires one current Topic", async t => {
 });
 
 function mockRunning(f: ReturnType<typeof fixture>, dispatch: (args: unknown) => Promise<unknown>) {
-  f.aide.runtime.plugins.listHarnessInvocations = () => ["a", "b"].map(id => ({ executionId: id, invocationId: `invocation-${id}`, phase: "running" })) as any;
+  f.aide.runtime.plugins.listHarnessInvocations = () => ["a", "b", "gate"].map(id => ({ executionId: id, invocationId: `invocation-${id}`, phase: "running" })) as any;
   f.aide.runtime.plugins.executionVerbs = (() => ({ harness: dispatch })) as any;
 }
 const intake = (c: TopicResource) => ({ pluginInstanceId: "personal", namespace: c.metadata.namespace, executionId: `intake-${c.spec.id}`, resourceRef: resourceRef(c) });
@@ -69,8 +68,8 @@ async function running(f: ReturnType<typeof fixture>, c: TopicResource) {
 }
 
 /** @case Native steer and followUp must use the Chief execution ID, not the intake Reconcile execution ID. */
-test("Steer and followUp racing within one root dispatch once and retain uncertain delivery evidence on recovery", async t => {
-  const f = fixture(t), a = await f.aide.topics.ensure("a"), b = await f.aide.topics.ensure("b");
+test("Steer and followUp racing within Gate dispatch once and retain uncertain delivery evidence on recovery", async t => {
+  const f = fixture(t), a = await f.aide.topics.ensure("gate"), b = await f.aide.topics.ensure("b");
   await running(f, a); await f.input("shared", [a], InputAttention.Immediate);
   let count = 0;
   mockRunning(f, async () => { count++; return { state: "success", value: { outcome: "accepted" } }; });
@@ -78,7 +77,7 @@ test("Steer and followUp racing within one root dispatch once and retain uncerta
     f.aide.personal.submitTopic(intake(a), { inputId: "shared", operation: "followUp" })]);
   assert.equal(count, 1); assert.equal(results.filter(r => r.accepted).length, 1);
   const receipt = f.aide.topics.inputStore.get("shared")!.status.assess!;
-  assert.ok(["a", "b"].includes(receipt.executionId!));
+  assert.ok(receipt.executionId === "gate");
   await f.aide.personal.recoverInterrupted();
   assert.equal(f.aide.topics.inputStore.get("shared")!.status.assess!.executionId, receipt.executionId);
   assert.equal(f.aide.topics.inputStore.get("shared")!.status.assess!.retryable, false);
@@ -101,17 +100,17 @@ test("An in-flight initial prompt loses safely to a competing prompt admission",
 });
 
 for (const outcome of ["rejected", "unknown", "completed"] as const) test(`Chief notification ${outcome} preserves the appropriate admission evidence`, async t => {
-  const f = fixture(t), a = await f.aide.topics.ensure("a"); await running(f, a);
+  const f = fixture(t), a = await f.aide.topics.ensure("gate"); await running(f, a);
   const fact = await f.input("fact", [a]);
   mockRunning(f, async () => {
     if (outcome === "unknown") throw new Error("transport timed out");
-    if (outcome === "completed") await deliverInput(f.resources, f.current(a), "a", "fact");
+    if (outcome === "completed") await deliverInput(f.resources, f.current(a), "gate", "fact");
     return { state: "success", value: { outcome: "rejected", reason: "not_running" } };
   });
   const submit = f.aide.personal.submitTopic(intake(a), { inputId: "fact", operation: "followUp" });
   if (outcome === "unknown") await assert.rejects(submit, /timed out/); else await submit;
   const receipt = f.aide.topics.inputStore.get("fact")!.status.assess!;
-  assert.equal(receipt.executionId, outcome === "rejected" ? undefined : "a");
+  assert.equal(receipt.executionId, outcome === "rejected" ? undefined : "gate");
   assert.equal((await nextInputs(f.resources, f.current(a), 8)).length, outcome === "rejected" ? 1 : 0);
   if (outcome === "completed") assert.ok(receipt.completedAt);
   if (outcome === "unknown") assert.match(receipt.lastError!, /timed out/);
@@ -261,26 +260,12 @@ test("Route compaction failure does not schedule replay of its failed Input", as
   assert.deepEqual(await nextRoleInputs(f.resources, latest, 8), []);
 });
 
-/** @case A successful immediate interruption preserves maintenance as pending without replaying completed business. */
-test("Immediate business can interrupt internal maintenance and unfinished maintenance remains pending", async t => {
-  const { createMaintenanceInput } = await import("../plugins/personal/secretary/input.ts");
-  const { maintenanceAgenda } = await import("../plugins/personal/secretary/maintenance.ts");
+test("Independent Immediate business waits while the domain Chief is running", async t => {
   const f = fixture(t), root = await f.aide.topics.ensure("a");
-  const maintenance = await createMaintenanceInput(f.context, root, new Date().toISOString(), await maintenanceAgenda(f.resources, []));
   await running(f, root);
-  await f.resources.patchStatus(f.current(root), { execution: { ...f.current(root).status.execution!, inputOrigin: "aide:curate" } });
-  await f.resources.patchStatus(maintenance, { assess: { ...maintenance.status.assess, executionId: "a", startedAt: new Date().toISOString() } });
   await f.input("urgent", [root], InputAttention.Immediate);
-  mockRunning(f, async () => ({ state: "success", value: { outcome: "accepted" } }));
-  assert.equal((await f.aide.personal.submitTopic(intake(root), { inputId: "urgent", operation: "steer" })).accepted, true);
-  await deliverInput(f.resources, f.current(root), "a", "urgent");
-  await finalizeExecution(f.context, f.current(root), "a", "");
-  const pending = f.aide.topics.inputStore.get(maintenance.metadata.name)!;
-  assert.equal(pending.status.assess?.completedAt, undefined);
-  assert.equal(pending.status.assess?.retryable, true);
-  assert.equal(pending.status.assess?.executionId, undefined);
-  assert.deepEqual(await nextInputs(f.resources, f.current(root), 8), []);
-  assert.ok(f.aide.topics.inputStore.get("urgent")!.status.assess?.completedAt);
+  assert.equal((await f.aide.personal.submitTopic(intake(root), { inputId: "urgent", operation: "steer" })).accepted, false);
+  assert.equal(f.aide.topics.inputStore.get("urgent")!.status.assess?.executionId, undefined);
 });
 
 /** @case Deferred batches drain at a full Input quota without allocating a maintenance or synthetic Input. */
@@ -304,7 +289,7 @@ test("Ten deferred Inputs activate one bounded business batch before full-quota 
 });
 
 test("Deferred deadline uses oldest creation, independently of review, and queries are bounded", async t => {
-  const { preparedIntake } = await import("../plugins/personal/chief/intake.ts");
+  const { preparedIntake } = await import("../plugins/personal/secretary/intake.ts");
   const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
   const f = fixture(t), root = await f.aide.topics.ensure("a");
   const first = await f.input("oldest", [root], InputAttention.Deferred);
@@ -318,64 +303,17 @@ test("Deferred deadline uses oldest creation, independently of review, and queri
   assert.equal(ready.inputs.map(i => i.metadata.name).find(id => id === "oldest"), "oldest");
 });
 
-for (const outcome of ["accepted", "rejected", "uncertain"] as const) test(`Deferred followUp batch ${outcome} keeps one atomic Batch receipt`, async t => {
-  const { submitChiefPending: submitPending } = await import("../plugins/personal/chief/intake.ts");
+test("Deferred batches remain ready until the running Chief finishes", async t => {
   const f = fixture(t), root = await f.aide.topics.ensure("a");
   await running(f, root);
   for (let i = 0; i < 10; i++) await f.input(`batch-${i}`, [root], InputAttention.Deferred);
-  const deliveries: any[] = [];
-  mockRunning(f, async args => {
-    deliveries.push(args);
-    assert.ok(f.aide.topics.inputStore.list().every(i => !i.status.assess?.executionId));
-    assert.equal((await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE))[0]!.status.assess?.executionId, "a");
-    if (outcome === "uncertain") throw new Error("delivery result unknown");
-    return { state: "success", value: { outcome, reason: outcome === "rejected" ? "unsupported" : undefined } };
-  });
-  const execution = { verbs: { action: async (_: string, args: unknown) => ({ state: "success", value: await f.aide.personal.submitTopic(intake(root), args) }) } } as unknown as ReconcileContext;
   await prepareInputs(f.context, f.current(root), topicPolicy());
-  const submitted = submitPending(f.context, execution, f.current(root));
-  if (outcome === "uncertain") await assert.rejects(submitted, /result unknown/); else await submitted;
-  assert.equal(deliveries.length, 1); assert.equal(deliveries[0].operation, "followUp");
-  const batch = (await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE))[0]!;
-  assert.deepEqual(JSON.parse(deliveries[0].prompt.split("\n")[1]).inputIds, [batch.metadata.uid]);
-  assert.doesNotMatch(deliveries[0].prompt, /batchId/);
-  assert.equal(batch.status.phase, outcome === "rejected" ? "ready" : "running");
-  assert.equal(batch.status.assess?.executionId, outcome === "rejected" ? undefined : "a");
-  if (outcome === "accepted") assert.equal(batch.status.assess?.deliveryId, deliveries[0].messageId);
-  assert.ok(f.aide.topics.inputStore.list().every(i => !i.status.assess?.executionId && i.spec.attention === InputAttention.Deferred));
-  if (outcome === "uncertain") {
-    for (const input of f.aide.topics.inputStore.list()) await reconcileBatchMember(f.context, input);
-    assert.ok(f.aide.topics.inputStore.list().every(i => !i.status.assess?.errorAt));
-    assert.equal(batch.status.assess?.retryable, true);
-    await finalizeExecution(f.context, f.current(root), "a");
-    const retry = (await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE))[0]!;
-    assert.equal(retry.status.phase, "failed"); assert.equal(retry.status.assess?.executionId, "a");
-    assert.match(retry.status.assess!.lastError!, /outcome unknown/);
-  }
-});
-
-
-test("A running Chief admits one outstanding deferred batch and resumes after its receipts", async t => {
-  const { submitChiefPending: submitPending } = await import("../plugins/personal/chief/intake.ts");
-  const f = fixture(t), root = await f.aide.topics.ensure("a"); await running(f, root);
-  for (let i = 0; i < 20; i++) await f.input(`bounded-${String(i).padStart(2, "0")}`, [root], InputAttention.Deferred);
-  const deliveries: any[] = [];
-  mockRunning(f, async args => { deliveries.push(args); return { state: "success", value: { outcome: "accepted" } }; });
-  const execution = { verbs: { action: async (_: string, args: unknown) => ({ state: "success", value: await f.aide.personal.submitTopic(intake(root), args) }) } } as unknown as ReconcileContext;
-  await prepareInputs(f.context, f.current(root), topicPolicy());
-  await prepareInputs(f.context, f.current(root), topicPolicy());
-  await submitPending(f.context, execution, f.current(root));
-  await submitPending(f.context, execution, f.current(root));
-  assert.equal(deliveries.length, 1);
-  assert.equal((await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE)).filter(b => b.status.phase === "running").length, 1);
-  await f.input("urgent-during-batch", [root], InputAttention.Immediate);
-  await submitPending(f.context, execution, f.current(root));
-  assert.equal(deliveries.length, 2); assert.equal(deliveries[1].operation, "steer");
-  const activeBatch = (await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE)).find(b => b.status.phase === "running")!;
-  await recordDelivery(f.resources, f.current(root), "a", activeBatch.status.assess!.deliveryId!);
-  await prepareInputs(f.context, f.current(root), topicPolicy());
-  await submitPending(f.context, execution, f.current(root));
-  assert.equal(deliveries.length, 3); assert.equal(deliveries[2].operation, "followUp");
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.executionId && !i.status.assess.completedAt).length, 1);
-  assert.equal((await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE)).filter(b => b.status.phase === "running").length, 1);
+  const { reconcileSecretary } = await import("../plugins/personal/secretary/reconcile.ts");
+  assert.equal((await reconcileSecretary(f.context, f.current(root))).intake, undefined);
+  const [batch] = await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE);
+  assert.equal(batch!.status.phase, "ready");
+  await finalizeExecution(f.context, f.current(root), "a");
+  const selected = await reconcileSecretary(f.context, f.current(root));
+  assert.equal(selected.intake?.batch?.metadata.uid, batch!.metadata.uid);
+  assert.equal(selected.intake?.inputs.length, 10);
 });

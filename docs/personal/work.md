@@ -50,16 +50,16 @@ Ongoing 记录尚有下文、值得持续跟进的同一事项。例如供应商
 | status.progress | 目前查明的进展与依据 |
 | status.closure | 有结论后写入收尾时间 at 和结果 outcome，同时清除预约 |
 | status.updatedAt、writer | 最近一次业务更新的时间、Chief 身份和执行 ID |
-| status.followupInputId | 当前预约已递交的提醒 Input。调整预约后，Secretary 可再次递交 |
+| status.followupInputId | 当前预约选中后关联的 Input。成功投递同时清除关联并写入下次核实时间 |
 
 ### 核实与收尾
 
-Secretary 按保存的时间递交 `aide:followup`。Chief 先核对 Ongoing、新 Input、关联工作和 Me 已给出的答复。有结论就记录结果及依据并关闭。事情仍在推进就记录进展，按约定安排下次核实。若还缺影响判断的事实，先私下问 Me。询问只完成这次检查，事项仍可等待答复。新的业务 Input 可以直接更新同一事项。
+Secretary 在所属 Chief 空闲时，根据 nextCheckAt 和新材料选择 Ongoing。到期检查投递成功时，若仍是同一预约，就从投递时刻顺延一小时。Chief 可按证据另定时间、显式清空 checkAt 等待回复，或记录结论并关闭。材料提前到达单独触发跟进时，保留未来预约。
 
-编辑进展时省略 checkAt 会保留原计划，显式清空则表示等待外部消息。一次预约无论重试多少次都只产生一个 Input，变更或取消预约后，Secretary 撤下仍在队列中的旧预约。Chief 已经接到提醒时，可以先调整下次核实时间，再就仍然有效的问题询问 Me。开放事项及其所属 Topic 受容量回收保护。后续阶段的稳定事实与方法可以另外写入普通 Note，再按需提炼到对象摘要。Note 的梳理、拆分和退役各自独立于跟进责任。
+编辑进展时省略 checkAt 会保留原计划，显式清空则表示等待外部消息。一次预约复用同一投递记录。Chief 更新预约后，下轮选单读取新的时间。Chief 已经接到提醒时，可以先调整下次核实时间，再就仍然有效的问题询问 Me。开放事项及其所属 Topic 受容量回收保护。后续阶段的稳定事实与方法可以另外写入普通 Note，再按需提炼到对象摘要。Note 的梳理、拆分和退役各自独立于跟进责任。
 
 `append_input` 可给 Ongoing 追加原始 Input 或当场记录的材料。Input 的 `status.handle` 按 Work UID 保存关联。Secretary 将新增材料的 ID 一起递交给领域 Chief，原有预约继续有效。Chief 用 `read_work` 查看关联 Input 和 Output。
 
-Chief 在业务 Input 或跟进轮次中调用 `ask_me({ workId, text })` 创建发给 Me 的私聊 Output。Me 的 Person 投递频控决定实际发送时间，命中频控时 Output 保持 pending，等待重新投递。Output 的 `spec.work` 指向事项，`purpose=question` 表示询问，`inputIds` 记录触发材料。预约时间变化不影响同一轮询问。事项已关闭或提醒中的问题已被替换时，旧提醒不能发问。同一事项、问题和触发材料重试时复用已接纳的 Output，实际送达结果见其 delivery 状态。
+Chief 在业务 Input 或跟进轮次中调用 `ask_me({ workId, text })` 发起私聊问询。跟进 Input 指向 Ongoing，Chief 先读最新情况。同轮改题时先完成 upsert_work，再按新问题提问。写入 Output 时检查执行、事项归属、开放状态与问题是否在提交期间改变。Output 记录 Work 和触发材料，重复提交复用原 Output，实际发送沿用 Person 频控。
 
 Me 可以在 Web Gate 的 Work 列表里打开任一开放事项，补充最新进展、结论或对问询的答复。提交将原文作为用户 Input 追加到事项，Secretary 通知所属领域的 Chief。Chief 根据补充更新进展或记录结论并关闭。

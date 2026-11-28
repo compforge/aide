@@ -2,7 +2,7 @@ import { isResourceVersionConflict, retryOnConflict, type PluginContext } from "
 import { noteVersion, type NoteResource } from "../note/model.ts";
 import { assignInput } from "../input/assignment.ts";
 import { inputStatus } from "../input/conditions.ts";
-import { INPUT_TYPE, InputAttention, deliveryFinished, type InputSpec, type InputStatus } from "../input/model.ts";
+import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
 import { inputRef, resourceRef, type Input } from "../input/state.ts";
 import { TOPIC_TYPE, type TopicResource, type TopicStatus } from "../topic/model.ts";
 import type { TopicPolicy } from "../topic/config.ts";
@@ -52,7 +52,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
     const spec: InputSpec = {
       origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
       text: `${maintenanceTask[origin]} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; ${origin === "aide:followup" ? "Ask Me privately if a consequential fact is still missing." : origin === "aide:curate" ? "Maintain existing mandates. Base new Work on the original business Input or source Note or Work. Keep this review silent." : "Do not communicate or hand off business Work."} Work on at most 8 materials or 8 direct children this round.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
-      observation: { ...(preparation?.notes ? { notes: preparation.notes.map(note => ({ noteId: note.metadata.name, version: noteVersion(note) })) } : {}), ...(scheduledMatter ? { ongoingId: scheduledMatter.metadata.name, ongoingUid: scheduledMatter.metadata.uid, question: scheduledMatter.spec.question ?? null, ...(materials.length ? { inputIds: materials.map(i => i.metadata.name) } : {}) } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
+      observation: { ...(preparation?.notes ? { notes: preparation.notes.map(note => ({ noteId: note.metadata.name, version: noteVersion(note) })) } : {}), ...(scheduledMatter ? { ongoingId: scheduledMatter.metadata.name, ongoingUid: scheduledMatter.metadata.uid, ...(materials.length ? { inputIds: materials.map(i => i.metadata.name) } : {}) } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
         completed: chiefWorkload(current).completed, weaveRevision: maintenance?.weaveRevision ?? 0,
         pressure: (maintenance?.notePressure ?? []).map(({ uid, pressure }) => ({ uid, version: pressure.version })),
       } } : {}) },
@@ -95,9 +95,9 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
       { operation: "patchStatus", resource: current, options: { resourceVersion: current.metadata.resourceVersion }, patch: {
         ...(preparation?.closeoutFor ? { closeoutFor: preparation.closeoutFor } : {}),
         ...(ownerPressure ? { notePressure: ownerPressure } : {}),
-        maintenanceRequests: { [origin]: { checkedAt: at, inputId, fingerprint,
-          attempts: current.status.maintenanceRequests?.[origin]?.fingerprint === fingerprint
-            ? Math.min(14, (current.status.maintenanceRequests[origin]?.attempts ?? 0) + 1) : 1 } },
+        ...(origin === "aide:followup" || preparation?.notes ? {} : { maintenanceChecks: { [origin]: { checkedAt: at, fingerprint,
+          attempts: current.status.maintenanceChecks?.[origin]?.fingerprint === fingerprint
+            ? Math.min(14, (current.status.maintenanceChecks[origin]?.attempts ?? 0) + 1) : 1 } } }),
         ...(origin === "aide:curate" && !preparation?.notes ? { reviewCheckedAt: at, idleReviewReset: null,
           chiefWorkload: { ...chiefWorkload(current), requestedThrough: chiefWorkload(current).completed, afterRequestSince: null } } : {}),
       } },
@@ -125,22 +125,23 @@ export async function tryCreateMaintenanceInput(context: Pick<PluginContext, "re
   preparation: Parameters<typeof createMaintenanceInput>[6], policy: TopicPolicy, fingerprint: string) {
   const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(topic));
   if (!current || current.metadata.deletionTimestamp) return;
-  const previous = current.status.maintenanceRequests?.[origin];
+  const previous = origin === "aide:followup" || preparation?.notes ? undefined : current.status.maintenanceChecks?.[origin];
   if (previous) {
-    const input = await context.resources.get<InputSpec, InputStatus>(inputRef(previous.inputId));
-    if (input && !deliveryFinished(input.status.assess)) return;
     const attempts = previous.fingerprint === fingerprint ? previous.attempts : 0;
     // Fourteen attempts reach the cap even with a one-second base cooldown.
     const delay = Math.min(Math.max(7200, policy.capacityCooldownSeconds), policy.capacityCooldownSeconds * 2 ** Math.max(0, attempts - 1));
-    const nextAt = Date.parse(input?.status.assess?.completedAt ?? previous.checkedAt) + delay * 1000;
-    if (!preparation?.notes && !preparation?.materials?.length && Date.now() < nextAt) {
+    const nextAt = Date.parse(previous.checkedAt) + delay * 1000;
+    if (Date.now() < nextAt) {
       context.logger.debug?.("Secretary maintenance cooling down", { attributes: { topicUid: topic.metadata.uid, origin,
         reason: attempts ? "unchanged_need" : "minimum_cooldown", attempts, nextAt: new Date(nextAt).toISOString() } });
       return;
     }
   }
-  try { return await createMaintenanceInput(context, current, dueAt, agenda, origin, trigger, preparation, fingerprint); }
-  catch (error) {
+  try {
+    const input = await createMaintenanceInput(context, current, dueAt, agenda, origin, trigger, preparation, fingerprint);
+    // A pending or uncertain delivery owns its retry deadline through preparedIntake.
+    if (!input.status.assess?.startedAt && !input.status.assess?.lastError && !input.status.assess?.completedAt) return input;
+  } catch (error) {
     if (error instanceof ObsoleteMaintenanceRequest || String(error).includes("Chief is dormant")) return;
     if (!String(error).includes("Resource capacity exhausted")) throw error;
     context.logger.warn("Topic maintenance deferred at resource capacity", { attributes: { topicUid: topic.metadata.uid, origin, error: String(error) } });

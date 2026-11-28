@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import type { Watch } from "@compforge/aide-plugin";
 import type { PluginContext } from "@compforge/aide-plugin";
-import { NOTE_TYPE, noteVersion, type NoteResource } from "./model.ts";
+import { NOTE_TYPE, noteVersion, pendingCuration, noteMaterial, type NoteResource } from "./model.ts";
 import { readTopicRoot } from "../topic/tree.ts";
 import type { ResourceRef } from "@compforge/aide-plugin";
 import { resourceRef } from "../input/state.ts";
@@ -17,7 +17,7 @@ export async function noteRoot(context: Pick<PluginContext, "resources">, note: 
   if (writer?.kind === "Topic") return readTopicRoot(context.resources, writer);
   return undefined;
 }
-/** @spec Only summary Notes need per-Note reconciliation, to repair their owner's derived fingerprint.
+/** @spec Repair the Summary fingerprint or the root index of a draft whose owner moved.
  * @why Ordinary Note edits are evidence changes, not independent review requests.
  * @case tests/note-knowledge.test.ts
  * @link docs/personal/note.md
@@ -32,13 +32,20 @@ export async function reconcileNote(context: PluginContext, note: NoteResource) 
     }
     return { requeueAfterMs: repairAfterMs };
   }
+  if (pendingCuration(note) && note.status.curationDelivery?.material !== noteMaterial(note.spec)) {
+    const root = await noteRoot(context, note);
+    if (root && root.metadata.uid !== (note.status.curationRoot ?? note.spec.subject.uid)) {
+      await context.resources.patchStatus(note, { curationRoot: root.metadata.uid }, { resourceVersion: note.metadata.resourceVersion });
+    }
+    return { requeueAfterMs: repairAfterMs };
+  }
 }
 
 /** @spec Note events wake Topic pressure checks; they never enqueue per-Note review work. */
 export function notePressureWatch(context: PluginContext): Watch {
   return { resourceType: NOTE_TYPE, handler: { create: async ({ object }) => requests(object as NoteResource), delete: async ({ object }) => requests(object as NoteResource), update: async ({ oldObject, newObject }) => {
     const a = oldObject as NoteResource, b = newObject as NoteResource;
-    if (isDeepStrictEqual(a.status.retired, b.status.retired) && noteVersion(a) === noteVersion(b)) return [];
+    if (isDeepStrictEqual(a.status.retired, b.status.retired) && noteVersion(a) === noteVersion(b) && a.status.curationRoot === b.status.curationRoot) return [];
     return [...await requests(a), ...await requests(b)];
   } } };
   async function requests(note: NoteResource) {

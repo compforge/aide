@@ -181,12 +181,8 @@ test("Concurrent material and child pressure share one root assignment until all
   assert.equal((await nextInputs(f.resources, f.read(f.root), 8))[0]!.spec.origin, "source");
   assert.equal(f.aide.topics.inputStore.query("unfiled", f.child.metadata.uid).length, 2);
 
-  for (const [maxUnfiledInput, maxChildren] of [[2, 1], [1, 2], [2, 2]] as const) {
-    await reconcileSecretary(f.context, f.read(f.child), topicPolicy({ maxUnfiledInput, maxChildren }));
-    assert.equal(requests().length, 1);
-    const assessment = f.aide.topics.inputStore.get(request.metadata.name)!.status.assess!;
-    assert.equal(assessment.result?.disposition, maxUnfiledInput === 2 && maxChildren === 2 ? "cancelled" : undefined);
-  }
+  const selected = await reconcileSecretary(f.context, f.read(f.root));
+  assert.equal(selected.intake?.inputs[0]?.spec.origin, "source");
 });
 
 test("maxInput is inert and exactly-at-threshold material does not trigger organization", async t => {

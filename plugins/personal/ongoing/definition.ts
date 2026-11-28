@@ -3,7 +3,7 @@ import { equalResourceValue } from "../../../src/resource/value.ts";
 import { requireContentWriter } from "../context-write.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { requireProcessingRoot, requireTopic } from "../topic/ownership.ts";
-import { ONGOING_TYPE, OngoingSpecSchema, OngoingStatusSchema, followupInputId, type OngoingResource, type OngoingSpec, type OngoingStatus } from "./model.ts";
+import { nextCheckAfterRetention, nextCheckAfterDelivery, ONGOING_TYPE, OngoingSpecSchema, OngoingStatusSchema, followupInputId, type OngoingResource, type OngoingSpec, type OngoingStatus } from "./model.ts";
 
 function validateMatter(matter: OngoingResource, context: ResourceValidationContext) {
   if (matter.metadata.namespace !== "v1" || matter.metadata.owner || matter.metadata.deletionTimestamp)
@@ -26,6 +26,15 @@ export const OngoingDefinition: ResourceDefinition<OngoingSpec, OngoingStatus> =
     update(before, after, context) {
       // A version precondition protects related Input and Output writes without a new business decision.
       if (equalResourceValue(before.spec, after.spec) && equalResourceValue(before.status, after.status)) return;
+      // Delivery and its next default appointment share the same transaction, including crash recovery.
+      if (before.status.followupInputId && !after.status.followupInputId && !before.status.closure) {
+        const receipt = context.page<InputSpec, InputStatus>(INPUT_TYPE, { limit: 1,
+          matchIndex: { name: "followup", value: before.status.followupInputId } }).items[0];
+        const deliveredAt = receipt?.status.assess?.completedAt;
+        const nextCheckAt = receipt ? deliveredAt && nextCheckAfterDelivery(before, receipt, deliveredAt) : nextCheckAfterRetention(before);
+        if (nextCheckAt && equalResourceValue(before.spec, after.spec) && equalResourceValue({ ...after.status, followupInputId: undefined },
+          { ...before.status, followupInputId: undefined, nextCheckAt })) return;
+      }
       const id = followupInputId(before);
       if (after.status.followupInputId && before.status.followupInputId !== after.status.followupInputId) {
         const input = id && context.page<InputSpec, InputStatus>(INPUT_TYPE, { limit: 1, matchIndex: { name: "followup", value: id } }).items[0];

@@ -4,7 +4,6 @@ import { isRootTopic } from "../plugins/personal/topic/boundary.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { summaryText, prepareSummary } from "../plugins/personal/note/summary.ts";
 import { patchSummary } from "./summary-fixture.ts";
-import { committedStatus } from "./fixtures/resource-write.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
 import { workPhase } from "../plugins/personal/work/status.ts";
@@ -910,8 +909,8 @@ test("Weave uses a dedicated native session and commits grouping through its res
 });
 
 
-/** @case Native steer admission and business completion stay in the same invocation through the real Runner and SDK. */
-test("Aide steers immediate Input and independently completes both inputs within one Chief invocation", { timeout: 20_000 }, async t => {
+/** @case The Secretary seals a Deferred Batch while Chief is busy, then gives the next free turn to Immediate business. */
+test("Busy Chief finishes its turn while Secretary seals a Batch for later dispatch", { timeout: 20_000 }, async t => {
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   const fixture = await setup(t, (_request, index) => index === 0 ? { text: "Inspecting the first input", pause }
     : { text: "Handled internally" });
@@ -925,36 +924,23 @@ test("Aide steers immediate Input and independently completes both inputs within
   await submit("first", InputAttention.Normal);
   for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
   assert.equal(fixture.requests.length, 1);
-  // Concurrent consumption/status writes invalidate ten admission snapshots: exhaust one local retry budget, then requeue.
-  const resourceClient = aide.runtime.plugins.resourceClient.bind(aide.runtime.plugins);
-  let conflicts = 10;
-  t.mock.method(aide.runtime.plugins, "resourceClient", (instance: string) => {
-    const client = resourceClient(instance);
-    return { ...client, async commit(writes: readonly import("@compforge/aide-plugin").ResourceCommit[]) {
-      const admission = writes.find(w => "resource" in w && w.resource.kind === "Topic"
-        && (committedStatus(w)?.execution?.admissionRevision ?? 0) > 0);
-      if (admission && "resource" in admission && conflicts > 0)
-        await patchSummary(client, admission.resource, { summary: `Concurrent status ${conflicts--}` });
-      return client.commit(writes);
-    } };
-  });
+  for (let i = 0; i < 10; i++) await submit(`deferred-${i}`, InputAttention.Deferred);
   await submit("urgent", InputAttention.Immediate);
-  const uid = aide.topics.resource("me")!.metadata.uid;
-  for (let i = 0; i < 200 && !aide.topics.inputStore.get("urgent")!.status.assess?.executionId; i++) await Bun.sleep(10);
-  assert.ok(aide.topics.inputStore.get("urgent")!.status.assess?.executionId);
-  assert.equal(conflicts, 0);
-  assert.equal(aide.topics.resource("me")!.status.execution!.admissionRevision, 1);
+  const client = aide.runtime.plugins.resourceClient("personal");
+  const { BATCH_TYPE } = await import("../plugins/personal/batch/model.ts");
+  const batch = async () => (await client.list<unknown, { phase: string }>(BATCH_TYPE))[0];
+  for (let i = 0; i < 300 && (await batch())?.status.phase !== "ready"; i++) await Bun.sleep(10);
+  assert.equal((await batch())?.status.phase, "ready");
+  assert.equal(fixture.requests.length, 1);
+  assert.equal(aide.topics.inputStore.get("urgent")!.status.assess?.executionId, undefined);
   release(); await aide.settled();
   assert.deepEqual(aide.topics.get("me")!.pendingInputIds, []);
   const first = aide.topics.inputStore.get("first")!.status.assess!;
   const urgent = aide.topics.inputStore.get("urgent")!.status.assess!;
-  assert.ok(first.completedAt); assert.ok(urgent.completedAt); assert.equal(first.executionId, urgent.executionId);
-  const background = JSON.stringify((fixture.requests[1]!.messages as Array<{ role: string; content: unknown }>).filter(m => m.role === "user" && messageText(m.content).includes("<aide_background")));
-  assert.match(background, /Concurrent status 1/, "Chief sees concurrent summary updates at the steer boundary");
-  assert.equal(aide.invocations().filter(i => i.topicId === "me").length, 1);
-  const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
-  const admitted = [...state.harnessInputs.values()].find(i => i.delivery === "steer")!;
-  assert.equal(admitted.deliveryOutcome, "applied");
+  assert.ok(first.completedAt); assert.ok(urgent.completedAt); assert.notEqual(first.executionId, urgent.executionId);
+  assert.match(JSON.stringify(fixture.requests[1]!.messages), /urgent/);
+  assert.equal((await batch())!.status.phase, "completed");
+  assert.equal(aide.invocations().filter(i => i.topicId === "me").length, 3);
   assert.equal(aide.outputs().length, 0);
 });
 
@@ -1416,10 +1402,10 @@ test("Weave queues a review Input after busy Chief business without mixing tools
   assert.ok(aide.topics.inputStore.get("first")!.status.assess?.executionId);
 });
 
-/** @case One native loop changes provider-visible tools and rejects out-of-task assessments and stale tool names. */
-test("Chief switches Input tools inside one Pi loop when immediate business interrupts review", { timeout: 30_000 }, async t => {
+/** @case A reused native session scopes tools and Usage to each independently dispatched Input. */
+test("Chief selects tools and records Usage for successive executions on the same Pi session", { timeout: 30_000 }, async t => {
   const { Type } = await import("typebox");
-  const { INPUT_ORIGINS, BUSINESS_INPUT_ORIGINS } = await import("../plugins/personal/chief/agent/input-tools.ts");
+  const { BUSINESS_INPUT_ORIGINS } = await import("../plugins/personal/chief/agent/input-tools.ts");
   type Task = import("../plugins/personal/chief/agent/input-tools.ts").ChiefInputTask;
   let task: Task = { executionId: "review-run", origin: "aide:curate", inputs: [
     { id: "maintenance", origin: "aide:curate", text: "Review changed Notes" },
@@ -1429,7 +1415,7 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
   const fixture = await setup(t, (request, index) => {
     const names = (request.tools as { function: { name: string } }[]).map(tool => tool.function.name);
     assert.ok(!names.includes("write"), "task switches must retain caller tool restrictions");
-    if (index < 2) {
+    if (index < 3) {
       assert.ok(names.includes("maintenance_action")); assert.ok(names.includes("memory_add"));
       assert.ok(!names.includes("say")); assert.ok(!names.includes("bash"));
     } else {
@@ -1439,8 +1425,9 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
     }
     if (index === 0) return { tool: "say", args: {} };
     if (index === 1) return { tool: "maintenance_action", args: {} };
-    if (index === 2) return { tool: "maintenance_action", args: {} };
-    if (index === 3) return { tool: "say", args: {} };
+    if (index === 2) return { text: "Review complete" };
+    if (index === 3) return { tool: "maintenance_action", args: {} };
+    if (index === 4) return { tool: "say", args: {} };
     return { text: "Answered the immediate input", usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } };
   }, "chief");
   const result = () => ({ content: [{ type: "text" as const, text: "ok" }], details: {} });
@@ -1455,27 +1442,26 @@ test("Chief switches Input tools inside one Pi loop when immediate business inte
     { name: "maintenance_action", label: "Review", inputOrigins: ["aide:curate"], description: "Review notes",
       parameters: Type.Object({}), async execute() {
         reviewed++;
-        task = { ...task, inputs: [...task.inputs, { id: "business", origin: "channel", text: "Answer now" }] };
-        await session.steer('[aide-input:business]\nNew Input: {"inputId":"business"}');
         return result();
       } },
     { name: "say", label: "Say", inputOrigins: BUSINESS_INPUT_ORIGINS, description: "Answer business input",
-      parameters: Type.Object({}), async execute() { said++; task = { ...task, inputs: task.inputs.filter(i => i.id !== "business") }; return result(); } },
+      parameters: Type.Object({}), async execute() { said++; return result(); } },
   ] });
   session.setActiveToolsByName(session.getActiveToolNames().filter(name => name !== "write"));
   try {
     await session.prompt('Activation: {"inputId":"maintenance"}');
-    assert.equal(fixture.requests.length, 5);
+    task = { executionId: "business-run", origin: "channel", inputs: [{ id: "business", origin: "channel", text: "Answer now" }] };
+    await session.prompt("Answer now");
+    assert.equal(fixture.requests.length, 6);
     assert.equal(reviewed, 1); assert.equal(said, 1);
     const observed = [...usageStore.calls(0, Date.now(), { window: "24h", role: "chief" })];
     assert.deepEqual(observed.map(call => call.origin),
-      ["aide:curate", "aide:curate", "business", "business", "business"]);
+      ["aide:curate", "aide:curate", "aide:curate", "business", "business", "business"]);
     assert.equal(new Set(observed.map(call => call.session)).size, 1);
     assert.deepEqual(observed.filter(call => call.input !== null).map(call => [call.input, call.output]), [[10, 5]]);
     assert.deepEqual(switched, ["aide:curate", "channel"]);
     assert.match(JSON.stringify(fixture.requests[1]!.messages), /not found|unavailable|not available/i);
-    assert.match(JSON.stringify(fixture.requests[3]!.messages), /not found|unavailable|not available/i);
-    assert.ok(task.inputs.some(i => i.id === "maintenance"), "interruption does not acknowledge maintenance");
+    assert.match(JSON.stringify(fixture.requests[4]!.messages), /not found|unavailable|not available/i);
   } finally { session.dispose(); }
 });
 
@@ -1528,47 +1514,6 @@ test("Chief restores the same session with the new execution's Input tools", { t
     assert.match(transcript, /Current Input origin: channel/);
     assert.doesNotMatch(transcript, /Current Input origin: aide:curate/);
   } finally { resumed.dispose(); }
-});
-
-/** @case Queued admission alone cannot change tools; a delivered followUp switches even with a prior Immediate receipt unfinished. */
-for (const [initialOrigin, origin] of [["aide:curate", "source"], ["aide:curate", "aide:organize"], ["channel", "aide:organize"]] as const)
-test(`Chief changes tools only when Pi delivers ${origin} followUp after ${initialOrigin}`, { timeout: 20_000 }, async t => {
-  const { Type } = await import("typebox");
-  let task: import("../plugins/personal/chief/agent/input-tools.ts").ChiefInputTask = { executionId: "initial", origin: initialOrigin, inputs: [
-    { id: "initial", origin: initialOrigin, text: "Initial task" },
-  ] };
-  const action = origin === "source" ? "say" : "move_topic";
-  let reviewed = 0, said = 0;
-  const fixture = await setup(t, (_request, index) => {
-    if (index === 0) return { tool: "maintenance_action", args: {} };
-    if (index === 1) return { text: "Maintenance turn complete" };
-    if (index === 2) return { tool: action, args: {} };
-    return { text: "Business turn complete" };
-  }, "chief");
-  const session = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding: {
-    read: () => task, changed() {},
-  }, tools: [
-    { name: "maintenance_action", label: "Initial action", description: "Handle initial task", inputOrigins: [initialOrigin], parameters: Type.Object({}),
-      async execute() {
-        reviewed++;
-        task = { ...task, inputs: [...task.inputs, { id: "normal", initial: false, origin, text: "Normal business fact" }] };
-        await session.followUp('[aide-input:normal]\nNew Input: {"inputId":"normal"}');
-        return { content: [{ type: "text", text: "Reviewed" }], details: {} };
-      } },
-    { name: action, label: "Followup action", description: "Handle the followUp", inputOrigins: [origin], parameters: Type.Object({}),
-      async execute() { said++; return { content: [{ type: "text", text: "Accepted" }], details: {} }; } },
-  ] });
-  try {
-    await session.sendCustomMessage({ customType: "aide.input", content: "Review input", display: true,
-      details: { deliveryId: "initial", inputs: [{ id: "initial", origin: initialOrigin }] } }, { triggerTurn: true });
-    assert.ok(!session.sessionManager.getEntries().some(entry => entry.type === "compaction"));
-    assert.equal(fixture.requests.length, 4); assert.equal(reviewed, 1); assert.equal(said, 1);
-    const names = (index: number) => (fixture.requests[index]!.tools as { function: { name: string } }[]).map(t => t.function.name);
-    for (const index of [0, 1]) { assert.ok(names(index).includes("maintenance_action")); assert.ok(!names(index).includes(action)); }
-    for (const index of [2, 3]) { assert.ok(names(index).includes(action)); assert.ok(!names(index).includes("maintenance_action")); }
-    assert.doesNotMatch(JSON.stringify(fixture.requests[1]!.messages), /Normal business fact/);
-    assert.ok(JSON.stringify(fixture.requests[2]!.messages).includes(`Current Input origin: ${origin}`));
-  } finally { session.dispose(); }
 });
 
 test("Chief Summary tools edit only the owner of the admitted Input", async t => {

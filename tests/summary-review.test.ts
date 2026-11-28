@@ -18,7 +18,12 @@ function schedule(f: Awaited<ReturnType<typeof secretaryFixture>>) {
   const gate = () => f.aide.topics.resource("gate")!;
   const start = Math.floor(Date.parse(gate().metadata.creationTimestamp) / interval) * interval;
   return {
-    tick: (minutes: number) => checkSummary(f.context, gate(), start + minutes * 60_000),
+    tick: async (minutes: number) => {
+      const now = start + minutes * 60_000;
+      await checkSummary(f.context, gate(), now);
+      for (const root of [f.root(), await ensureDefaultTopic(f.resources)]) await checkSummary(f.context, gate(), now, root);
+      return (await checkSummary(f.context, gate(), now)).requeueAfterMs;
+    },
     requests: () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:summary"),
   };
 }
@@ -103,7 +108,7 @@ test("A business arrival during Summary selection wins the scheduling transactio
       await f.input("arrived", InputAttention.Immediate);
     return f.resources.commit(writes);
   } };
-  await checkSummary({ resources, logger: f.context.logger }, gate, due);
+  await checkSummary({ resources, logger: f.context.logger }, gate, due, f.root());
   assert.equal(s.requests().length, 0);
   assert.equal(f.aide.topics.resource("gate")!.status.summaryCheckAt, new Date(due).toISOString());
 });

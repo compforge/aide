@@ -1,99 +1,54 @@
-# Secretary
+# Secretary：为领域 Chief 选择下一件工作
 
-## 整体定位
+## 职责与一轮调度
 
-Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为可处理的待办，像秘书为老板安排工作日程。日程随资源事实变化持续更新，不绑定自然日。它决定何时准备哪些请求，业务判断与执行由 Chief 负责。
+每棵领域 Topic 树由 root 的 Chief 负责。秘书观察树里的 Input、Batch、Note 和 Work，在 Chief 能接单时，按当前事实选一件交给它。Chief 读取材料，判断要不要回复、推进工作或整理认识。Gate 有自己的对话投递方式。[Chief 的接纳与连续执行](chief.md#接纳与连续执行) · [Gate](gate.md)
 
-角色的本质是 Reconciler。Secretary 运行在 Topic 的具名 `secretary` Controller 中，独立于 Chief 的执行，因此 Chief 忙时仍可准备后续待办。它通过资源读写协作，不调用 Agent、不领取 Chief execution，也没有独立的 Secretary CRD 或会话。
+<a id="reconciler"></a>
 
-## 输入与产物
+1. **唤醒。** 资源变化、定时到期，或 root Topic 清除本轮执行状态，都会让秘书重新检查。
+2. **看闲忙。** 秘书重读 root 的 `status.execution`。已有执行时，Chief 继续手头的事，秘书可以独立封批、更新 Note 的容量信息。
+3. **选一件。** Chief 空闲时，秘书先看已经就绪的 Input 和 Batch，再检查 Ongoing 和领域维护需求。选中一个内部事项时，才根据当前材料创建对应的 Input。本轮没有合适的工作，就等下次唤醒。
 
-| 观察到的事实 | 准备的待办 |
-| --- | --- |
-| Deferred Input 的数量与最早等待时间达到阈值 | 创建独立 Batch，将兼容的原始 Input 归入固定批次 |
-| Topic 的直属未归集 Input、Work 或 child 数量超限 | 创建一条 `aide:organize` Input，请 Chief 一起整理主题结构和材料归属 |
-| Weave 结构版本变化或 Note 容量压力 | 创建 `aide:curate` Input，请 Chief 检查并维护认识 |
-| Chief 完成量达到阈值，或待回顾活动等待达到时限 | 创建 `aide:curate` Input；本轮覆盖请求创建时的完成水位 |
-| 静默检查到期且没有待办 | 只更新检查时间与退避，不创建 Input、不触发 Agent |
+例如，Chief 正在处理别的事，一条跟进交付的 Ongoing 到了 `nextCheckAt`。这时用户又发来一条普通 Input：“对方已经确认收货。”下轮秘书先递交这条消息。Chief 据此记录结论并关闭 Ongoing。再下一轮，秘书看到事项已关闭，这次到期检查就无需生成 `aide:followup`。[对应的调度用例](../../tests/topic-secretary.test.ts)
 
-每个普通 Topic 检查自己的直属容量；维护请求交给其当前 root Chief 处理。领域 root 负责子树认识维护和业务批次准备。Gate 的单聊与协调请求逐条研判。具体范围见[容量与维护请求](#容量与维护请求)和 [Gate](gate.md)。
+## Deferred 归组
 
-## 领域静默
+Chief 忙时，秘书仍可为它准备下一批材料。兼容的 Deferred Input 达到数量阈值，或同组最早一条等到时限，秘书就封一个 Batch。默认是 **10 条或 10 分钟**。即使只有一条也能按时封批，后来到达的 Input 不会推迟最早一条的期限。
 
-领域根 Topic 的 `status.phase` 取 `active` 或 `dormant`，覆盖整棵职责树。Channel、Source 和 Gate 转交的用户请求按原始到达时间更新 `lastInputAt`。用户主动补充 Ongoing 也算外部活动。秘书的内部 Input 和 Chief 的办理决定保持现有活动时间。
+封批固定本批成员，晚到的材料归入下一批。就绪的 Batch 保存在 CRD 中，等 Chief 空闲后与其他就绪事项一起参与选择。成员兼容条件、原子归组和恢复规则见 [Batch](input.md#batch)。
 
-距最后一次外部活动满 `topic.dormantAfterSeconds`（默认 900 秒），Chief 的执行结束，业务 Input 与 Batch 排空后，领域可以静默。有尚未投递的普通 Note 时，秘书可在当前活跃期结束前安排最后一批整理。静默期间暂停 Curate、Organize 和该领域负责的 Summary 复核。已承诺的 Ongoing 仍按计划跟进。执行中的业务可以接收新业务，例行维护等待独立的空闲轮次。仍在秘书处积攒的 Deferred 材料先按 Batch 策略归组。
+<a id="容量与维护请求"></a>
 
-外部 Input 唤醒领域后，在下一次 Chief prompt 前评估一次当前 Pi session 的上下文。达到 `topic.wakeCompactTokens`（默认 128000）时，Pi 生成历史摘要并按其近期消息预算保留原文。Chief 可按 ID 回读仍在职责树内的 Input。压缩使用现有 Usage 记录，失败时记录原因并继续处理原请求。进入静默本身不调用模型、不释放 session；长期空闲的 session 沿用原有回收策略。
+## Chief 空闲时如何选单
 
-## Note 维护
+秘书在同一 root 内按下表从上往下检查，选到一件便结束本轮。尚未选中的维护需求仍由相应的 Ongoing、Note 或 Topic 表达，下一轮重新判断。
 
-Secretary 合并领域内的梳理需求，并在开放 Ongoing 到期或收到新关联材料时递交 followup。Chief 创建 Ongoing 时保存核实时间，缺省为 1 小时后，之后可以通过 upsert_work 调整。curate 结合普通 Note、已有 Work 和后续证据复盘该领域的认识与责任。followup 围绕指定 Ongoing 核实未决问题，必要时私下询问 Me。[Note 梳理](note.md#梳理与提炼)、[Ongoing 核实与收尾](work.md#核实与收尾)
-
-### 摘要复核
-
-Secretary 每到整刻钟检查一次，从已有 Summary 或相关普通 Note 的 Topic、Person 和 Address 中选择最久未复核的对象，未复核对象优先。Topic 的责任 root 承接检查；Person 与 Address 由 default Chief 承接。只有该 Chief 当前没有执行、没有排队的 Input 或 Batch，才递交一条 `aide:summary`。忙就跳过当轮，下一个整刻钟照常检查。时钟保存在 Gate，重启只检查当前一轮。
-
-Summary 请求投递时记录对象的轮转时间 `summaryReviewedAt`；正文修订由 Note 的实际变更记录。Summary 的内容版本只随内容变化。判断标准见 [Note](note.md#事项归位与提炼回顾)。
-
-## Reconciler
-
-资源 Watch 唤醒 Secretary，周期协调补齐漏掉的通知与时间阈值。Secretary 从索引查询当前待办、Batch、Topic 结构和 Note 压力，去重已有请求，取消已过时的未接纳安排，再准备需要的新任务。检查时间、各类维护请求的身份与需求指纹、冷却及退避保存在 Topic 调度状态中。普通 Immediate／Normal Input 直接交给 Chief；Secretary 旁观处理事实，不是所有 Input 的前置关卡。
-
-### Deferred 归组
-
-当前 Batch 仅用于 Deferred Input。Secretary 按 `topic.deferred.count` 与 `maxWaitSeconds` 判断是否归组，保留各成员的来源、原 attention 和权限依据；Batch 按 Normal 优先级交给 Chief。Immediate、Normal、内部维护及显式 handoff 保持独立 Input。
-
-成员归组与 Batch 就绪在同一事务中提交。`Input.status.batchId` 是成员关系的唯一记录，`batchAt` 记录归组时间；Batch 创建并完成归组后，后到材料留待下一批。成员兼容性、准备中断、容量不足与保留规则由 [Batch](input.md#batch) 定义。
-
-### 容量与维护请求
-
-维护任务使用普通 Input：origin 标记请求类型，text 描述任务，curate 的 `observation.review` 保存请求时的 Chief 完成水位、结构通知版本和压力依据。创建请求时确定 Topic 归属；负责人分派随当前 Topic tree 收敛到 root。
-
-同一 Topic、同一维护 origin 的排队、执行和可重试请求共同参与去重。一轮完成后，后续周期或新变化产生新的 Input；已消失且尚未接纳的请求可取消。完整参数见[配置](../configuration.md#topic-消费策略)。
-
-每个 Topic 的 Secretary Reconcile 检查自己的直属容量，root 与非 root 使用相同机制。直属 Input 移入移出、完成或删除，以及 child 创建、删除和换 parent，会唤醒受影响节点；周期协调兜底。查询按索引读取至阈值加一，最多携带 8 条材料或 child 的标识，不为判断超限读取全部对象。
-
-| origin | 触发与目的 |
-| --- | --- |
-| aide:organize | 任一直属容量超限时，汇总 Input、Work、child 的计数与样本。所有超限都消失后可取消尚未接纳的议程 |
-| aide:followup | 跟进需要回应的事项；按开放 Ongoing 保存的 `checkAt` 一次性调度，核实具体问题或复核事项是否仍需跟进 |
-| aide:curate | 普通 Note 的改动达到批量或等待上限，或工作量、子摘要、结构与预算变化需要梳理；Chief 据此核对普通 Note 和相关 Task、Routine、Ongoing |
-
-内置请求复用 Input，status.topic 指向目标节点，未领取时 status.assess.topic 收敛到当前 root，领取后保留实际负责人。origin 决定 Chief 的工具与处理路径，text 描述任务。Secretary 统一准备 Curate／Followup／Organize，每个节点、每种 origin 最多一条未完成请求；可重试失败仍处理原 Input。创建与请求记账原子提交，结果与完成水位原子提交，无需二次结算。`maintenanceRequests` 保留请求身份、时间、需求指纹与尝试次数；`notes_changed` 按各 Note 的 `status.curateAt` 选取到期材料；其余触发的同一需求从 `capacityCooldownSeconds`（默认 60 秒）指数退避到 2 小时（基础冷却更长时保留基础冷却），新需求重新安排。已完成 Input 回收后仍可从 Topic 保留的事实继续调度。
-
-maxUnfiledInput 统计直属、无 topicKey、未删除的业务 Input，包含已研判材料；三类内置 Input 排除。maxInput 字段暂时保留，不参与策略。maxChildren 统计直属有效 child。归集到 child 后，该 child 同样检查阈值并请求 root 继续整理；已完成回执不重置。容量触发独立于静默回顾退避，执行前重查需求，已消失则直接完成请求。提示每轮至多处理 8 条材料或直属 child；这是 Agent 执行要求，不是工具调用次数硬配额，整体激活提示还受 contextChars 限制。
+| 观察对象 | 何时可以选 | 交给 Chief 的工作 |
+| --- | --- | --- |
+| 已就绪的 Input 或 Batch | 有可投递的材料，或已明确投递失败的材料到了重试时间。Immediate Input 优先，其次是可投递的 Batch，再是其他就绪 Input | 一条原 Input 或一个已封的 Batch |
+| 开放的 Ongoing | 已到核实时间，或收到尚待处理的关联材料 | `aide:followup`，带事项及相关材料，由 Chief 核实现状、决定下一步。[核实与收尾](work.md#核实与收尾) |
+| 有变化的普通 Note | 待整理材料达到批量或最早等待时限；领域进入静默前也可以做一次收尾整理 | `aide:curate`，从这批 Note 出发整理，并核对相关 Work。[Note 梳理](note.md#梳理与提炼) |
+| 子树中各 Topic 的直属材料 | 某个 Topic 的未归集 Input、受托 Work 或直属子 Topic 数量超限 | `aide:organize`，带上超限的 Topic 和材料，请 Chief 调整归属 |
+| 整个领域的认识 | Chief 的工作量达到回顾条件、Weave 通知结构变化，或 Note 数量与篇幅需要整理 | `aide:curate`，带本轮回顾依据，请 Chief 结合已有 Note 和 Work 重新梳理 |
+| Topic、Person 或 Address 的摘要 | 到了全局复核时刻，轮到的对象有相关材料，且负责的 Chief 空闲、没有排队工作 | `aide:summary`，复核这个对象下次被读到时应提供的默认背景，按需修订。[Summary Note](note.md#作为-summary-的-note) |
 
 ### 工作量与时间窗口
 
-`Topic.status.chiefWorkload` 记录 Chief 已完成量与最近 Curate 覆盖的水位。每成功处理一个独立 Input 或 Batch 计一次，包括 Curate、Followup、Organize；Batch 内有多少成员都只计一次，成员结果投影不重复计数。Task／Routine 的执行、状态和报告不计入 Chief 工作量；如果形成了新的协调 Input，并由 Chief 完成，则按一次计数。
+一次成功投递的独立 Input 或 Batch 给 Chief 记一次工作量。默认累计 **10 次**，或最早一项尚未回顾的活动已等 **15 分钟**，秘书就可以安排一次 Curate。请求只覆盖选中时的完成水位，此后的活动留给下轮回顾。一次 Curate 自身计入完成量，单靠它不会启动下一次定时回顾。
 
-默认累计 10 次完成触发 Curate；不足 10 次时，从最早尚未回顾的活动等待 15 分钟触发，后续完成不推迟该时间。Curate 自身仍计入下一轮数量，但不独自开启定时回顾需求，避免空闲时持续自我触发。请求记录创建时的完成水位，完成事务只确认这一水位，并保留请求后到来的活动。计数和时间窗口随 Topic 持久化，不依赖已完成 Input 的保留或历史扫描。
+秘书按持久化的活动时间和当前配置计算下次检查。连续几次没有回顾需求时，可以拉长检查间隔；新的外部 Input 仍能通过资源变化及时唤醒秘书。同一容量问题重复出现时也有冷却时间。配置开关、阈值与退避策略见 [Topic 定时协调与回顾](../configuration.md#topic-定时协调与回顾)。
 
-Secretary 根据 Weave 通知、工作量和 Note 本身的变化或容量压力准备维护请求。父子 Summary 独立修订。压力指纹使用材料身份、正文和预算，单纯改名沿用原退避。
+### 摘要复核
 
-领域仍活跃且没有维护需求时，Secretary 的回顾检查默认按 15、30、60、120 分钟退避；资源 Watch 和短周期 tick 仍保障新 Input 与阈值响应。空检查不触发 Agent，新的业务到达恢复检查节奏。
+Gate 保存全局的 15 分钟时钟。每到整刻钟，优先选有 Summary 或相关普通 Note、且尚未复核的对象，其次选最久未复核的对象。Topic 交给当前领域的 root Chief，Person 和 Address 交给默认领域的 Chief。负责的 Chief 忙或有待办时，跳过本次，下个整刻钟重新选择。复核完成可以保留原文。[摘要复核实现](../../plugins/personal/secretary/summary.ts)
 
-### 协调周期与配置变更
+## 一轮结束与领域静默
 
-Topic 配置区分 `trigger.intervalSeconds`（默认 60 秒，固定唤醒 Reconcile）和 `review`（业务回顾策略）。单个 Topic 的 `spec.review.enabled` 默认开启；关闭只停止后台回顾，不停止协调、业务输入或结构通知。Chief Harness 不持有业务调度配置。
+材料成功进入 Chief 上下文时，运行时记录投递回执；Chief 结束整轮执行时，root 才清除 `status.execution`。前者确认这件材料已经送达，后者唤醒秘书选择下一件。因此，即便材料已经送达，Chief 仍然可能在使用工具处理它。投递结果不明确时，沿用原记录核实。[Chief 的完成与重试](chief.md#完成与重试)
 
-回顾截止时间从持久化事实与当前策略计算。调整配置后，下一次协调使用新策略，不从重启重新计时、不补跑错过的周期。Chief 执行结束只保存执行事实，不重置 Secretary 调度状态。明确未投递的 Input／Batch 可以再次调度。执行中断时先核对原生会话，结果不明的投递留待核实。关闭回顾或调整责任边界时，明确重置静默检查状态。
+### 领域静默
 
-维护 Input 创建即绑定目标 Topic，无需 Route 模型；请求身份、冷却及 Curate 覆盖快照原子保存。Chief 使用 origin 选择工具，按需执行相应操作；系统 Input 不刷新 `lastInputAt`、不新增授权。日志区分请求生成、冷却等待、无事退避与执行结果，保留 origin、Topic、请求身份、触发原因与下一次检查时间。
+**空闲**描述 Chief 此刻能否接单，**静默**描述整棵领域树是否还需要例行维护。外部活动停止默认 15 分钟、业务待办清空且 Chief 空闲后，秘书可为本段活动安排最后一批 Note 整理，然后让 root 进入 `dormant`。静默期间暂停 Curate、Organize 和 Summary，已承诺的 Ongoing 仍按计划跟进。
 
-## 与 Chief 及其它角色协作
-
-Chief Reconcile 关注抽到的非 Deferred Input／Batch，按其 origin、attention 和权限选择工具并触发 Agent，把当前待办处理好。Secretary 关注更多资源事实，它的工作产物是新的 Input 或就绪 Batch。Chief 使用 Agent 作判断；运行时将投递回执、Chief 工作量与本次 Curate 覆盖水位在同一事务中提交。Chief 不决定下一次维护何时发生，也不在执行结束时重置秘书的退避。
-
-Secretary 观察 Chief 已持久化的完成事实，后续需求产生新 Input。结果写入与重试由 [Chief](chief.md#完成与重试) 负责，Batch 成员结果由 Input Reconcile 投影；这些完成路径无需秘书再次确认。
-
-Route 负责初始 Topic 归属，Weave 负责 Topic 之间的组织关系，Task／Routine 负责持续办理。Secretary 以这些角色留下的资源事实准备任务，角色之间不直接触发彼此的 Agent。完整流转见 [Personal](README.md#角色与协作) 和 [Input](input.md#路由投递与办理)。
-
-## 实现入口
-
-- [Secretary Reconcile](../../plugins/personal/secretary/reconcile.ts)：待办准备、空检查与过时请求取消。
-- [Batch 准备](../../plugins/personal/secretary/batching.ts)：Deferred 归组与未接纳 Batch 协调。
-- [维护请求](../../plugins/personal/secretary/input.ts)与[容量检查](../../plugins/personal/secretary/maintenance.ts)：请求去重、触发证据与准备阶段冷却。
-- [Chief 投递事务](../../plugins/personal/chief/delivery.ts)同时提交投递回执和[工作量记录](../../plugins/personal/chief/input-outcome.ts)。
-- [角色注册](../../plugins/personal/plugin.ts)与[协作测试](../../tests/topic-secretary.test.ts)：并行协调、完成与恢复边界。
+新的外部 Input 会唤醒领域，包括用户主动补充的 Ongoing 信息。内部维护 Input 保留原有的外部活动时间。唤醒后，Chief 在处理新材料前按上下文用量决定是否压缩会话。[Chief 的上下文组织](chief.md#上下文组织与优化) · [唤醒时的会话处理](../../plugins/personal/chief/agent/wake.ts)

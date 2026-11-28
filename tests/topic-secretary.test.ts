@@ -4,16 +4,17 @@ import { BATCH_TYPE } from "../plugins/personal/batch/model.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { secretaryFixture } from "./secretary-fixture.ts";
-import { reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
+import { prepareSecretary, reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
 import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 
-test("Chief ignores unprepared Deferred; Secretary produces a batch without invoking Harness", async t => {
+test("Secretary seals a ready Batch during an active Chief turn and selects it after release", async t => {
   const f = await secretaryFixture(t); await f.input("a"); await f.input("b");
-  await reconcileChief(f.context, f.execution(), f.root(), f.policy);
-  assert.equal(f.calls(), 0); assert.equal(f.aide.topics.inputStore.list().length, 2);
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await f.resources.patchStatus(f.root(), { execution: { id: "busy", startedAt: new Date().toISOString() } });
+  await prepareSecretary(f.context, f.root(), f.policy);
+  assert.equal((await reconcileSecretary(f.context, f.root(), f.policy)).intake, undefined);
+  await f.resources.patchStatus(f.root(), { execution: null });
   assert.equal(f.calls(), 0); assert.equal((await f.resources.list(BATCH_TYPE)).length, 1);
   await reconcileChief(f.context, f.execution(), f.root(), f.policy); assert.equal(f.calls(), 1);
 });
@@ -45,13 +46,16 @@ test("Maintenance remains an independent Input behind ordinary business", async 
 });
 
 // @case Structure notification is acknowledged only by successful review, but failures still back off.
-test("Secretary prepares while Chief is busy and failed structure review does not hot-loop", async t => {
+test("Secretary defers preparation while Chief is busy and failed structure review does not hot-loop", async t => {
   const f = await secretaryFixture(t);
   await f.resources.patchStatus(f.root(), { execution: { id: "busy", startedAt: new Date().toISOString() }, weaveRevision: 1 });
   await reconcileSecretary(f.context, f.root(), f.policy);
   assert.equal(f.calls(), 0);
+  assert.equal(f.aide.topics.inputStore.list().length, 0);
+  await f.resources.patchStatus(f.root(), { execution: null });
+  await reconcileSecretary(f.context, f.root(), f.policy);
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
-  assert.ok(review.spec.observation?.review); assert.ok(f.root().status.maintenanceRequests?.["aide:curate"]);
+  assert.ok(review.spec.observation?.review); assert.ok(f.root().status.maintenanceChecks?.["aide:curate"]);
   await f.resources.patchStatus(f.root(), { execution: null });
   await reconcileChief(f.context, f.execution("failure", async () => { throw new Error("provider failed"); }), f.root(), f.policy);
   await reconcileSecretary(f.context, f.root(), f.policy);
@@ -233,7 +237,8 @@ test("Unchanged organization pressure backs off instead of reissuing every base 
   const advance = deadlineClock(t);
   f.policy.maxUnfiledInput = 1;
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
-  await reconcileChief(f.context, f.execution("business"), f.root(), f.policy);
+  await reconcileChief(f.context, f.execution("first"), f.root(), f.policy);
+  await reconcileChief(f.context, f.execution("second"), f.root(), f.policy);
   const reviews = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize");
   for (const round of [1, 2]) {
     await reconcileSecretary(f.context, f.root(), f.policy);
@@ -243,7 +248,7 @@ test("Unchanged organization pressure backs off instead of reissuing every base 
   }
   await reconcileSecretary(f.context, f.root(), f.policy);
   assert.equal(reviews().length, 2, "second unchanged attempt waits 120 seconds");
-  assert.equal(f.root().status.maintenanceRequests?.["aide:organize"]?.attempts, 2);
+  assert.equal(f.root().status.maintenanceChecks?.["aide:organize"]?.attempts, 2);
   advance(61_000);
   await reconcileSecretary(f.context, f.root(), f.policy);
   assert.equal(reviews().length, 3);
@@ -285,18 +290,21 @@ test("Secretary request creation retries a concurrent Chief completion without l
 
 test("Maintenance backoff reaches two hours even with a one-second base cooldown", async t => {
   const f = await secretaryFixture(t), advance = deadlineClock(t);
+  f.policy.review.idleSeconds = 10800;
+  f.policy.review.backoff = null;
   f.policy.dormantAfterSeconds = 10800;
   f.policy.maxUnfiledInput = 1; f.policy.capacityCooldownSeconds = 1;
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
-  await reconcileChief(f.context, f.execution("business"), f.root(), f.policy);
+  await reconcileChief(f.context, f.execution("first"), f.root(), f.policy);
+  await reconcileChief(f.context, f.execution("second"), f.root(), f.policy);
   await reconcileSecretary(f.context, f.root(), f.policy);
   await reconcileChief(f.context, f.execution("organize"), f.root(), f.policy);
-  const request = f.root().status.maintenanceRequests!["aide:organize"]!;
-  await f.resources.patchStatus(f.root(), { maintenanceRequests: { "aide:organize": { ...request, attempts: 14 } } });
+  const request = f.root().status.maintenanceChecks!["aide:organize"]!;
+  await f.resources.patchStatus(f.root(), { maintenanceChecks: { "aide:organize": { ...request, attempts: 14 } } });
   const count = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize").length;
   advance(7199_000); await reconcileSecretary(f.context, f.root(), f.policy); assert.equal(count(), 1);
   advance(2000); await reconcileSecretary(f.context, f.root(), f.policy); assert.equal(count(), 2);
-  assert.equal(f.root().status.maintenanceRequests!["aide:organize"]!.attempts, 14);
+  assert.equal(f.root().status.maintenanceChecks!["aide:organize"]!.attempts, 14);
 });
 
 test("inactive domain sleeps without inference, follows up while dormant, and wakes on external arrival", async t => {
@@ -318,4 +326,23 @@ test("inactive domain sleeps without inference, follows up while dormant, and wa
   assert.equal(f.root().status.phase, "active");
   assert.equal(f.root().status.compactOnWake, true);
   assert.equal(f.calls(), 1);
+});
+
+
+test("Business closes a due Ongoing before the Secretary ever creates a followup", async t => {
+  const { readOngoing, upsertOngoing } = await import("../plugins/personal/ongoing/service.ts");
+  const f = await secretaryFixture(t);
+  await f.resources.patchStatus(f.root(), { execution: { id: "setup", startedAt: new Date().toISOString() } });
+  const work = await upsertOngoing(f.resources, f.root(), { title: "Await delivery confirmation", checkAt: new Date(0).toISOString() }, "setup");
+  await f.input("confirmed", InputAttention.Normal);
+  assert.equal((await reconcileSecretary(f.context, f.root(), f.policy)).intake, undefined);
+  await f.resources.patchStatus(f.root(), { execution: null });
+  await reconcileChief(f.context, f.execution("close", async () => {
+    await deliverInput(f.resources, f.root(), "close", "confirmed");
+    const current = await readOngoing(f.resources, f.root(), work.id);
+    await upsertOngoing(f.resources, f.root(), { ongoingId: work.id, version: current.metadata.resourceVersion, outcome: "User confirmed delivery" }, "close");
+  }), f.root(), f.policy);
+  assert.ok((await readOngoing(f.resources, f.root(), work.id)).status.closure);
+  assert.equal((await reconcileSecretary(f.context, f.root(), f.policy)).intake, undefined);
+  assert.ok(!f.aide.topics.inputStore.list().some(i => i.spec.origin === "aide:followup"));
 });
