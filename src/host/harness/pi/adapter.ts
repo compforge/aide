@@ -9,7 +9,7 @@ import { unsupportedPromptBlocks } from "../adapter.ts";
 import type { LogSink } from "../../logging.ts";
 
 /** The composition root binds tools; the adapter only speaks Pi's session API. */
-export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner"> & Partial<Pick<AgentSession, "steer" | "followUp" | "clearQueue" | "sendCustomMessage" | "isStreaming">> & { preparePrompt?(): Promise<void> };
+export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner"> & Partial<Pick<AgentSession, "steer" | "followUp" | "clearQueue" | "sendCustomMessage" | "isStreaming">> & { handlePrompt?(): Promise<boolean> };
 export type PiSessionFactory = (options: { cwd: string; sessionId?: string }) => Promise<PiSession>;
 interface Turn {
   steering: Map<string, string | undefined>;
@@ -126,10 +126,13 @@ export class PiAdapter implements Harness {
     session.active = turn;
     this.log("Pi turn accepted", turn.id);
     // Admission precedes execution; subsequent failures must reach the event stream.
-    turn.preparing = !!session.native.preparePrompt;
+    turn.preparing = !!session.native.handlePrompt;
     turn.done = Promise.resolve().then(async () => {
       try {
-        if (!turn.cancelled) await session.native.preparePrompt?.();
+        if (!turn.cancelled && await session.native.handlePrompt?.()) {
+          turn.settled = { reason: "end_turn" };
+          return;
+        }
       } finally { turn.preparing = false; }
       if (turn.cancelled) return;
       if (message) return session.native.sendCustomMessage!(message, { triggerTurn: true });

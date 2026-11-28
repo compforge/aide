@@ -15,7 +15,7 @@ export enum InputAttention {
 }
 
 export const BUSINESS_INPUT_ORIGINS = ["channel", "source", "chief", "aide:handoff"] as const;
-const maintenanceOrigins = ["aide:curate", "aide:followup", "aide:organize", "aide:summary"] as const;
+const maintenanceOrigins = ["aide:curate", "aide:followup", "aide:organize", "aide:summary", "aide:stow"] as const;
 export const INPUT_ORIGINS = [...BUSINESS_INPUT_ORIGINS, ...maintenanceOrigins] as const;
 export type InputOrigin = typeof INPUT_ORIGINS[number];
 export const isInternalInput = (input: Pick<InputSpec, "origin">): boolean =>

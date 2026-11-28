@@ -49,7 +49,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
       }
       return;
     }
-    if (current.kind === "Topic" && /Chief is dormant|version conflict/.test(String(error))) return;
+    if (current.kind === "Topic" && /version conflict/.test(String(error))) return;
     throw error;
   }
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", inputIds, executionId: execution.executionId } });
@@ -104,7 +104,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
       const released = await finalizeExecution(context, current, execution.executionId, current.kind === "Topic" && completed ? "" : error, failure);
       if (released?.sessionId) {
         try {
-          const closed = await execution.verbs.harness({ operation: "close", ...released, sessionId: released.sessionId, timeoutMs: 30_000 });
+          const closed = await execution.verbs.harness({ operation: "close", harness: released.harness, sessionId: released.sessionId, timeoutMs: 30_000 });
           if (closed.state !== "success" || closed.value.outcome !== "accepted") throw new Error(`Could not close failed Agent: ${closed.state}`);
         } catch (cause) {
           context.logger.warn("Failed Agent runtime cleanup failed", { attributes: { resourceUid: current.metadata.uid,

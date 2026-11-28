@@ -22,6 +22,7 @@ export async function secretaryFixture(t: TestContext) {
   const policy = topicPolicy({ deferred: { count: 2, maxWaitSeconds: 600 } });
   const context = { resources, instance: { config: { topic: policy } }, logger: { info() {}, warn() {}, error() {} } } as unknown as PluginContext;
   const root = () => aide.topics.resource("root")!;
+  await resources.patchStatus(root(), { lastInputAt: root().metadata.creationTimestamp });
   const input = async (id: string, attention = InputAttention.Deferred, origin: InputOrigin = "source", originId = "fixture", extra: Partial<InputSpec> = {}) => {
     const item = await aide.topics.submit(id, { topicId: "root", origin, originId, attention, text: `evidence ${id}`, ...extra });
     await routeTo(resources, root().metadata, item);

@@ -34,6 +34,7 @@ export async function saveAgent(resources: ResourceClient, owner: Readonly<LoopR
   for (let attempt = 0; ; attempt++) {
     const current = await resources.get<unknown, LoopStatus>(resourceRef(owner));
     if (!current || current.metadata.uid !== owner.metadata.uid || current.metadata.deletionTimestamp || current.status.execution?.id !== executionId) throw new Error("Agent owner is no longer active");
+    if (current.status.agent?.harness === agent.harness && current.status.agent?.sessionId === agent.sessionId) return;
     try { await patchStatus(resources, current, { agent }); return; }
     catch (error) { if (attempt >= 8 || !String(error).includes("version conflict")) throw error; }
   }
@@ -48,7 +49,7 @@ export async function prepareAgent(resources: ResourceClient, execution: Reconci
     if (policy.state !== "success") throw new Error(`Could not select Topic session: ${policy.state === "failure" ? policy.error ?? "failure" : policy.state}`);
     startNew = policy.value.startNew;
   }
-  if (!startNew && previous?.harness === harness && previous.sessionId) return previous;
+  if (!startNew && previous?.harness === harness && previous.sessionId) return { harness, sessionId: previous.sessionId };
   const created = await execution.verbs.harness({ operation: "create", harness, timeoutMs: 30_000 });
   if (created.state !== "success" || created.value.outcome !== "accepted" || !created.agent?.sessionId) throw new Error("Continuous agent requires a native recovery reference before prompt");
   try { await saveAgent(resources, owner, execution.executionId, created.agent); }

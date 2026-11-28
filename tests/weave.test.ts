@@ -261,7 +261,8 @@ test("Root Chief admits urgent and observed business as separate bounded tasks w
 test("Unfinished synthesis retries one review Input without refreshing business activity", async t => {
   const f = fixture(t); await f.initialize();
   const a = await ensureSourceTopic(f.resources, "retry:a", "A"), b = await ensureSourceTopic(f.resources, "retry:b", "B");
-  await f.group(a, b);
+  const lastInputAt = new Date().toISOString();
+  await f.group(await f.resources.patchStatus(a, { lastInputAt }), b);
   const root = f.aide.topics.list().find(t => isRootTopic({ spec: t }))!;
   await patchSummary(f.resources, f.refresh(a), { summary: "Changed after grouping" });
   let prompts = 0;
@@ -281,6 +282,7 @@ test("Unfinished synthesis retries one review Input without refreshing business 
   await reconcileSecretary(f.context, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 2);
+  assert.equal(f.aide.topics.resource(root.id)!.status.lastInputAt, lastInputAt);
   assert.equal(f.aide.topics.resource(root.id)!.status.maintenanceChecks?.["aide:curate"]?.attempts, 1);
   assert.equal(f.aide.topics.inputStore.list().length, 1);
   assert.equal(f.aide.topics.inputStore.list()[0]!.metadata.uid, pending.metadata.uid);

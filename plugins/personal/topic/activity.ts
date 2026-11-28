@@ -1,26 +1,20 @@
-import type { ResourceValidationContext } from "@compforge/aide-plugin";
-import { BATCH_TYPE } from "../batch/model.ts";
-import { INPUT_TYPE, isInternalInput, type InputSpec, type InputStatus } from "../input/model.ts";
-import { TOPIC_TYPE, type TopicResource, type TopicStatus } from "./model.ts";
-import { topicSubtree } from "./tree.ts";
-import { isRootTopic } from "./boundary.ts";
+import type { InputSpec } from "../input/model.ts";
+import type { TopicResource, TopicStatus } from "./model.ts";
+import type { TopicPolicy } from "./config.ts";
 
 export const externalInput = (spec: Pick<InputSpec, "origin">) =>
   spec.origin === "channel" || spec.origin === "source" || spec.origin === "aide:handoff";
 
-export function queuedBusiness(topic: TopicResource, context: ResourceValidationContext): boolean {
-  const pending = (name: string, uid: string) => context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name, value: uid } })
-    .some(input => !isInternalInput(input.spec));
-  return pending("assignedPending", topic.metadata.uid) || !!context.list(BATCH_TYPE, { matchIndex: { name: "open", value: topic.metadata.uid } }).length
-    || topicSubtree(topic, parent => context.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE, {
-      matchIndex: { name: "parent", value: parent.metadata.uid } })).some(t => pending("unassigned", t.metadata.uid));
+/** Only external arrivals open or extend a domain's maintenance window. */
+export function inWorkWindow(topic: TopicResource | undefined, policy: TopicPolicy, now = Date.now()): boolean {
+  const last = topic?.status.lastInputAt;
+  return !!last && now < Date.parse(last) + policy.workWindowSeconds * 1000;
 }
 
 /** @spec External arrivals wake the domain. Replaying or filing older evidence preserves the latest arrival.
- * @link docs/personal/secretary.md#领域静默
+ * @link docs/personal/secretary.md#工作窗口
  */
 export function externalActivity(topic: TopicResource, at: string): Partial<TopicStatus> {
   const lastInputAt = topic.status.lastInputAt && topic.status.lastInputAt > at ? topic.status.lastInputAt : at;
-  if (!isRootTopic(topic)) return { lastInputAt };
-  return { lastInputAt, phase: "active", ...(topic.status.phase === "dormant" ? { compactOnWake: true } : {}) };
+  return { lastInputAt };
 }

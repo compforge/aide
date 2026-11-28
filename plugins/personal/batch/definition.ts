@@ -15,7 +15,7 @@ function canEvict(batch: Batch, context: ResourceValidationContext) {
     && membersInTransaction(context, batch).every(i => deliveryFinished(i.status.assess));
 }
 export const BatchDefinition: ResourceDefinition<BatchSpec, BatchStatus> = {
-  type: BATCH_TYPE, indexVersion: 2,
+  type: BATCH_TYPE, indexVersion: 3,
   schema: { spec: z.object({ topic: ResourceRefSchema, attention: z.literal(InputAttention.Normal), oldestAt: z.iso.datetime() }).strict(),
     status: z.object({ phase: z.enum(["preparing", "ready", "running", "completed", "failed", "cancelled"]), assess: ReceiptSchema.optional() }).strict() },
   validator: {
@@ -56,10 +56,8 @@ export const BatchDefinition: ResourceDefinition<BatchSpec, BatchStatus> = {
     open: r => !r.metadata.deletionTimestamp && !batchFinished(r) ? [r.spec.topic.uid] : [],
     active: r => !r.metadata.deletionTimestamp && r.status.phase === "running" ? [r.spec.topic.uid] : [],
     deliveryExecution: r => r.status.assess?.executionId ? [r.status.assess?.executionId] : [] },
-  orderedIndexes: { ready: r => !r.metadata.deletionTimestamp && r.status.phase === "ready" && !r.status.assess?.errorAt
-    ? [{ value: r.spec.topic.uid, order: r.spec.oldestAt }] : [],
-    retry: r => !r.metadata.deletionTimestamp && r.status.phase === "ready" && r.status.assess?.errorAt
-      ? [{ value: r.spec.topic.uid, order: r.status.assess.errorAt }] : [] },
+  orderedIndexes: { ready: r => !r.metadata.deletionTimestamp && r.status.phase === "ready"
+    ? [{ value: r.spec.topic.uid, order: r.metadata.creationTimestamp }] : [] },
   retention: { collectOnRelease: true, releasedAt: r => r.status.assess?.completedAt ?? r.status.assess?.errorAt, canEvict,
     references: r => batchFinished(r) ? [] : [r.spec.topic.uid] },
   printer: { describe: r => `Batch ${r.metadata.name} (${r.status.phase})\nTopic: ${r.spec.topic.name}\nAttention: ${r.spec.attention}\nOldest input: ${r.spec.oldestAt}\n${r.status.assess?.result?.summary ?? r.status.assess?.lastError ?? ""}`,

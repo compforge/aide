@@ -9,6 +9,7 @@ import { isProcessingRoot } from "../topic/boundary.ts";
 export async function preparedInputs(resources: ResourceReader, owner: Readonly<TopicResource>, limit = 10, businessOnly = false, retryDelayMs = 60_000) {
   if (!isProcessingRoot(owner)) return [];
   const result: Input[] = [];
+  // Stow is selected separately, after considering fresh maintenance demand.
   const queues = [{ name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, InputAttention.Immediate]) },
     { name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, InputAttention.Normal]) },
     ...(["aide:organize", "aide:followup", "aide:curate", "aide:summary"] as const).map(origin => ({ name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, origin]) }))];

@@ -16,15 +16,12 @@ export interface TopicStatus extends ResourceContext {
   assignmentRefresh?: { version: string; cursor: string; complete: boolean };
   conditions?: import("../conditions.ts").Condition[];
   organization?: import("./ref.ts").Organization;
-  phase?: "active" | "dormant";
-  compactOnWake?: boolean;
-  closeoutFor?: string;
   lastInputAt?: string;
   /** Notification progress belongs to the Topic, not to its Input material. */
   weaveRevision?: number;
   notifiedWeaveRevision?: number;
   lastError?: string | null;
-  agent?: import("@compforge/aide-plugin").AgentStatus;
+  agent?: import("@compforge/aide-plugin").AgentStatus & { promptTokens?: number; stowInputId?: string };
   chiefWorkload?: import("./workload.ts").ChiefWorkload;
   /** Secretary retains request identity and no-progress backoff independently of Input retention. */
   maintenanceChecks?: Partial<Record<"aide:curate" | "aide:organize", { checkedAt: string; fingerprint: string; attempts: number }>>;

@@ -1,4 +1,5 @@
-import { settleDomain } from "./dormancy.ts";
+import { inWorkWindow } from "../topic/activity.ts";
+import { selectStow } from "./stow.ts";
 import { checkSummary } from "./summary.ts";
 import { selectOngoing } from "./ongoing.ts";
 import { readTopicSubtree } from "../topic/tree.ts";
@@ -42,28 +43,20 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
   let next = policy.trigger.intervalSeconds * 1000;
   let topic = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(initial));
   if (!topic || topic.metadata.deletionTimestamp || topic.status.execution || !isRootTopic(topic)) return { requeueAfterMs: next };
+  const open = inWorkWindow(topic, policy);
   const schedule = idleReviewSchedule(topic, policy.review);
-  if (Object.keys(schedule.patch).length) topic = await context.resources.patchStatus(topic, schedule.patch);
-  const ready = await preparedIntake(context.resources, topic, false, policy.trigger.intervalSeconds * 1000);
+  if (open && Object.keys(schedule.patch).length) topic = await context.resources.patchStatus(topic, schedule.patch);
+  const ready = await preparedIntake(context.resources, topic, !open, next);
   if (ready.inputs.length) return { intake: ready, requeueAfterMs: next };
+  if (!open) return { requeueAfterMs: next };
   const topics = await readTopicSubtree(context.resources, resourceRef(topic));
   const followup = await selectOngoing(context, topics, policy);
   next = Math.min(next, followup.requeueAfterMs);
   if (followup.input) return { intake: { inputs: [followup.input] }, requeueAfterMs: next };
-  if (topic.status.phase === "dormant") return { requeueAfterMs: next };
-  const since = topic.status.lastInputAt ?? topic.metadata.creationTimestamp;
-  const remaining = Date.parse(since) + policy.dormantAfterSeconds * 1000 - Date.now();
-  if (remaining <= 0) {
-    const input = await settleDomain(context, topic, policy, since);
-    return { intake: input ? { inputs: [input] } : undefined, requeueAfterMs: next };
-  }
-  if (!topic.status.phase) {
-    topic = await context.resources.patchStatus(topic, { phase: "active" }, { resourceVersion: topic.metadata.resourceVersion });
-  }
   const pending = await context.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, {
     matchIndex: { name: "pendingCuration", value: topic.metadata.uid }, direction: "asc", limit: 1 });
   if (pending.items[0]) {
-    const result = await prepareNoteMaintenance(context, pending.items[0], policy, Date.now(), false, topic.metadata.uid);
+    const result = await prepareNoteMaintenance(context, pending.items[0], policy, Date.now(), topic.metadata.uid);
     if (result?.input) return { intake: { inputs: [result.input] }, requeueAfterMs: next };
     if (result) next = Math.min(next, result.requeueAfterMs);
   }
@@ -99,11 +92,12 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
   }
   const gate = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(topic.spec.parentRef!);
   if (gate) {
-    const summary = await checkSummary(context, gate, Date.now(), topic);
+    const summary = await checkSummary(context, gate, Date.now(), topic, policy);
     if (summary.input) return { intake: { inputs: [summary.input] }, requeueAfterMs: next };
     next = Math.min(next, summary.requeueAfterMs);
   }
-  return { requeueAfterMs: Math.min(next, remaining) };
+  const stow = await selectStow(context, topic, policy);
+  return { requeueAfterMs: next, intake: stow ? { inputs: [stow] } : undefined };
 }
 
 /** @spec Deferred aggregation follows material count and oldest arrival even during an active Chief execution.
@@ -111,7 +105,7 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
  */
 export async function prepareSecretary(context: PluginContext, topic: TopicResource, policy: TopicPolicy) {
   if (topic.metadata.deletionTimestamp) return;
-  if (isGateTopic(topic)) return checkSummary(context, topic);
+  if (isGateTopic(topic)) return checkSummary(context, topic, Date.now(), undefined, policy);
   await refreshNotePressure(context, topic);
   if (isRootTopic(topic)) return { requeueAfterMs: await prepareInputs(context, topic, policy) };
   await reconcileBatches(context, topic);

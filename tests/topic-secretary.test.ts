@@ -292,7 +292,7 @@ test("Maintenance backoff reaches two hours even with a one-second base cooldown
   const f = await secretaryFixture(t), advance = deadlineClock(t);
   f.policy.review.idleSeconds = 10800;
   f.policy.review.backoff = null;
-  f.policy.dormantAfterSeconds = 10800;
+  f.policy.workWindowSeconds = 10800;
   f.policy.maxUnfiledInput = 1; f.policy.capacityCooldownSeconds = 1;
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
   await reconcileChief(f.context, f.execution("first"), f.root(), f.policy);
@@ -307,25 +307,19 @@ test("Maintenance backoff reaches two hours even with a one-second base cooldown
   assert.equal(f.root().status.maintenanceChecks!["aide:organize"]!.attempts, 14);
 });
 
-test("inactive domain sleeps without inference, follows up while dormant, and wakes on external arrival", async t => {
-  const f = await secretaryFixture(t), advance = deadlineClock(t);
-  await reconcileSecretary(f.context, f.root(), f.policy);
-  assert.equal(f.root().status.phase, "active");
-  advance(901_000);
-  await reconcileSecretary(f.context, f.root(), f.policy);
-  assert.equal(f.root().status.phase, "dormant");
-  await f.resources.patchStatus(f.root(), { weaveRevision: 1 });
-  for (let i = 0; i < 3; i++) await reconcileSecretary(f.context, f.root(), f.policy);
+test("window expiry postpones a due Ongoing until fresh external business is handled", async t => {
+  const { upsertOngoing } = await import("../plugins/personal/ongoing/service.ts");
+  const f = await secretaryFixture(t);
+  const at = new Date(0).toISOString();
+  await f.resources.patchStatus(f.root(), { lastInputAt: at, execution: { id: "setup", startedAt: at } });
+  await upsertOngoing(f.resources, f.root(), { title: "Check receipt", checkAt: at }, "setup");
+  await f.resources.patchStatus(f.root(), { execution: null });
+  assert.equal((await reconcileSecretary(f.context, f.root(), f.policy)).intake, undefined);
   assert.equal(f.aide.topics.inputStore.list().length, 0);
-  await f.input("due-check", InputAttention.Normal, "aide:followup");
-  await reconcileChief(f.context, f.execution("followup"), f.root(), f.policy);
-  assert.ok(f.aide.topics.inputStore.get("due-check")!.status.assess?.completedAt);
-  assert.equal(f.root().status.phase, "dormant");
-  assert.equal(f.root().status.lastInputAt, undefined);
   await f.input("external-reply", InputAttention.Normal, "channel");
-  assert.equal(f.root().status.phase, "active");
-  assert.equal(f.root().status.compactOnWake, true);
-  assert.equal(f.calls(), 1);
+  await reconcileChief(f.context, f.execution("reply"), f.root(), f.policy);
+  assert.ok(f.aide.topics.inputStore.get("external-reply")!.status.assess?.completedAt);
+  assert.equal((await reconcileSecretary(f.context, f.root(), f.policy)).intake?.inputs[0]?.spec.origin, "aide:followup");
 });
 
 
@@ -345,4 +339,22 @@ test("Business closes a due Ongoing before the Secretary ever creates a followup
   assert.ok((await readOngoing(f.resources, f.root(), work.id)).status.closure);
   assert.equal((await reconcileSecretary(f.context, f.root(), f.policy)).intake, undefined);
   assert.ok(!f.aide.topics.inputStore.list().some(i => i.spec.origin === "aide:followup"));
+});
+
+test("Stow qualifies strictly above the threshold, yields to maintenance, and reserves one prompt", async t => {
+  const f = await secretaryFixture(t);
+  const agent = { harness: "chief", sessionId: "current", promptTokens: f.policy.stowPromptTokens };
+  await f.resources.patchStatus(f.root(), { agent });
+  const select = async () => (await reconcileSecretary(f.context, f.root(), f.policy)).intake?.inputs[0];
+  assert.equal(await select(), undefined);
+  await f.resources.patchStatus(f.root(), { agent: { ...agent, promptTokens: agent.promptTokens + 1 }, weaveRevision: 1 });
+  assert.equal((await select())?.spec.origin, "aide:curate");
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:stow").length, 0);
+  await reconcileChief(f.context, f.execution("review"), f.root(), f.policy);
+  const stow = await select();
+  assert.equal(stow?.spec.origin, "aide:stow");
+  assert.equal((await select())?.metadata.uid, stow?.metadata.uid);
+  assert.equal(f.root().status.agent?.promptTokens, agent.promptTokens + 1);
+  await f.resources.patchStatus(f.root(), { lastInputAt: new Date(0).toISOString() });
+  assert.equal(await select(), undefined);
 });

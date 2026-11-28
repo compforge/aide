@@ -5,7 +5,7 @@ import { topicPolicy } from "../topic/config.ts";
 
 export async function releaseTopicAgent(context: PluginContext, execution: ReconcileContext, topic: TopicResource) {
   if (!topic.status.agent?.sessionId) return;
-  const closed = await execution.verbs.harness({ operation: "close", ...topic.status.agent, sessionId: topic.status.agent.sessionId, timeoutMs: 30_000 });
+  const closed = await execution.verbs.harness({ operation: "close", harness: topic.status.agent.harness, sessionId: topic.status.agent.sessionId, timeoutMs: 30_000 });
   if (closed.state !== "success" || closed.value.outcome !== "accepted") throw new Error("Topic agent could not close");
   if (!topic.metadata.deletionTimestamp) {
     const { agent: _, ...status } = topic.status;

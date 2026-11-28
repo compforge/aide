@@ -14,7 +14,7 @@ import { chiefPreviews } from "./inputs.ts";
 import { finalizeExecution, runInput } from "../execution/loop.ts";
 import { submitGatePending } from "../gate/intake.ts";
 import { isInternalInput } from "../input/model.ts";
-import { patchStatus } from "../status.ts";
+import { inWorkWindow } from "../topic/activity.ts";
 import { topicPolicy, type TopicPolicy } from "../topic/config.ts";
 
 const instructions = `Handle the activated Input using only the tools available for its origin. Keep the current task separate from background evidence and earlier unfinished tasks.
@@ -59,11 +59,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     const result = latest && await collectTopic(context, latest, execution);
     return { ...result, requeueAfterMs: Math.min(result?.requeueAfterMs ?? Infinity, selected.requeueAfterMs) };
   }
-  if (initial.status.phase === "dormant" && isInternalInput(input.spec) && input.spec.origin !== "aide:followup") {
-    await patchStatus(context.resources, input, { assess: { ...input.status.assess, completedAt: new Date().toISOString(),
-      result: { disposition: "cancelled", summary: "Domain Chief is dormant" } } });
-    return { requeueAfterMs: 1 };
-  }
+  if (isInternalInput(input.spec) && !inWorkWindow(initial, policy)) return { requeueAfterMs: selected.requeueAfterMs };
   const items = chiefPreviews(inputs, policy.contextChars - 3000);
   const prompt = `${instructions}\nActivation: ${JSON.stringify({ kind: "input", topicId: initial.spec.id,
     inputId: items[0]!.inputId, inputIds: items.map(i => i.inputId), inputs: items, at: new Date().toISOString() })}\nRead full evidence with read_input.`;

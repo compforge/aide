@@ -243,4 +243,4 @@ maxChars 默认 4000，是普通 Note 与 summary Note 共用的篇幅软预算�
 
 Chief 通过 `read_person.contacts` 找到联系地址，再由 `read_address.delivery.configured` 核对 Host 的当前发送路径。该值复用 Output 的目标配置检查，不证明平台可达、权限或投递成功，也不覆盖禁言和披露判定。Lark open_id 单聊不要求已经观察到机器人私聊或先拉群；Host Channel 凭证独立于 lark-cli 登录与 shell 配置。历史 Note 的能力判断不能替代当前 Host 查询；实际发信仍经 Output。
 
-Chief Reconcile 只接纳当前可处理的非 Deferred Input／Batch，并按 origin 选择工具与执行路径。完成一次计一项 Chief 工作量，包括内部维护 Input；一个 Batch 始终计一项。维护的生成时机、冷却和退避归 [Secretary](secretary.md)，Chief 完成事务只保存结果与对应水位事实。
+Chief Reconcile 只接纳当前可处理的非 Deferred Input／Batch，并按 origin 选择工具与执行路径。业务投递和整理、跟进各计一次 Chief 工作量，Stow 单独统计；一个 Batch 始终计一项。维护的生成时机、冷却和退避归 [Secretary](secretary.md)，Chief 完成事务只保存结果与对应水位事实。

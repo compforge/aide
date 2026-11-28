@@ -189,16 +189,15 @@ test("A delivered Batch releases the queue even when Chief takes no action", asy
   assert.equal(f.root().status.chiefWorkload?.completed, 2);
 });
 
-test("An undelivered Batch yields to waiting work during and after its cooldown", async t => {
+test("An undelivered Batch yields during cooldown and regains its creation order once eligible", async t => {
   const f = await secretaryFixture(t);
   for (const ids of [["a", "b"], ["c", "d"]]) {
     for (const id of ids) await f.input(id);
     await prepareInputs(f.context, f.root(), f.policy);
   }
   await reconcileChief(f.context, f.execution("miss", async () => {}), f.root(), f.policy);
-  for (const delay of [60_000, 0]) {
-    assert.deepEqual((await preparedIntake(f.resources, f.root(), false, delay)).inputs.map(i => i.metadata.name).sort(), ["c", "d"]);
-  }
+  assert.deepEqual((await preparedIntake(f.resources, f.root(), false, 60_000)).inputs.map(i => i.metadata.name).sort(), ["c", "d"]);
+  assert.deepEqual((await preparedIntake(f.resources, f.root(), false, 0)).inputs.map(i => i.metadata.name).sort(), ["a", "b"]);
 });
 
 test("A business assessment during preparation rolls back the Batch membership", async t => {
@@ -302,4 +301,18 @@ for (const format of ["legacy", "custom"] as const) test(`Recovery restores ${fo
   }), f.root(), f.policy);
   assert.equal((await batchById(f.resources, batch.metadata.uid))?.status.phase, "completed");
   assert.equal(f.root().status.chiefWorkload?.completed, 1);
+});
+
+test("Normal Inputs and sealed Batches share creation order behind Immediate", async t => {
+  const f = await secretaryFixture(t);
+  await f.input("old-deferred"); await f.input("later-deferred");
+  await f.input("before-seal", InputAttention.Normal);
+  await prepareInputs(f.context, f.root(), f.policy);
+  await f.input("after-seal", InputAttention.Normal);
+  await f.input("urgent", InputAttention.Immediate);
+  for (const expected of [["urgent"], ["before-seal"], ["later-deferred", "old-deferred"], ["after-seal"]]) {
+    const selection = await preparedIntake(f.resources, f.root());
+    assert.deepEqual(selection.inputs.map(i => i.metadata.name).sort(), expected);
+    await reconcileChief(f.context, f.execution(expected[0]), f.root(), f.policy);
+  }
 });
