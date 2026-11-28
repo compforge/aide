@@ -1,6 +1,7 @@
+import { reviewAttention } from "./candidate.ts";
 import { tryCreateMaintenanceInput } from "./input.ts";
 import { digest } from "../identity.ts";
-import type { ResourceReader, ResourceType } from "@compforge/aide-plugin";
+import { isResourceVersionConflict, type PluginContext, type ResourceReader, type ResourceType } from "@compforge/aide-plugin";
 import { INPUT_TYPE } from "../input/model.ts";
 import { DELEGATED_WORK_TYPES } from "../work/resources.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
@@ -51,15 +52,34 @@ export async function maintenanceAgenda(resources: ResourceReader, topics: reado
 }
 
 /** Every Topic checks only direct capacity; the assigned root performs the requested work. */
-export async function ensureOrganizationInput(context: import("@compforge/aide-plugin").PluginContext, topic: TopicResource, policy = topicPolicy(context.instance.config.topic)) {
+export async function observeCapacity(context: PluginContext, topic: TopicResource, policy = topicPolicy(context.instance.config.topic)) {
   const agenda = await maintenanceAgenda(context.resources, [topic], policy);
   const facts = agenda.topics[0];
+  const now = Date.now();
+  const createdAt = topic.status.organizeSince ?? new Date(now).toISOString();
+  try {
+    if (!facts && topic.status.organizeSince) await context.resources.patch(topic,
+      { type: "json", value: [{ op: "remove", path: "/status/organizeSince" }] }, { resourceVersion: topic.metadata.resourceVersion });
+    if (facts && !topic.status.organizeSince) await context.resources.patchStatus(topic, { organizeSince: createdAt }, { resourceVersion: topic.metadata.resourceVersion });
+  } catch (error) {
+    if (isResourceVersionConflict(error)) return;
+    throw error;
+  }
   if (!facts) return;
+  return { agenda, createdAt };
+}
+
+export async function organizationCandidate(context: PluginContext, topic: TopicResource, policy = topicPolicy(context.instance.config.topic)) {
+  const observed = await observeCapacity(context, topic, policy);
+  if (!observed) return;
+  const { agenda, createdAt } = observed;
+  const facts = agenda.topics[0]!;
+  const attention = reviewAttention(createdAt, policy.review.idleSeconds * 1000, Date.now());
   // One request covers all exceeded limits. Only changes to an active pressure reset its backoff.
   const fingerprint = digest([
     facts.inputs > policy.maxUnfiledInput && [facts.inputs, facts.inputIds, policy.maxUnfiledInput],
     facts.work > policy.maxWork && [facts.work, facts.workIds, policy.maxWork],
     facts.children > policy.maxChildren && [facts.children, facts.childUids, policy.maxChildren],
   ]);
-  return tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:organize", "capacity", undefined, policy, fingerprint);
+  return { attention, createdAt, dispatch: () => tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:organize", "capacity", undefined, policy, fingerprint, attention) };
 }

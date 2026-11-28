@@ -1,11 +1,10 @@
-import { inWorkWindow } from "../topic/activity.ts";
+import { reviewAttention, type InternalCandidate } from "./candidate.ts";
 import { selectStow } from "./stow.ts";
-import { checkSummary } from "./summary.ts";
+import { summaryCandidate } from "./summary.ts";
 import { selectOngoing } from "./ongoing.ts";
 import { readTopicSubtree } from "../topic/tree.ts";
-import { preparedIntake, type PreparedIntake } from "./intake.ts";
 import { NOTE_TYPE, type NoteResource } from "../note/model.ts";
-import { prepareNoteMaintenance } from "./note.ts";
+import { noteCandidate } from "./note.ts";
 import { topicWatch, materialWatch } from "../topic/watch.ts";
 import { notePressureWatch } from "../note/reconcile.ts";
 import { digest } from "../identity.ts";
@@ -19,7 +18,7 @@ import { dueNotePressure, refreshNotePressure } from "../note/pressure.ts";
 import { commitStatus } from "../status.ts";
 import { isGateTopic, isRootTopic } from "../topic/boundary.ts";
 import { topicPolicy, type TopicPolicy } from "../topic/config.ts";
-import { maintenanceAgenda, ensureOrganizationInput } from "./maintenance.ts";
+import { maintenanceAgenda, observeCapacity, organizationCandidate } from "./maintenance.ts";
 import type { ReviewPreparation } from "./review.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 import { idleReviewSchedule } from "./review.ts";
@@ -34,35 +33,27 @@ function maintenanceInstructions(plan: ReviewPreparation, maxChars: number): str
   ].filter(Boolean).join("\n");
 }
 
-/** @spec The serial root reconcile selects one dispatch from live CRDs, then admits that selection.
- * @link docs/personal/secretary.md#reconciler
- * @case tests/topic-secretary.test.ts
- */
-export async function reconcileSecretary(context: PluginContext, initial: Readonly<TopicResource>, policy: TopicPolicy = topicPolicy(context.instance.config.topic)):
-    Promise<{ requeueAfterMs: number; intake?: PreparedIntake }> {
+/** Rules describe the demand and its age. Only the winning rule reserves its materials. */
+export async function listInternalCandidates(context: PluginContext, initial: TopicResource, policy: TopicPolicy, hasReady: boolean) {
   let next = policy.trigger.intervalSeconds * 1000;
-  let topic = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(initial));
-  if (!topic || topic.metadata.deletionTimestamp || topic.status.execution || !isRootTopic(topic)) return { requeueAfterMs: next };
-  const open = inWorkWindow(topic);
-  const schedule = idleReviewSchedule(topic, policy.review);
-  if (open && Object.keys(schedule.patch).length) topic = await context.resources.patchStatus(topic, schedule.patch);
-  const ready = await preparedIntake(context.resources, topic, !open, next);
-  if (ready.inputs.length) return { intake: ready, requeueAfterMs: next };
-  if (!open) return { requeueAfterMs: next };
+  const schedule = idleReviewSchedule(initial, policy.review);
+  const topic = Object.keys(schedule.patch).length ? await context.resources.patchStatus(initial, schedule.patch) : initial;
+  const candidates: InternalCandidate[] = [];
+  const now = Date.now();
   const topics = await readTopicSubtree(context.resources, resourceRef(topic));
   const followup = await selectOngoing(context, topics, policy);
+  candidates.push(...followup.candidates);
   next = Math.min(next, followup.requeueAfterMs);
-  if (followup.input) return { intake: { inputs: [followup.input] }, requeueAfterMs: next };
   const pending = await context.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, {
     matchIndex: { name: "pendingCuration", value: topic.metadata.uid }, direction: "asc", limit: 1 });
   if (pending.items[0]) {
-    const result = await prepareNoteMaintenance(context, pending.items[0], policy, Date.now(), topic.metadata.uid);
-    if (result?.input) return { intake: { inputs: [result.input] }, requeueAfterMs: next };
+    const result = await noteCandidate(context, pending.items[0], policy, now, topic.metadata.uid);
+    if (result?.candidate) candidates.push(result.candidate);
     if (result) next = Math.min(next, result.requeueAfterMs);
   }
   for (const member of topics) {
-    const input = await ensureOrganizationInput(context, member, policy);
-    if (input) return { intake: { inputs: [input] }, requeueAfterMs: next };
+    const candidate = await organizationCandidate(context, member, policy);
+    if (candidate) candidates.push(candidate);
   }
   const due = topicReview(topic.spec.review).enabled && Date.parse(schedule.dueAt) <= Date.now();
   const notePressure = await dueNotePressure(context.resources, topic, Date.now(), Math.max(1, Math.min(8, Math.floor((policy.contextChars - 3000) / 600))));
@@ -77,27 +68,31 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
     if (notePressure.length) agenda.reason = "note_pressure";
     const fingerprint = digest([weave ? plan.weaveRevision : 0,
       notePressure.map(entry => [entry.uid, entry.pressure.version]), workloadDue ? work.completed : null]);
-    const input = await tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:curate",
+    const observed = new Date(now).toISOString();
+    const createdAt = [...(weave ? [topic.status.weaveSince ?? observed] : []),
+      ...(workloadDue && work.pendingSince ? [work.pendingSince] : []), ...notePressure.map(p => p.pressure.since ?? observed)].sort()[0] ?? observed;
+    const attention = reviewAttention(createdAt, policy.review.idleSeconds * 1000, now);
+    candidates.push({ attention, createdAt, dispatch: () => tryCreateMaintenanceInput(context, topic, observed, agenda, "aide:curate",
       notePressure.length ? "note_pressure" : weave ? "understanding" : countDue ? "workload" : "idle",
-      { plan, instructions: maintenanceInstructions(plan, policy.maxChars), cooldownSeconds: policy.capacityCooldownSeconds }, policy, fingerprint);
-    if (input) return { intake: { inputs: [input] }, requeueAfterMs: next };
-  } else if (due && !topic.status.execution) {
+      { plan, instructions: maintenanceInstructions(plan, policy.maxChars), cooldownSeconds: policy.capacityCooldownSeconds }, policy, fingerprint, attention) });
+  } else if (due && !candidates.length && !hasReady) {
     const patch = { reviewCheckedAt: new Date().toISOString(), idleReviewReset: null,
       idleReviewCount: policy.review.backoff ? Math.min(Number.MAX_SAFE_INTEGER, schedule.count + 1) : 0 };
     try { await commitStatus(context.resources, [{ operation: "patchStatus", resource: topic, patch }]); }
-    catch (error) { if (isResourceVersionConflict(error)) return { requeueAfterMs: 1 }; throw error; }
+    catch (error) { if (isResourceVersionConflict(error)) return { candidates, requeueAfterMs: 1 }; throw error; }
     context.logger.debug?.("Secretary review check found no work", { attributes: { topicUid: topic.metadata.uid,
       reason: "no_review_demand", completed: work.completed, reviewed: work.reviewed, idleReviewCount: patch.idleReviewCount,
       nextAt: idleReviewSchedule({ ...topic, status: { ...topic.status, ...patch } }, policy.review).dueAt } });
   }
   const gate = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(topic.spec.parentRef!);
   if (gate) {
-    const summary = await checkSummary(context, gate, Date.now(), topic);
-    if (summary.input) return { intake: { inputs: [summary.input] }, requeueAfterMs: next };
+    const summary = await summaryCandidate(context, gate, now, topic);
+    if (summary.candidate) candidates.push(summary.candidate);
     next = Math.min(next, summary.requeueAfterMs);
   }
   const stow = await selectStow(context, topic, policy);
-  return { requeueAfterMs: next, intake: stow ? { inputs: [stow] } : undefined };
+  if (stow) candidates.push(stow);
+  return { requeueAfterMs: next, candidates };
 }
 
 /** @spec Deferred aggregation follows material count and oldest arrival even during an active Chief execution.
@@ -105,8 +100,10 @@ export async function reconcileSecretary(context: PluginContext, initial: Readon
  */
 export async function prepareSecretary(context: PluginContext, topic: TopicResource, policy: TopicPolicy) {
   if (topic.metadata.deletionTimestamp) return;
-  if (isGateTopic(topic)) return checkSummary(context, topic);
+  if (isGateTopic(topic)) return summaryCandidate(context, topic);
   await refreshNotePressure(context, topic);
+  // Persist pressure onset even when no domain selection runs during a long Chief invocation.
+  await observeCapacity(context, topic, policy);
   if (isRootTopic(topic)) return { requeueAfterMs: await prepareInputs(context, topic, policy) };
   await reconcileBatches(context, topic);
 }

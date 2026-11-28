@@ -1,3 +1,4 @@
+import { changedTree } from "../topic/model.ts";
 import { isRootTopic } from "../topic/boundary.ts";
 import { prepareSummary } from "../note/summary.ts";
 import { readNotes } from "../note/query.ts";
@@ -51,7 +52,7 @@ export async function groupTopics(resources: ResourceClient, weave: WeaveResourc
         status: { ...resource.status, reviewCheckedAt: null, idleReviewCount: 0, idleReviewReset: null, organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid,
           reviewedVersion: versions.get(resource.metadata.uid), toUid: parent.metadata.uid, reason: `Weave grouped under ${parent.spec.name ?? parent.spec.id}` } } };
       }),
-      { operation: "patchStatus", resource: parent, patch: { organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid, ...(group.parent ? { reviewedVersion: versions.get(parent.metadata.uid) } : {}), reason: "Weave combined related roots" }, weaveRevision: (parent.status.weaveRevision ?? 0) + 1,
+      { operation: "patchStatus", resource: parent, patch: { organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid, ...(group.parent ? { reviewedVersion: versions.get(parent.metadata.uid) } : {}), reason: "Weave combined related roots" }, ...changedTree(parent.status, new Date().toISOString()),
         ...prepared.status,
         lastInputAt: (group.parent ? [parent, ...children] : children).flatMap(t => t.status.lastInputAt ? [t.status.lastInputAt] : []).sort().at(-1),
       } },

@@ -1,6 +1,6 @@
 import type { PluginContext, Watch } from "@compforge/aide-plugin";
 import type { TopicResource } from "../topic/model.ts";
-import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
+import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
 import { commitStatus } from "../status.ts";
 import { assignmentWatch, inputRef, type Input } from "../input/state.ts";
 import { digest } from "../identity.ts";
@@ -14,7 +14,7 @@ import { tryCreateMaintenanceInput } from "./input.ts";
 /** @spec One durable Input per Ongoing check plan. A competing pending Input leaves this check due.
  * @link docs/personal/work.md#ongoing
  */
-export async function prepareOngoingCheck(context: PluginContext, matter: OngoingResource, policy: TopicPolicy, now = Date.now(), expectedRootUid?: string) {
+export async function ongoingCandidate(context: PluginContext, matter: OngoingResource, policy: TopicPolicy, now = Date.now(), expectedRootUid?: string) {
   if (matter.metadata.deletionTimestamp) return;
   const { items: materials } = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, { limit: 16, matchIndex: { name: "handlePending", value: matter.metadata.uid } });
   if (matter.status.closure) {
@@ -44,10 +44,12 @@ export async function prepareOngoingCheck(context: PluginContext, matter: Ongoin
   const root = await readTopicRoot(context.resources, matter.spec.topic);
   if (!root || !isRootTopic(root) || expectedRootUid && expectedRootUid !== root.metadata.uid) return;
   const instructions = `Read Ongoing ${matter.metadata.name} and verify current evidence before acting. ${materials.length ? `Read newly attached Inputs: ${materials.map(i => i.metadata.name).join(", ")}. ` : ""} Read the current question from the Ongoing.`;
-  const input = await tryCreateMaintenanceInput(context, root, dueAt, await maintenanceAgenda(context.resources, [], policy),
+  const dispatch = async () => tryCreateMaintenanceInput(context, root, dueAt, await maintenanceAgenda(context.resources, [], policy),
     "aide:followup", materials.length ? "work_input" : matter.spec.question ? "question_due" : "ongoing_check_due",
     { ongoing: matter, materials, instructions, cooldownSeconds: policy.capacityCooldownSeconds }, policy, requestId);
-  return { input, requeueAfterMs: Math.max(1, policy.capacityCooldownSeconds * 1000) };
+  const arrivals = materials.map(i => i.status.handle![matter.metadata.uid]!.assignedAt);
+  if (checkDue) arrivals.push(scheduled!);
+  return { candidate: { attention: InputAttention.Normal, createdAt: arrivals.sort()[0]!, dispatch }, requeueAfterMs: Math.max(1, policy.capacityCooldownSeconds * 1000) };
 }
 
 /** Ongoing changes only wake the responsible root. Root timers cover deadlines and missed notifications. */
@@ -85,20 +87,20 @@ export async function selectOngoing(context: PluginContext, topics: TopicResourc
   const matters: OngoingResource[] = [];
   for (const topic of topics) matters.push(...await context.resources.list<OngoingResource["spec"], OngoingResource["status"]>(
     ONGOING_TYPE, { matchIndex: { name: "openTopic", value: topic.metadata.uid } }));
-  matters.sort((a, b) => (a.status.nextCheckAt ?? "~").localeCompare(b.status.nextCheckAt ?? "~") || a.metadata.uid.localeCompare(b.metadata.uid));
   let next = policy.trigger.intervalSeconds * 1000;
+  const candidates = [];
   for (const matter of matters) {
-    const result = await prepareOngoingCheck(context, matter, policy, now, topics[0]?.metadata.uid);
-    if (result?.input) return { input: result.input, requeueAfterMs: next };
+    const result = await ongoingCandidate(context, matter, policy, now, topics[0]?.metadata.uid);
+    if (result?.candidate) candidates.push(result.candidate);
     if (result) next = Math.min(next, result.requeueAfterMs);
   }
-  return { requeueAfterMs: next };
+  return { candidates, requeueAfterMs: next };
 }
 
 // Closing a Work still settles material attached before closure; only the root dispatches open Work.
 export function registerOngoingCleanup(context: PluginContext) {
   context.controllers.register({ name: "closed-material", resourceType: ONGOING_TYPE,
     watches: [assignmentWatch("handle", "Ongoing")], reconcile: async (_execution, matter: OngoingResource) => {
-      if (matter.status.closure) return prepareOngoingCheck(context, matter, topicPolicy(context.instance.config.topic));
+      if (matter.status.closure) return ongoingCandidate(context, matter, topicPolicy(context.instance.config.topic));
     } });
 }

@@ -90,7 +90,9 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   }
   finally {
     try {
-      if (streaming) {
+      // Direct business delivery can open a reply Stream after the initial Chief prompt.
+      const direct = target === "chief" && (await context.resources.get<unknown, LoopStatus>(resourceRef(current)))?.status.execution?.admissionRevision;
+      if (streaming || direct) {
         const closed = await execution.verbs.action("finish_output_stream", completed ? {} : { error });
         if (closed.state !== "success") throw new Error(`Could not close Chief output stream: ${closed.state === "failure" ? closed.error : closed.state}`);
       }

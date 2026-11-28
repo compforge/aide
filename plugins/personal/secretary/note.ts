@@ -1,3 +1,4 @@
+import { reviewAttention } from "./candidate.ts";
 import type { PluginContext } from "@compforge/aide-plugin";
 import { NOTE_TYPE, noteMaterial, noteVersion, pendingCuration, type NoteResource } from "../note/model.ts";
 import { noteRoot } from "../note/reconcile.ts";
@@ -11,7 +12,7 @@ import { digest } from "../identity.ts";
  * @case tests/note-knowledge.test.ts
  * @link docs/personal/note.md
  */
-export async function prepareNoteMaintenance(context: PluginContext, note: NoteResource, policy: TopicPolicy, now = Date.now(), expectedRoot?: string) {
+export async function noteCandidate(context: PluginContext, note: NoteResource, policy: TopicPolicy, now = Date.now(), expectedRoot?: string) {
   if (note.metadata.deletionTimestamp || note.status.retired || note.spec.summaryOf) return;
   const since = pendingCuration(note);
   if (!since || note.status.curationDelivery?.material === noteMaterial(note.spec)) return;
@@ -42,9 +43,11 @@ export async function prepareNoteMaintenance(context: PluginContext, note: NoteR
     }
     const notes = batch.map(item => ({ noteId: item.metadata.name, version: noteVersion(item) }));
     const instructions = `Start with these changed ordinary Notes, then look for related evidence and duplicates: ${notes.map(item => item.noteId).join(", ")}.`;
-    const input = await tryCreateMaintenanceInput(context, topic, at, await maintenanceAgenda(context.resources, [], policy),
-      "aide:curate", "notes_changed", { notes: batch, instructions, cooldownSeconds: cooldown }, policy, digest(notes));
-    return { input, requeueAfterMs: policy.capacityCooldownSeconds * 1000 };
+    const createdAt = new Date(oldest).toISOString();
+    const attention = reviewAttention(createdAt, policy.curation.maxWaitSeconds * 1000, now);
+    const dispatch = async () => tryCreateMaintenanceInput(context, topic, at, await maintenanceAgenda(context.resources, [], policy),
+      "aide:curate", "notes_changed", { notes: batch, instructions, cooldownSeconds: cooldown }, policy, digest(notes), attention);
+    return { candidate: { attention, createdAt, dispatch }, requeueAfterMs: policy.capacityCooldownSeconds * 1000 };
   } else next = due;
   return { requeueAfterMs: Math.min(Math.max(1, next - now), 2_147_483_647) };
 }

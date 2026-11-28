@@ -1,6 +1,7 @@
+import { inputExpired } from "./retention.ts";
 import { SubjectSchema } from "../note/model.ts";
-import { BATCH_TYPE } from "../batch/model.ts";
-import { INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
+import { BATCH_TYPE, type BatchStatus, type BatchSpec } from "../batch/model.ts";
+import { compareInputPriority, inputAttention, INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
 import { topicSubtree } from "../topic/tree.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 import { z } from "zod";
@@ -44,12 +45,16 @@ export function validateReviewRequest(input: { metadata: { name: string }; spec:
       if (root.metadata.uid !== topic.metadata.uid) throw new Error("Summary review Topic moved");
     } else if (!topic.spec.default) throw new Error("Shared Summary reviews belong to the default Chief");
     // The indexes and execution are read in the same transaction that hands the Input to Chief.
+    const priority = { attention: inputAttention(input.spec), createdAt: String(input.spec.observation?.candidateSince ?? "") };
     const queued = (name: string, uid: string) => context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name, value: uid } })
-      .some(other => other.metadata.name !== input.metadata.name && other.spec.origin !== "aide:stow");
+      .some(other => other.metadata.name !== input.metadata.name && !other.status.assess?.executionId
+        && !other.status.assess?.lastError && !inputExpired(other) && compareInputPriority(
+        { attention: inputAttention(other.spec), createdAt: other.metadata.creationTimestamp }, priority) < 0);
     const children = (parent: TopicResource) => context.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
       { matchIndex: { name: "parent", value: parent.metadata.uid } });
     if (topic.status.execution || queued("assignedPending", topic.metadata.uid)
-      || context.list(BATCH_TYPE, { matchIndex: { name: "open", value: topic.metadata.uid } }).length
+      || context.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "open", value: topic.metadata.uid } })
+        .some(b => b.status.phase === "ready" && !b.status.assess?.lastError && compareInputPriority({ attention: b.spec.attention, createdAt: b.metadata.creationTimestamp }, priority) < 0)
       || topicSubtree(topic, children).some(child => queued("unassigned", child.metadata.uid)))
       throw new Error("Chief has queued work");
   }

@@ -1,5 +1,4 @@
 import { inWorkWindow } from "../../topic/activity.ts";
-import { preparedIntake } from "../../secretary/intake.ts";
 import { confirmCuratedNotes, type NoteConfirmation } from "../../note/confirm.ts";
 import { bindInputDelivery, recordDelivery } from "../delivery.ts";
 import { readOngoing } from "../../ongoing/service.ts";
@@ -83,19 +82,24 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
         const current = store.topics.resource(topicId);
         if (!current || current.metadata.uid !== ref.uid || current.status.agent?.sessionId !== sessionId
           || (!current.status.agent.stowInputId && (current.status.agent.promptTokens ?? null) === promptTokens)) return;
-        store.resources.patchStatus(TOPIC_TYPE, current.metadata.name, { agent: { promptTokens, stowInputId: null } },
+        const stowSince = promptTokens !== null && promptTokens > policy.stowPromptTokens
+          ? (current.status.agent.stowInputId ? undefined : current.status.agent.stowSince) ?? new Date().toISOString() : null;
+        store.resources.patchStatus(TOPIC_TYPE, current.metadata.name, { agent: { promptTokens, stowSince, stowInputId: null } },
           { expectedUid: current.metadata.uid, expectedResourceVersion: current.metadata.resourceVersion });
       } }, inputBinding: {
       onUsageError: err => log.warn({ err, topicId }, "Chief usage origin unavailable"),
-      read: () => {
-        const c = active();
-        return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "chief",
-          inputs: [...store.topics.inputStore.query("deliveryExecution", c.status.execution!.id).map(i => ({
+      read: deliveryId => {
+        const c = active(), execution = c.status.execution!;
+        const inputs = store.topics.inputStore.query("deliveryExecution", execution.id)
+          .filter(i => (i.status.assess?.deliveryId ?? execution.id) === (deliveryId ?? execution.id));
+        return { executionId: execution.id, origin: inputs[0]?.spec.origin ?? execution.inputOrigin ?? "chief",
+          inputs: [...inputs.map(i => ({
             id: i.metadata.name,
             ongoingUid: typeof i.spec.observation?.ongoingUid === "string" ? i.spec.observation.ongoingUid : undefined,
             summaryOwnerUid: i.spec.origin === "aide:summary" ? SummaryOwnerSchema.parse(i.spec.observation?.summaryOwner).uid : undefined,
             origin: i.spec.origin, text: inputPreview(i, Math.floor(policy.contextChars / 8)),
-          })), ...store.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "deliveryExecution", value: c.status.execution!.id } }).flatMap(batch => {
+          })), ...store.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "deliveryExecution", value: execution.id } }).filter(batch =>
+            (batch.status.assess?.deliveryId ?? execution.id) === (deliveryId ?? execution.id)).flatMap(batch => {
             const members = store.topics.inputStore.query("batch", batch.metadata.uid);
             return chiefPreviews(members, Math.floor(policy.contextChars / 8)).map(item => ({
               id: item.inputId,
@@ -123,18 +127,21 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
           "Chief session compaction checkpoint appended");
       }
     });
-    bindInputDelivery(session, active, plugins.resourceClient("personal"), log);
+    bindInputDelivery(session, active, plugins.resourceClient("personal"), log, async (executionId, deliveryId) => {
+      mailSender.finish(executionId);
+      const inputs = store.topics.inputStore.query("deliveryExecution", executionId).filter(i => i.status.assess?.deliveryId === deliveryId);
+      await mailSender.begin(topicId, executionId, inputs.map(i => i.metadata.name), deliveryId);
+    });
     return Object.assign(session, { async handlePrompt() {
       const topic = active(), execution = topic.status.execution!;
       if (execution.inputOrigin !== "aide:stow") return false;
       const resources = plugins.resourceClient("personal");
       const [input] = store.topics.inputStore.query("deliveryExecution", execution.id);
       if (input?.spec.origin !== "aide:stow") throw new Error("Stow requires its admitted Input");
-      const ready = await preparedIntake(resources, topic, false, policy.trigger.intervalSeconds * 1000);
       const current = active();
-      const eligible = inWorkWindow(current) && !ready.inputs.length
+      const eligible = inWorkWindow(current)
         && input.spec.observation?.sessionId === session.sessionId && current.status.agent?.sessionId === session.sessionId
-        && input.spec.observation?.lastInputAt === current.status.lastInputAt && current.status.agent.stowInputId === input.metadata.name
+        && current.status.agent.stowInputId === input.metadata.name
         && (current.status.agent.promptTokens ?? 0) > policy.stowPromptTokens;
       if (!await recordDelivery(resources, current, execution.id, execution.id)) return true;
       if (!eligible) {

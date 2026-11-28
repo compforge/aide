@@ -17,11 +17,13 @@ export interface TopicStatus extends ResourceContext {
   conditions?: import("../conditions.ts").Condition[];
   organization?: import("./ref.ts").Organization;
   lastInputAt?: string;
-  /** Notification progress belongs to the Topic, not to its Input material. */
+  organizeSince?: string;
+  /** The first outstanding structure change and its acknowledgement survive Input retention. */
+  weaveSince?: string;
   weaveRevision?: number;
   notifiedWeaveRevision?: number;
   lastError?: string | null;
-  agent?: import("@compforge/aide-plugin").AgentStatus & { promptTokens?: number; stowInputId?: string };
+  agent?: import("@compforge/aide-plugin").AgentStatus & { promptTokens?: number; stowSince?: string; stowInputId?: string };
   chiefWorkload?: import("./workload.ts").ChiefWorkload;
   /** Secretary retains request identity and no-progress backoff independently of Input retention. */
   maintenanceChecks?: Partial<Record<"aide:curate" | "aide:organize", { checkedAt: string; fingerprint: string; attempts: number }>>;
@@ -33,6 +35,11 @@ export interface TopicStatus extends ResourceContext {
   idleSince?: string;
   execution?: LoopExecution | null;
   receipts: Array<{ key: string; responseId: string }>;
+}
+export function changedTree(status: TopicStatus, at: string) {
+  const revision = status.weaveRevision ?? 0;
+  const outstanding = revision > (status.notifiedWeaveRevision ?? 0);
+  return { weaveRevision: revision + 1, weaveSince: outstanding ? status.weaveSince ?? at : at };
 }
 export type TopicResource = Resource<TopicSpec, TopicStatus>;
 export type TopicDeletionBlock = "busy" | "work" | "default" | "gate" | "children" | "knowledge";

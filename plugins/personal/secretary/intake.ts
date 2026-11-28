@@ -1,5 +1,5 @@
 import type { ResourceReader } from "@compforge/aide-plugin";
-import { deliveryRetryDue, isInternalInput, InputAttention, inputAttention } from "../input/model.ts";
+import { deliveryRetryDue, compareInputPriority, InputAttention, inputAttention } from "../input/model.ts";
 import type { Input } from "../input/state.ts";
 import { preparedInputs } from "../chief/queue.ts";
 import type { TopicResource } from "../topic/model.ts";
@@ -23,7 +23,8 @@ export async function preparedIntake(resources: ResourceReader, topic: TopicReso
       matchIndex: { name: "ready", value: topic.metadata.uid }, direction: "asc", limit: 10, continue: cursor });
     for (const batch of page.items) {
       const input = inputs[0];
-      if (input && !isInternalInput(input.spec) && input.metadata.creationTimestamp <= batch.metadata.creationTimestamp) return { inputs };
+      if (input && compareInputPriority({ attention: inputAttention(input.spec), createdAt: input.metadata.creationTimestamp },
+        { attention: batch.spec.attention, createdAt: batch.metadata.creationTimestamp }) <= 0) return { inputs };
       if (deliveryRetryDue(batch.status.assess, retryDelayMs)) return { inputs: await expandBatch(resources, batch), batch };
     }
     cursor = page.metadata.continue;

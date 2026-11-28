@@ -60,13 +60,13 @@ Input Reconcile 负责确定投递归属、投影 Batch 回执和解析保留策
 
 ### 内容、身份与调度
 
-领域 Chief 空闲时一次接纳一条业务 Input 或一个就绪 Batch，Immediate 优先。Chief 忙时业务 Input 保留在 CRD 中，Deferred 可继续按数量或最早等待时间封批。
+外部业务 Input 按 Attention 投给 Chief。运行中的会话通过 `steer` 接收 Immediate，通过 `followUp` 接收 High 和 Normal。待启动或恢复时，Chief 从积压候选中先比较 Attention，同档先处理创建时间较早的一项。Deferred 的重要性、紧迫性低于 Normal，当前由秘书按数量或最早等待时间封批。
 
 未填写 attention 时，Channel 默认 Immediate，Source / Chief / 内置 Input 默认 Normal。attention 不限制 Route 分类，也不阻止明确交给 Task / Routine 的办理。Secretary 的时间检查独立于 review 开关、退避与 Chief 是否空闲。
 
 ### Batch
 
-Batch 是 Personal 的独立 CRD，对 Chief 表现为一条特殊的输入：接纳、处理、完成。当前只用于将积压的 Deferred Input 组成一个按 Normal 优先级处理的任务。Normal、Immediate、内部维护和显式 handoff 继续独立处理。
+Batch 是 Personal 的独立 CRD，对 Chief 表现为一条特殊的输入：接纳、处理、完成。当前只用于将积压的 Deferred Input 组成一个按 Normal 优先级处理的任务。Normal、High、Immediate、内部维护和显式 handoff 继续独立处理。
 
 #### 成员与调度
 

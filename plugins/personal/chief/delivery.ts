@@ -81,15 +81,18 @@ export async function recordDelivery(resources: ResourceClient, owner: TopicReso
 /** @spec An admission is delivered when its identified Input enters native context. Queue acceptance alone leaves the receipt pending.
  * @link docs/personal/input.md
  */
-export function bindInputDelivery(session: AgentSession, owner: () => TopicResource, resources: ResourceClient, log: Logger) {
+export function bindInputDelivery(session: AgentSession, owner: () => TopicResource, resources: ResourceClient, log: Logger,
+  onDirectDelivery?: (executionId: string, deliveryId: string) => Promise<void>) {
   session.agent.subscribe(async event => {
     if (event.type !== "message_end") return;
     const id = deliveredMessageId(event.message);
     if (!id) return;
     const topic = owner();
     const executionId = topic.status.execution!.id;
-    if ((id === executionId || id.startsWith(executionId + ":")) && await recordDelivery(resources, topic, executionId, id))
+    if ((id === executionId || id.startsWith(executionId + ":")) && await recordDelivery(resources, topic, executionId, id)) {
+      if (id !== executionId) await onDirectDelivery?.(executionId, id);
       log.info({ topicUid: topic.metadata.uid, executionId, deliveryId: id }, "Input delivered to Chief context");
+    }
   });
 }
 

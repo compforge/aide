@@ -260,13 +260,25 @@ test("Route compaction failure does not schedule replay of its failed Input", as
   assert.deepEqual(await nextRoleInputs(f.resources, latest, 8), []);
 });
 
-test("Independent Immediate business waits while the domain Chief is running", async t => {
-  const f = fixture(t), root = await f.aide.topics.ensure("a");
-  await running(f, root);
-  await f.input("urgent", [root], InputAttention.Immediate);
-  assert.equal((await f.aide.personal.submitTopic(intake(root), { inputId: "urgent", operation: "steer" })).accepted, false);
-  assert.equal(f.aide.topics.inputStore.get("urgent")!.status.assess?.executionId, undefined);
-});
+for (const [attention, operation] of [[InputAttention.Normal, "followUp"], [InputAttention.High, "followUp"], [InputAttention.Immediate, "steer"]] as const)
+  test(`Running domain Chief admits ${attention} business directly through ${operation}`, async t => {
+    const f = fixture(t), root = await f.aide.topics.ensure("a");
+    await running(f, root);
+    await f.resources.patchStatus(f.current(root), { execution: { ...f.current(root).status.execution!, inputOrigin: "source" } });
+    await f.input("direct", [root], attention);
+    const calls: string[] = [];
+    mockRunning(f, async args => {
+      calls.push((args as { operation: string }).operation);
+      return { state: "success", value: { outcome: "accepted" } };
+    });
+    const { reconcileChiefIntake } = await import("../plugins/personal/chief/reconcile.ts");
+    const execution = { verbs: { action: async (_name: string, args: unknown) => ({
+      state: "success", value: await f.aide.personal.submitTopic(intake(root), args),
+    }) } } as unknown as ReconcileContext;
+    await reconcileChiefIntake(f.context, execution, f.current(root));
+    assert.deepEqual(calls, [operation]);
+    assert.equal(f.aide.topics.inputStore.get("direct")!.status.assess?.executionId, "a");
+  });
 
 /** @case Deferred batches drain at a full Input quota without allocating a maintenance or synthetic Input. */
 test("Ten deferred Inputs activate one bounded business batch before full-quota maintenance", async t => {
@@ -308,12 +320,12 @@ test("Deferred batches remain ready until the running Chief finishes", async t =
   await running(f, root);
   for (let i = 0; i < 10; i++) await f.input(`batch-${i}`, [root], InputAttention.Deferred);
   await prepareInputs(f.context, f.current(root), topicPolicy());
-  const { reconcileSecretary } = await import("../plugins/personal/secretary/reconcile.ts");
-  assert.equal((await reconcileSecretary(f.context, f.current(root))).intake, undefined);
+  const { selectChiefIntake } = await import("../plugins/personal/chief/intake.ts");
+  assert.equal((await selectChiefIntake(f.context, f.current(root))).intake, undefined);
   const [batch] = await f.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE);
   assert.equal(batch!.status.phase, "ready");
   await finalizeExecution(f.context, f.current(root), "a");
-  const selected = await reconcileSecretary(f.context, f.current(root));
+  const selected = await selectChiefIntake(f.context, f.current(root));
   assert.equal(selected.intake?.batch?.metadata.uid, batch!.metadata.uid);
   assert.equal(selected.intake?.inputs.length, 10);
 });

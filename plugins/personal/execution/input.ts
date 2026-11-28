@@ -2,11 +2,10 @@ import type { PluginContext, ReconcileContext, ResourceClient } from "@compforge
 import type { LoopResource } from "./loop.ts";
 import { isProcessingRoot } from "../topic/boundary.ts";
 import { inputExpired } from "../input/retention.ts";
-import { InputAttention, inputAttention, deliveryFinished, type InputSpec } from "../input/model.ts";
+import { InputAttention, compareInputPriority, inputAttention, deliveryFinished, type InputSpec } from "../input/model.ts";
 import { pendingInputs, resourceRef, attemptOf, type Input } from "../input/state.ts";
 
 export const immediate = (input: InputSpec) => inputAttention(input) === InputAttention.Immediate;
-const attentionOrder = { [InputAttention.Immediate]: 0, [InputAttention.Normal]: 1, [InputAttention.Deferred]: 2 };
 /** @spec Deferral controls Chief activation, not Route classification or explicit Work handoff. */
 export const canActivate = (input: InputSpec, owner: Pick<LoopResource, "kind">) =>
   owner.kind !== "Topic" || inputAttention(input) !== InputAttention.Deferred;
@@ -25,8 +24,8 @@ export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
 export async function nextInputs(resources: ResourceClient, owner: Readonly<LoopResource>, limit: number) {
   const inputs = await pendingInputs(resources, resourceRef(owner));
   return inputs.filter(i => eligible(i, owner)).sort((a, b) =>
-    (owner.kind === "Route" ? 0 : attentionOrder[inputAttention(a.spec)] - attentionOrder[inputAttention(b.spec)])
-    || a.metadata.creationTimestamp.localeCompare(b.metadata.creationTimestamp) || a.metadata.name.localeCompare(b.metadata.name)).slice(0, limit);
+    (owner.kind === "Route" ? a.metadata.creationTimestamp.localeCompare(b.metadata.creationTimestamp) : compareInputPriority(
+      { attention: inputAttention(a.spec), createdAt: a.metadata.creationTimestamp }, { attention: inputAttention(b.spec), createdAt: b.metadata.creationTimestamp })) || a.metadata.name.localeCompare(b.metadata.name)).slice(0, limit);
 }
 
 export async function nextInput(resources: ResourceClient, owner: Readonly<LoopResource>) {

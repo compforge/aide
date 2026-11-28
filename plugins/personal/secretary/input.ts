@@ -26,7 +26,7 @@ const maintenanceTask: Record<MaintenanceOrigin, string> = {
  * @link docs/personal/secretary.md#容量与维护请求
  */
 export async function createMaintenanceInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" | "ongoing_check_due" | "work_input" = "idle", preparation?: { notes?: NoteResource[]; ongoing?: OngoingResource; materials?: readonly Input[]; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda)) {
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin = "aide:curate", trigger: "capacity" | "idle" | "workload" | "understanding" | "note_pressure" | "notes_changed" | "question_due" | "ongoing_check_due" | "work_input" = "idle", preparation?: { notes?: NoteResource[]; ongoing?: OngoingResource; materials?: readonly Input[]; plan?: ReviewPreparation; instructions: string; cooldownSeconds: number }, fingerprint = digest(agenda), attention = InputAttention.Normal, reusePending = true) {
   if (origin === "aide:followup" && (!preparation?.ongoing || !preparation.materials?.length && !followupInputId(preparation.ongoing))) throw new ObsoleteMaintenanceRequest();
   const target = resourceRef(topic);
   const maintenance = preparation?.plan, instructions = preparation?.instructions ?? "";
@@ -39,7 +39,10 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
     if (!current || current.metadata.deletionTimestamp) throw new Error("Maintenance Topic no longer exists");
     const pending = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
       matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
-    if (pending.items[0]) return pending.items[0];
+    if (pending.items[0]) {
+      if (reusePending) return pending.items[0];
+      throw new ObsoleteMaintenanceRequest();
+    }
     const scheduledMatter = origin === "aide:followup" ? preparation?.ongoing : undefined;
     const materials = preparation?.materials ?? [];
     const consumesCheck = scheduledMatter && !scheduledMatter.status.followupInputId && dueAt === scheduledMatter.status.nextCheckAt;
@@ -48,7 +51,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
     const inputId = scheduledMatter ? (consumesCheck ? followupInputId(scheduledMatter)! : fingerprint) : `${origin.slice(5)}-${digest(requestKey)}`;
     const at = new Date().toISOString();
     const spec: InputSpec = {
-      origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
+      origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention,
       text: `${maintenanceTask[origin]} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; ${origin === "aide:followup" ? "Ask Me privately if a consequential fact is still missing." : origin === "aide:curate" ? "Maintain existing mandates. Base new Work on the original business Input or source Note or Work. Keep this review silent." : "Do not communicate or hand off business Work."} Work on at most 8 materials or 8 direct children this round.\nFacts: ${JSON.stringify(agenda)}\n${instructions}`,
       observation: { ...(preparation?.notes ? { notes: preparation.notes.map(note => ({ noteId: note.metadata.name, version: noteVersion(note) })) } : {}), ...(scheduledMatter ? { ongoingId: scheduledMatter.metadata.name, ongoingUid: scheduledMatter.metadata.uid, ...(materials.length ? { inputIds: materials.map(i => i.metadata.name) } : {}) } : {}), dueAt, triggeredAt: at, facts: agenda, trigger, ...(origin === "aide:curate" && !preparation?.notes ? { review: {
         completed: chiefWorkload(current).completed, weaveRevision: maintenance?.weaveRevision ?? 0,
@@ -72,7 +75,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
         { matchIndex: { name: "uid", value: entry.uid }, limit: 1 })).items[0];
       if (!target?.status.notePressure) continue;
       const p = target.status.notePressure;
-      const notePressure = { ...p,
+      const notePressure = { ...p, since: at,
         attempts: Math.min(5, p.attempts + 1), nextAt: new Date(Date.now() + Math.max(preparation!.cooldownSeconds,
           Math.min(900, preparation!.cooldownSeconds * 2 ** p.attempts)) * 1000).toISOString(),
       };
@@ -92,6 +95,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
       ...pressureWrites,
       { operation: "patchStatus", resource: current, options: { resourceVersion: current.metadata.resourceVersion }, patch: {
         ...(ownerPressure ? { notePressure: ownerPressure } : {}),
+        ...(origin === "aide:organize" ? { organizeSince: at } : {}),
         ...(origin === "aide:followup" || preparation?.notes ? {} : { maintenanceChecks: { [origin]: { checkedAt: at, fingerprint,
           attempts: current.status.maintenanceChecks?.[origin]?.fingerprint === fingerprint
             ? Math.min(14, (current.status.maintenanceChecks[origin]?.attempts ?? 0) + 1) : 1 } } }),
@@ -109,7 +113,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
       if (!existing || existing.metadata.deletionTimestamp || existing.spec.origin !== origin || existing.status.topic?.uid !== target.uid) throw error;
       return existing;
     }
-    context.logger.info("Topic internal Input requested", { attributes: { origin, topicUid: topic.metadata.uid, inputId, dueAt, trigger, fingerprint, completed: chiefWorkload(current).completed } });
+    context.logger.info("Topic internal Input requested", { attributes: { origin, topicUid: topic.metadata.uid, inputId, dueAt, trigger, attention, fingerprint, completed: chiefWorkload(current).completed } });
     return (await context.resources.get<InputSpec, InputStatus>(inputRef(inputId)))!;
   });
   await assignInput(context, input);
@@ -119,7 +123,7 @@ export async function createMaintenanceInput(context: Pick<PluginContext, "resou
 /** Pending requests stay single-flight. Newly attached material can wake Chief after the prior delivery settles. */
 export async function tryCreateMaintenanceInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
   agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: MaintenanceOrigin, trigger: Parameters<typeof createMaintenanceInput>[5],
-  preparation: Parameters<typeof createMaintenanceInput>[6], policy: TopicPolicy, fingerprint: string) {
+  preparation: Parameters<typeof createMaintenanceInput>[6], policy: TopicPolicy, fingerprint: string, attention = InputAttention.Normal) {
   const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(topic));
   if (!current || current.metadata.deletionTimestamp) return;
   const previous = origin === "aide:followup" || preparation?.notes ? undefined : current.status.maintenanceChecks?.[origin];
@@ -135,7 +139,7 @@ export async function tryCreateMaintenanceInput(context: Pick<PluginContext, "re
     }
   }
   try {
-    const input = await createMaintenanceInput(context, current, dueAt, agenda, origin, trigger, preparation, fingerprint);
+    const input = await createMaintenanceInput(context, current, dueAt, agenda, origin, trigger, preparation, fingerprint, attention, false);
     // A pending or uncertain delivery owns its retry deadline through preparedIntake.
     if (!input.status.assess?.startedAt && !input.status.assess?.lastError && !input.status.assess?.completedAt) return input;
   } catch (error) {

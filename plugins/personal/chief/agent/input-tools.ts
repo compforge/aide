@@ -1,3 +1,5 @@
+import { getCurrentTools, getToolStateChanges, toToolDeclaration } from "@earendil-works/pi-ai";
+import { deliveredMessageId } from "../../../../agents/pi/input.ts";
 import type { AgentSession, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 import { BUSINESS_INPUT_ORIGINS, INPUT_ORIGINS, isInternalInput, type InputOrigin } from "../../input/model.ts";
@@ -9,7 +11,7 @@ export interface ChiefInputTask {
   inputs: { id: string; ongoingUid?: string; summaryOwnerUid?: string; origin: InputOrigin; text: string }[];
 }
 export interface ChiefInputBinding {
-  read(): ChiefInputTask;
+  read(deliveryId?: string): ChiefInputTask;
   ongoingUid?(id: string): Promise<string | undefined>;
   noteSummaryOwner?(id: string): Promise<string | undefined>;
   onUsageError?(error: unknown): void;
@@ -37,7 +39,7 @@ export function toolsForInput(tools: readonly { name: string; inputOrigins: read
 }
 /**
  * @spec Each provider request exposes only tools declared for its current Input origin; selection never unions task capabilities.
- * @spec One domain execution has one Input origin, including all members of a Deferred Batch.
+ * @spec A native delivery selects its own origin and materials, including all members of a sealed Batch.
  * @why A smaller tool list focuses the model on the current task; execution checks also reject stale or unavailable calls.
  * @link docs/personal/chief.md
  */
@@ -47,10 +49,14 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
   let current: ChiefInputTask | undefined;
   let names: string[] = [];
   let allowed: Set<string> | undefined;
-  let taggedExecution: string | undefined;
-  const begin = () => {
+  let deliveryId: string | undefined;
+  let usageTag: string | undefined;
+  const begin = (id?: string) => {
+    const task = binding.read(id);
+    if (id && !task.inputs.length) return;
+    deliveryId = id;
     allowed ??= new Set(session.getActiveToolNames());
-    current = binding.read();
+    current = task;
     names = toolsForInput(declarations, current.origin).filter(name => allowed!.has(name));
     session.setActiveToolsByName(names);
     binding.changed(current, names);
@@ -62,13 +68,20 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     if (options?.triggerTurn && !session.isStreaming) begin();
     return send(message, options);
   };
+  // Native steer/followUp changes the task only when Pi delivers its admitted message.
+  session.agent.subscribe(event => {
+    if (event.type !== "message_end") return;
+    const id = deliveredMessageId(event.message);
+    if (id && current && id.startsWith(current.executionId + ":")) begin(id);
+  });
   const prepareRequest = session.agent.prepareRequest;
   session.agent.prepareRequest = (request, signal) => {
-    if (current && taggedExecution !== current.executionId) {
+    const tag = current && JSON.stringify([current.executionId, current.origin]);
+    if (current && usageTag !== tag) {
       try {
         const origin = isInternalInput(current) ? current.origin : "business";
         session.sessionManager.appendCustomEntry("aide.usage-origin", { origin });
-        taggedExecution = current.executionId;
+        usageTag = tag;
       } catch (error) { binding.onUsageError?.(error); }
     }
     return prepareRequest?.(request, signal);
@@ -80,13 +93,18 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     if (!current) throw new Error("Chief Input task is not selected");
     const at = history.findIndex(message => message.role !== "system");
     const prefix = at < 0 ? history.length : at;
+    // Pi declares tools before it emits queued messages. A direct delivery may switch origin
+    // after that declaration; align this request with the callable loadout at the same boundary.
+    const changes = deliveryId && getToolStateChanges(getCurrentTools(history), session.agent.state.tools.map(toToolDeclaration));
+    const loadout = changes && (changes.toolsAdded.length || changes.toolsRemoved.length)
+      ? [{ role: "system" as const, content: "", timestamp: 0, ...changes }] : [];
     return [...history.slice(0, prefix), {
       role: "custom" as const, customType: "aide.chief-task", display: false, timestamp: 0,
       content: `Current Input origin: ${current.origin}\n${instructions[current.origin]}\nAdmitted inputs for this task: ${JSON.stringify(current.inputs.slice(0, 10).map(({ id, text }) => ({ inputId: id, text })))}\nOther origins are background evidence only.`,
-    }, ...history.slice(prefix)];
+    }, ...history.slice(prefix), ...loadout];
   };
   session.agent.beforeToolCall = async (context, signal) => {
-    const live = binding.read();
+    const live = binding.read(deliveryId);
     if (!current || live.executionId !== current.executionId || !names.includes(context.toolCall.name))
       return { block: true, reason: "Tool is unavailable for the current Chief Input task" };
     if (current.origin === "aide:summary" && ["upsert_note", "prune_note", "split_note", "retire_note"].includes(context.toolCall.name)) {

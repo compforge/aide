@@ -4,7 +4,8 @@ import { BATCH_TYPE } from "../plugins/personal/batch/model.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { secretaryFixture } from "./secretary-fixture.ts";
-import { prepareSecretary, reconcileSecretary } from "../plugins/personal/secretary/reconcile.ts";
+import { prepareSecretary } from "../plugins/personal/secretary/reconcile.ts";
+import { selectChiefIntake } from "../plugins/personal/chief/intake.ts";
 import { reconcileChief } from "../plugins/personal/chief/reconcile.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
@@ -13,7 +14,7 @@ test("Secretary seals a ready Batch during an active Chief turn and selects it a
   const f = await secretaryFixture(t); await f.input("a"); await f.input("b");
   await f.resources.patchStatus(f.root(), { execution: { id: "busy", startedAt: new Date().toISOString() } });
   await prepareSecretary(f.context, f.root(), f.policy);
-  assert.equal((await reconcileSecretary(f.context, f.root(), f.policy)).intake, undefined);
+  assert.equal((await selectChiefIntake(f.context, f.root(), f.policy)).intake, undefined);
   await f.resources.patchStatus(f.root(), { execution: null });
   assert.equal(f.calls(), 0); assert.equal((await f.resources.list(BATCH_TYPE)).length, 1);
   await reconcileChief(f.context, f.execution(), f.root(), f.policy); assert.equal(f.calls(), 1);
@@ -22,7 +23,7 @@ test("Secretary seals a ready Batch during an active Chief turn and selects it a
 test("Chief commits review results and scheduling facts once without Secretary settlement", async t => {
   const f = await secretaryFixture(t);
   await f.resources.patchStatus(f.root(), { weaveRevision: 1 });
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   assert.ok(review.spec.observation?.review); assert.equal(f.calls(), 0);
   await reconcileChief(f.context, f.execution(), f.root(), f.policy);
@@ -30,18 +31,18 @@ test("Chief commits review results and scheduling facts once without Secretary s
   assert.equal(f.root().status.chiefWorkload?.reviewed, (review.spec.observation!.review as { completed: number }).completed);
   assert.equal(f.root().status.chiefWorkload?.completed, 1);
   const count = f.root().status.chiefWorkload?.completed;
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   assert.equal(f.root().status.chiefWorkload?.completed, count);
   assert.equal(f.calls(), 1);
 });
 
-test("Maintenance remains an independent Input behind ordinary business", async t => {
+test("Older maintenance wins against equally urgent ordinary business", async t => {
   const f = await secretaryFixture(t);
   await f.input("review", InputAttention.Normal, "aide:curate");
   await f.input("business", InputAttention.Normal);
   await reconcileChief(f.context, f.execution(), f.root(), f.policy);
-  assert.equal(f.aide.topics.inputStore.get("review")!.status.assess?.executionId, undefined);
-  assert.ok(f.aide.topics.inputStore.get("business")!.status.assess?.completedAt);
+  assert.ok(f.aide.topics.inputStore.get("review")!.status.assess?.completedAt);
+  assert.equal(f.aide.topics.inputStore.get("business")!.status.assess?.executionId, undefined);
   assert.equal((await f.resources.list(BATCH_TYPE)).length, 0);
 });
 
@@ -49,17 +50,17 @@ test("Maintenance remains an independent Input behind ordinary business", async 
 test("Secretary defers preparation while Chief is busy and failed structure review does not hot-loop", async t => {
   const f = await secretaryFixture(t);
   await f.resources.patchStatus(f.root(), { execution: { id: "busy", startedAt: new Date().toISOString() }, weaveRevision: 1 });
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   assert.equal(f.calls(), 0);
   assert.equal(f.aide.topics.inputStore.list().length, 0);
   await f.resources.patchStatus(f.root(), { execution: null });
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   assert.ok(review.spec.observation?.review); assert.ok(f.root().status.maintenanceChecks?.["aide:curate"]);
   await f.resources.patchStatus(f.root(), { execution: null });
   await reconcileChief(f.context, f.execution("failure", async () => { throw new Error("provider failed"); }), f.root(), f.policy);
-  await reconcileSecretary(f.context, f.root(), f.policy);
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 1);
   assert.equal(f.root().status.notifiedWeaveRevision ?? 0, 0);
   assert.equal(f.aide.topics.inputStore.get(review.metadata.name)!.status.assess?.retryable, true);
@@ -69,7 +70,7 @@ test("Secretary defers preparation while Chief is busy and failed structure revi
 test("Review completion failure retries atomically and repeated completion cannot increment backoff", async t => {
   const f = await secretaryFixture(t);
   await f.resources.patchStatus(f.root(), { weaveRevision: 1 });
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   await reconcileChief(f.context, f.execution("write-failure", async () => {
     const failing = { ...f.resources, async commit() { throw new Error("receipt store unavailable"); } };
@@ -92,12 +93,12 @@ test("Review completion failure retries atomically and repeated completion canno
   }), f.root(), f.policy);
   assert.ok(f.aide.topics.inputStore.get(review.metadata.name)!.status.assess?.completedAt);
   const receipt = f.aide.topics.inputStore.get(review.metadata.name)!;
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   assert.equal(f.aide.topics.inputStore.get(review.metadata.name)!.metadata.resourceVersion, receipt.metadata.resourceVersion);
   // A later structure change is a new task with a new Input identity.
   deadlineClock(t)(61_000);
   await f.resources.patchStatus(f.root(), { weaveRevision: 2 });
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 2);
 });
 
@@ -105,7 +106,7 @@ test("Review completion failure retries atomically and repeated completion canno
 test("Maintenance completion retries a conflicting Topic write atomically", async t => {
   const f = await secretaryFixture(t);
   await f.resources.patchStatus(f.root(), { weaveRevision: 1 });
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   let raced = false, rolledBack = false;
   await reconcileChief(f.context, f.execution("race", async () => {
@@ -152,11 +153,11 @@ test("Secretary schedules by completion count and Review preserves work complete
   f.policy.review.completedInputs = 2;
   await f.input("first", InputAttention.Normal);
   await reconcileChief(f.context, f.execution("one"), f.root(), f.policy);
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 0);
   await f.input("second", InputAttention.Normal);
   await reconcileChief(f.context, f.execution("two"), f.root(), f.policy);
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   assert.equal(review.spec.observation?.trigger, "workload");
   assert.equal((review.spec.observation?.review as { completed: number }).completed, 2);
@@ -178,16 +179,16 @@ test("Time trigger uses the earliest unreviewed completion and later work cannot
   await reconcileChief(f.context, f.execution("one"), f.root(), f.policy);
   const since = new Date(Date.now() - 901_000).toISOString();
   await f.resources.patchStatus(f.root(), { chiefWorkload: { ...f.root().status.chiefWorkload!, pendingSince: since } });
-  await f.input("second", InputAttention.Normal);
+  await f.input("second", InputAttention.Immediate);
   await reconcileChief(f.context, f.execution("two"), f.root(), f.policy);
   assert.equal(f.root().status.chiefWorkload?.pendingSince, since);
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   assert.equal(review.spec.observation?.trigger, "idle");
   await reconcileChief(f.context, f.execution("review"), f.root(), f.policy);
   assert.equal(f.root().status.chiefWorkload?.pendingSince ?? null, null);
   await f.resources.patchStatus(f.root(), { reviewCheckedAt: new Date(0).toISOString(), idleReviewReset: null });
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 1,
     "Review's own completion does not reopen a timed window");
 });
@@ -200,7 +201,7 @@ test("Review renaming a child Note does not create a new maintenance need", asyn
   await f.resources.patchStatus(f.root(), { execution: { id: "write", startedAt: new Date().toISOString() } });
   const note = await upsertTopicNote(f.resources, f.root(), "write", { nature: "semantic", subject: resourceRef(child), name: "old", text: "unchanged facts" }, "note");
   await f.resources.patchStatus(f.root(), { execution: null, chiefWorkload: { completed: 1, reviewed: 0, pendingSince: new Date(0).toISOString() } });
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
   await reconcileChief(f.context, f.execution("rename", async () => {
     const updated = await upsertTopicNote(f.resources, f.root(), "rename", { noteId: note.noteId, version: note.version, name: "new", text: "unchanged facts" }, "rename");
@@ -209,7 +210,7 @@ test("Review renaming a child Note does not create a new maintenance need", asyn
   }), f.root(), f.policy);
   for (let i = 0; i < 3; i++) {
     await f.resources.patchStatus(f.root(), { reviewCheckedAt: new Date(0).toISOString(), idleReviewReset: null });
-    await reconcileSecretary(f.context, f.root(), f.policy);
+    await selectChiefIntake(f.context, f.root(), f.policy);
   }
   assert.equal(f.calls(), 1);
   assert.equal(f.aide.topics.inputStore.list().length, 1);
@@ -227,7 +228,7 @@ test("Task and Routine status updates do not count as Chief workload", async t =
       spec: { title: id, instruction: "Independent work", ...(id === "task" ? { initialInputId: "initial" } : { trigger: { cron: null, timezone: "UTC", event: "changed" } }) }, status: { topic: resourceRef(f.root()) } });
     await f.resources.patchStatus(work, { idleSince: new Date().toISOString() });
   }
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   assert.equal(f.root().status.chiefWorkload?.completed ?? 0, 0);
   assert.equal(f.calls(), 0);
 });
@@ -241,16 +242,16 @@ test("Unchanged organization pressure backs off instead of reissuing every base 
   await reconcileChief(f.context, f.execution("second"), f.root(), f.policy);
   const reviews = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize");
   for (const round of [1, 2]) {
-    await reconcileSecretary(f.context, f.root(), f.policy);
+    await selectChiefIntake(f.context, f.root(), f.policy);
     assert.equal(reviews().length, round);
     await reconcileChief(f.context, f.execution(`organize-${round}`), f.root(), f.policy);
     if (round === 1) advance(61_000);
   }
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   assert.equal(reviews().length, 2, "second unchanged attempt waits 120 seconds");
   assert.equal(f.root().status.maintenanceChecks?.["aide:organize"]?.attempts, 2);
   advance(61_000);
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   assert.equal(reviews().length, 3);
 });
 
@@ -264,7 +265,7 @@ test("Input collection cannot erase Chief completion demand", async t => {
   assert.equal(f.aide.topics.inputStore.get("old"), undefined);
   assert.equal(f.root().status.chiefWorkload?.completed, 1);
   await f.resources.patchStatus(f.root(), { chiefWorkload: { ...f.root().status.chiefWorkload!, pendingSince: new Date(0).toISOString() } });
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate").length, 1);
 });
 
@@ -279,7 +280,7 @@ test("Secretary request creation retries a concurrent Chief completion without l
     }
     return f.resources.commit(writes);
   } } };
-  await reconcileSecretary(context, f.root(), f.policy);
+  await selectChiefIntake(context, f.root(), f.policy);
   assert.ok(raced);
   const reviews = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate");
   assert.equal(reviews.length, 1);
@@ -296,15 +297,15 @@ test("Maintenance backoff reaches two hours even with a one-second base cooldown
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
   await reconcileChief(f.context, f.execution("first"), f.root(), f.policy);
   await reconcileChief(f.context, f.execution("second"), f.root(), f.policy);
-  await reconcileSecretary(f.context, f.root(), f.policy);
+  await selectChiefIntake(f.context, f.root(), f.policy);
   await reconcileChief(f.context, f.execution("organize"), f.root(), f.policy);
   const request = f.root().status.maintenanceChecks!["aide:organize"]!;
   await f.resources.patchStatus(f.root(), { maintenanceChecks: { "aide:organize": { ...request, attempts: 14 } } });
   const count = () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize").length;
   advance(7199_000);
   await f.resources.patchStatus(f.root(), { lastInputAt: new Date(Date.now()).toISOString() });
-  await reconcileSecretary(f.context, f.root(), f.policy); assert.equal(count(), 1);
-  advance(2000); await reconcileSecretary(f.context, f.root(), f.policy); assert.equal(count(), 2);
+  await selectChiefIntake(f.context, f.root(), f.policy); assert.equal(count(), 1);
+  advance(2000); await selectChiefIntake(f.context, f.root(), f.policy); assert.equal(count(), 2);
   assert.equal(f.root().status.maintenanceChecks!["aide:organize"]!.attempts, 14);
 });
 
@@ -315,12 +316,12 @@ test("window expiry postpones a due Ongoing until fresh external business is han
   await f.resources.patchStatus(f.root(), { lastInputAt: at, execution: { id: "setup", startedAt: at } });
   await upsertOngoing(f.resources, f.root(), { title: "Check receipt", checkAt: at }, "setup");
   await f.resources.patchStatus(f.root(), { execution: null });
-  assert.equal((await reconcileSecretary(f.context, f.root(), f.policy)).intake, undefined);
+  assert.equal((await selectChiefIntake(f.context, f.root(), f.policy)).intake, undefined);
   assert.equal(f.aide.topics.inputStore.list().length, 0);
-  await f.input("external-reply", InputAttention.Normal, "channel");
+  await f.input("external-reply", InputAttention.Immediate, "channel");
   await reconcileChief(f.context, f.execution("reply"), f.root(), f.policy);
   assert.ok(f.aide.topics.inputStore.get("external-reply")!.status.assess?.completedAt);
-  assert.equal((await reconcileSecretary(f.context, f.root(), f.policy)).intake?.inputs[0]?.spec.origin, "aide:followup");
+  assert.equal((await selectChiefIntake(f.context, f.root(), f.policy)).intake?.inputs[0]?.spec.origin, "aide:followup");
 });
 
 
@@ -329,8 +330,8 @@ test("Business closes a due Ongoing before the Secretary ever creates a followup
   const f = await secretaryFixture(t);
   await f.resources.patchStatus(f.root(), { execution: { id: "setup", startedAt: new Date().toISOString() } });
   const work = await upsertOngoing(f.resources, f.root(), { title: "Await delivery confirmation", checkAt: new Date(0).toISOString() }, "setup");
-  await f.input("confirmed", InputAttention.Normal);
-  assert.equal((await reconcileSecretary(f.context, f.root(), f.policy)).intake, undefined);
+  await f.input("confirmed", InputAttention.High);
+  assert.equal((await selectChiefIntake(f.context, f.root(), f.policy)).intake, undefined);
   await f.resources.patchStatus(f.root(), { execution: null });
   await reconcileChief(f.context, f.execution("close", async () => {
     await deliverInput(f.resources, f.root(), "close", "confirmed");
@@ -338,7 +339,7 @@ test("Business closes a due Ongoing before the Secretary ever creates a followup
     await upsertOngoing(f.resources, f.root(), { ongoingId: work.id, version: current.metadata.resourceVersion, outcome: "User confirmed delivery" }, "close");
   }), f.root(), f.policy);
   assert.ok((await readOngoing(f.resources, f.root(), work.id)).status.closure);
-  assert.equal((await reconcileSecretary(f.context, f.root(), f.policy)).intake, undefined);
+  assert.equal((await selectChiefIntake(f.context, f.root(), f.policy)).intake, undefined);
   assert.ok(!f.aide.topics.inputStore.list().some(i => i.spec.origin === "aide:followup"));
 });
 
@@ -346,16 +347,43 @@ test("Stow qualifies strictly above the threshold, yields to maintenance, and re
   const f = await secretaryFixture(t);
   const agent = { harness: "chief", sessionId: "current", promptTokens: f.policy.stowPromptTokens };
   await f.resources.patchStatus(f.root(), { agent });
-  const select = async () => (await reconcileSecretary(f.context, f.root(), f.policy)).intake?.inputs[0];
+  const select = async () => (await selectChiefIntake(f.context, f.root(), f.policy)).intake?.inputs[0];
   assert.equal(await select(), undefined);
-  await f.resources.patchStatus(f.root(), { agent: { ...agent, promptTokens: agent.promptTokens + 1 }, weaveRevision: 1 });
-  assert.equal((await select())?.spec.origin, "aide:curate");
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:stow").length, 0);
+  await f.resources.patchStatus(f.root(), { agent: { ...agent, promptTokens: agent.promptTokens + 1, stowSince: new Date().toISOString() }, weaveRevision: 1, weaveSince: new Date(Date.now() - 1000).toISOString() });
   await reconcileChief(f.context, f.execution("review"), f.root(), f.policy);
+  assert.ok(f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")?.status.assess?.completedAt);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:stow").length, 0);
   const stow = await select();
   assert.equal(stow?.spec.origin, "aide:stow");
   assert.equal((await select())?.metadata.uid, stow?.metadata.uid);
   assert.equal(f.root().status.agent?.promptTokens, agent.promptTokens + 1);
   await f.resources.patchStatus(f.root(), { lastInputAt: new Date(0).toISOString() });
   assert.equal(await select(), undefined);
+});
+
+test("Overdue Curate first appears as High and only the selected rule creates an Input", async t => {
+  const f = await secretaryFixture(t);
+  const since = new Date(Date.now() - 2 * f.policy.review.idleSeconds * 1000).toISOString();
+  await f.resources.patchStatus(f.root(), { chiefWorkload: { completed: 1, reviewed: 0, pendingSince: since },
+    agent: { harness: "chief", sessionId: "session", promptTokens: f.policy.stowPromptTokens + 1, stowSince: since } });
+  await f.input("normal", InputAttention.Normal);
+  await f.input("interrupt", InputAttention.Immediate);
+  const choose = async () => (await selectChiefIntake(f.context, f.root(), f.policy)).intake?.inputs[0];
+  assert.equal((await choose())?.metadata.name, "interrupt");
+  assert.equal(f.aide.topics.inputStore.list().length, 2);
+  await reconcileChief(f.context, f.execution("interrupt"), f.root(), f.policy);
+  const chosen = await choose();
+  assert.equal(chosen?.spec.origin, "aide:curate");
+  assert.equal(chosen?.spec.attention, InputAttention.High);
+  assert.equal(f.aide.topics.inputStore.list().length, 3);
+});
+
+test("Stow competes at Normal using the first over-threshold observation", async t => {
+  const f = await secretaryFixture(t);
+  await f.resources.patchStatus(f.root(), { agent: { harness: "chief", sessionId: "session",
+    promptTokens: f.policy.stowPromptTokens + 1, stowSince: new Date(Date.now() - 3600000).toISOString() } });
+  await f.input("newer", InputAttention.Normal);
+  const chosen = (await selectChiefIntake(f.context, f.root(), f.policy)).intake?.inputs[0];
+  assert.equal(chosen?.spec.origin, "aide:stow");
+  assert.equal(chosen?.spec.attention, InputAttention.Normal);
 });

@@ -9,11 +9,8 @@ import { isProcessingRoot } from "../topic/boundary.ts";
 export async function preparedInputs(resources: ResourceReader, owner: Readonly<TopicResource>, limit = 10, businessOnly = false, retryDelayMs = 60_000) {
   if (!isProcessingRoot(owner)) return [];
   const result: Input[] = [];
-  // Stow is selected separately, after considering fresh maintenance demand.
-  const queues = [{ name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, InputAttention.Immediate]) },
-    { name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, InputAttention.Normal]) },
-    ...(["aide:organize", "aide:followup", "aide:curate", "aide:summary"] as const).map(origin => ({ name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, origin]) }))];
-  for (const matchIndex of queues) {
+  for (const attention of [InputAttention.Immediate, InputAttention.High, InputAttention.Normal]) {
+    const matchIndex = { name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, attention]) };
     let cursor = "";
     do {
       const page = await resources.page<InputSpec, InputStatus>(INPUT_TYPE, { namespace: owner.metadata.namespace, matchIndex, continue: cursor, limit: 10 });
@@ -21,7 +18,7 @@ export async function preparedInputs(resources: ResourceReader, owner: Readonly<
         if (!deliveryRetryDue(input.status.assess, retryDelayMs) || input.metadata.deletionTimestamp || input.status.batchId || inputExpired(input) || deliveryFinished(input.status.assess)
           || input.status.assess?.executionId || result.some(i => i.metadata.uid === input.metadata.uid)) continue;
         const internal = isInternalInput(input.spec);
-        if (businessOnly && internal) return result;
+        if (businessOnly && internal) continue;
         if (internal) return result.length ? result : [input];
         if (result.length && result[0]!.spec.origin !== input.spec.origin) return result;
         result.push(input);

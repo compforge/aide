@@ -12,7 +12,7 @@ import { NOTE_TYPE, noteMaxChars, noteVersion, noteTextVersion, type NoteResourc
 const candidate = z.object({ noteId: z.string(), version: z.string(), chars: z.number().int().nonnegative(), maxChars: z.number().int().positive() }).strict();
 export const NotePressureSchema = z.object({ rootUid: z.string(), version: z.string(), maxNotes: z.number().int().positive(),
   count: z.number().int().nonnegative(), truncated: z.boolean(), notes: z.array(candidate).max(20), oversized: z.array(candidate).max(20),
-  nextAt: z.string().datetime(), attempts: z.number().int().nonnegative().max(5),
+  since: z.iso.datetime().optional(), nextAt: z.string().datetime(), attempts: z.number().int().nonnegative().max(5),
 }).strict();
 export type NotePressure = z.infer<typeof NotePressureSchema>;
 export type NotePressureTopic = { uid: string; name?: string; pressure: NotePressure };
@@ -44,7 +44,7 @@ export async function refreshNotePressure(context: Pick<PluginContext, "resource
     const identity = (n: NoteResource) => [n.metadata.uid, noteTextVersion(n), noteMaxChars(n.spec)];
     const version = digest([root.metadata.uid, maxNotes, notes.items.map(identity), oversized.items.map(identity)]);
     const pressure: NotePressure = { ...facts, rootUid: root.metadata.uid, version,
-      nextAt: previous?.version === version ? previous.nextAt : new Date(0).toISOString(), attempts: previous?.version === version ? previous.attempts : 0 };
+      since: previous?.since ?? new Date().toISOString(), nextAt: previous?.version === version ? previous.nextAt : new Date(0).toISOString(), attempts: previous?.version === version ? previous.attempts : 0 };
     if (isDeepStrictEqual(previous, pressure)) return;
     await context.resources.patchStatus(current, { notePressure: pressure }, { resourceVersion: current.metadata.resourceVersion });
     context.logger.info("Topic Note pressure observed", { attributes: { topicUid: current.metadata.uid, rootUid: root.metadata.uid,

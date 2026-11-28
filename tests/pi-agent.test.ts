@@ -910,7 +910,7 @@ test("Weave uses a dedicated native session and commits grouping through its res
 
 
 /** @case The Secretary seals a Deferred Batch while Chief is busy, then gives the next free turn to Immediate business. */
-test("Busy Chief finishes its turn while Secretary seals a Batch for later dispatch", { timeout: 20_000 }, async t => {
+test("Busy Chief accepts Immediate business directly while Secretary seals a Batch", { timeout: 20_000 }, async t => {
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   const fixture = await setup(t, (_request, index) => index === 0 ? { text: "Inspecting the first input", pause }
     : { text: "Handled internally" });
@@ -932,15 +932,16 @@ test("Busy Chief finishes its turn while Secretary seals a Batch for later dispa
   for (let i = 0; i < 300 && (await batch())?.status.phase !== "ready"; i++) await Bun.sleep(10);
   assert.equal((await batch())?.status.phase, "ready");
   assert.equal(fixture.requests.length, 1);
-  assert.equal(aide.topics.inputStore.get("urgent")!.status.assess?.executionId, undefined);
+  for (let i = 0; i < 300 && !aide.topics.inputStore.get("urgent")!.status.assess?.executionId; i++) await Bun.sleep(10);
+  assert.equal(aide.topics.inputStore.get("urgent")!.status.assess?.executionId, aide.topics.inputStore.get("first")!.status.assess?.executionId);
   release(); await aide.settled();
   assert.deepEqual(aide.topics.get("me")!.pendingInputIds, []);
   const first = aide.topics.inputStore.get("first")!.status.assess!;
   const urgent = aide.topics.inputStore.get("urgent")!.status.assess!;
-  assert.ok(first.completedAt); assert.ok(urgent.completedAt); assert.notEqual(first.executionId, urgent.executionId);
+  assert.ok(first.completedAt); assert.ok(urgent.completedAt); assert.equal(first.executionId, urgent.executionId);
   assert.match(JSON.stringify(fixture.requests[1]!.messages), /urgent/);
   assert.equal((await batch())!.status.phase, "completed");
-  assert.equal(aide.invocations().filter(i => i.topicId === "me").length, 3);
+  assert.equal(aide.invocations().filter(i => i.topicId === "me").length, 2);
   assert.equal(aide.outputs().length, 0);
 });
 
@@ -1403,6 +1404,60 @@ test("Weave queues a review Input after busy Chief business without mixing tools
 });
 
 /** @case A reused native session scopes tools and Usage to each independently dispatched Input. */
+test("Direct channel delivery binds its reply to a separate Stream in the same invocation", { timeout: 20_000 }, async t => {
+  let release!: () => void;
+  const pause = new Promise<void>(resolve => { release = resolve; });
+  const fixture = await setup(t, (_request, index) => index === 0 ? { text: "First reply", pause } : { text: "Second reply" });
+  const aide: Aide = new Aide(join(fixture.config.cwd, "direct-replies"), { cwd: fixture.config.cwd, timezone: "UTC",
+    defaultHarnessConfig: { id: "default", harness: "pi" },
+    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
+      chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }) }, pino({ level: "silent" }));
+  t.after(async () => { release(); await aide.close(); });
+  await aide.start();
+  const send = (id: string) => receiveDomain(aide, fixtureIncoming({ channelId: "web", topicId: "me", id, text: id }));
+  const first = await send("first");
+  for (let i = 0; i < 300 && !fixture.requests.length; i++) await Bun.sleep(10);
+  const second = await send("second");
+  for (let i = 0; i < 300 && !aide.topics.inputStore.get(second.inputId)?.status.assess?.executionId; i++) await Bun.sleep(10);
+  assert.equal(aide.topics.inputStore.get(second.inputId)?.status.assess?.executionId, aide.topics.inputStore.get(first.inputId)?.status.assess?.executionId);
+  release();
+  await aide.settled();
+  const replies = aide.outputStore.list().map(o => ({ id: o.spec.replyTo?.input.name, phase: aide.outputStore.streams.get(o.spec.stream).status.phase,
+    text: aide.outputs().find(view => view.id === o.metadata.name)?.text }));
+  assert.deepEqual(new Set(replies.map(r => r.id)), new Set([first.inputId, second.inputId]));
+  assert.ok(replies.every(r => r.phase !== "open"));
+  assert.doesNotMatch(replies.find(r => r.id === first.inputId)?.text ?? "", /Second reply/);
+  assert.match(replies.find(r => r.id === second.inputId)?.text ?? "", /Second reply/);
+});
+
+test("Normal business joins a running Curate and receives business tools at native delivery", { timeout: 20_000 }, async t => {
+  let release!: () => void;
+  const pause = new Promise<void>(resolve => { release = resolve; });
+  const fixture = await setup(t, (_request, index) => ({ text: "Handled", ...(index === 0 ? { pause } : {}) }));
+  const aide: Aide = new Aide(join(fixture.config.cwd, "curate-followup"), { cwd: fixture.config.cwd, timezone: "UTC",
+    defaultHarnessConfig: { id: "default", harness: "pi" },
+    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
+      chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }) }, pino({ level: "silent" }));
+  t.after(async () => { release(); await aide.close(); });
+  const topic = await aide.topics.ensure("me");
+  await aide.runtime.plugins.resourceClient("personal").patchStatus(topic, { weaveRevision: 1, lastInputAt: new Date().toISOString() });
+  await aide.start();
+  for (let i = 0; i < 300 && !fixture.requests.length; i++) await Bun.sleep(10);
+  assert.equal(fixture.requests.length, 1);
+  const review = aide.topics.inputStore.list().find(i => i.spec.origin === "aide:curate")!;
+  await aide.topics.submit("arrival", { topicId: "me", origin: "source", originId: "fixture", attention: InputAttention.Normal, text: "Updated delivery date" });
+  for (let i = 0; i < 300 && !aide.topics.inputStore.get("arrival")?.status.assess?.executionId; i++) await Bun.sleep(10);
+  assert.equal(aide.topics.inputStore.get("arrival")?.status.assess?.executionId, review.status.assess?.executionId);
+  release();
+  await aide.settled();
+  const tools = fixture.requests.map(r => (r.tools as { function: { name: string } }[]).map(tool => tool.function.name));
+  assert.ok(tools[0]!.includes("confirm_curated_notes"));
+  assert.ok(tools[1]!.includes("say"));
+  assert.ok(!tools[1]!.includes("confirm_curated_notes"));
+  assert.match(JSON.stringify(fixture.requests[1]!.messages), /Current Input origin: source/);
+  assert.ok(aide.topics.inputStore.get("arrival")?.status.assess?.completedAt);
+});
+
 test("Chief selects tools and records Usage for successive executions on the same Pi session", { timeout: 30_000 }, async t => {
   const { Type } = await import("typebox");
   const { BUSINESS_INPUT_ORIGINS } = await import("../plugins/personal/chief/agent/input-tools.ts");
