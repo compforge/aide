@@ -7,11 +7,12 @@ import { collectTopic, releaseTopicAgent } from "./session.ts";
 import { assignmentWatch, resourceRef } from "../input/state.ts";
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
-import { preparedIntake } from "./intake.ts";
+import { reconcileSecretary } from "../secretary/reconcile.ts";
+import { ongoingMaterialWatch, ongoingWatch } from "../secretary/ongoing.ts";
 import { batchWatch } from "../batch/reconcile.ts";
 import { chiefPreviews } from "./inputs.ts";
 import { finalizeExecution, runInput } from "../execution/loop.ts";
-import { submitChiefPending } from "./intake.ts";
+import { submitGatePending } from "../gate/intake.ts";
 import { isInternalInput } from "../input/model.ts";
 import { patchStatus } from "../status.ts";
 import { topicPolicy, type TopicPolicy } from "../topic/config.ts";
@@ -26,16 +27,12 @@ function boundedPrompt(prompt: string, limit: number): string {
   return prompt.length <= limit ? prompt : prompt.slice(0, limit - suffix.length) + suffix;
 }
 
-/** @spec Intake can steer while the agent controller waits for inference. Timer activation remains independent of new input. */
+/** @spec Input ownership converges while the domain agent is busy. Only Gate accepts conversational interruptions. */
 export async function reconcileChiefIntake(context: PluginContext, execution: ReconcileContext, c: Readonly<TopicResource>) {
   if (c.metadata.deletionTimestamp) { await releaseTopicAgent(context, execution, c); return; }
   if (await reconcileAssignments(context, c)) return { requeueAfterMs: 1 };
   c = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(c)))!;
-  if (isProcessingRoot(c)) {
-    const retry = await submitChiefPending(context, execution, c);
-    if (retry) return retry;
-  }
-  if (isGateTopic(c)) return;
+  if (isGateTopic(c)) return submitGatePending(context, execution, c);
   const result = await collectTopic(context, c);
   return { ...result, requeueAfterMs: Math.min(result?.requeueAfterMs ?? Infinity, topicPolicy(context.instance.config.topic).trigger.intervalSeconds * 1000) };
 }
@@ -54,10 +51,13 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     return { requeueAfterMs: 1 };
   }
   if (!isProcessingRoot(initial)) { await releaseTopicAgent(context, execution, initial); return; }
-  const { inputs, batch } = await preparedIntake(context.resources, initial, false, policy.trigger.intervalSeconds * 1000), input = inputs[0];
+  const selected = await reconcileSecretary(context, initial, policy);
+  const { inputs, batch } = selected.intake ?? { inputs: [] };
+  const input = inputs[0];
   if (!input) {
-    const result = await collectTopic(context, initial, execution);
-    return { ...result, requeueAfterMs: Math.min(result?.requeueAfterMs ?? Infinity, policy.trigger.intervalSeconds * 1000) };
+    const latest = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(initial));
+    const result = latest && await collectTopic(context, latest, execution);
+    return { ...result, requeueAfterMs: Math.min(result?.requeueAfterMs ?? Infinity, selected.requeueAfterMs) };
   }
   if (initial.status.phase === "dormant" && isInternalInput(input.spec) && input.spec.origin !== "aide:followup") {
     await patchStatus(context.resources, input, { assess: { ...input.status.assess, completedAt: new Date().toISOString(),
@@ -73,11 +73,11 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   return typeof retry === "object" ? retry : { requeueAfterMs: 1 };
 }
 
-/** @spec Intake and agent controllers keep separate queues so new material can steer active inference. */
+/** @spec Each domain selects and admits on its serial agent controller. Ownership and Gate intake can progress independently. */
 export function registerChief(context: PluginContext): void {
   const policy = topicPolicy(context.instance.config.topic);
   context.controllers.register({ resourceType: TOPIC_TYPE, maxConcurrency: 1, watches: [batchWatch(true), notePressureWatch(context), topicWatch(context), materialWatch(), assignmentWatch("assess", "Topic")],
     reconcile: (execution, c: Readonly<TopicResource>) => reconcileChiefIntake(context, execution, c) });
-  context.controllers.register({ name: "agent", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [batchWatch(), notePressureWatch(context), topicWatch(context), materialWatch(), assignmentWatch("assess", "Topic")],
+  context.controllers.register({ name: "agent", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [ongoingWatch(context), ongoingMaterialWatch(context), batchWatch(), notePressureWatch(context), topicWatch(context), materialWatch(), assignmentWatch("assess", "Topic")],
     reconcile: (execution, c: Readonly<TopicResource>) => reconcileChief(context, execution, c, policy) });
 }

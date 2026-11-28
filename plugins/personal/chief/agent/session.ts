@@ -76,15 +76,14 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
         const c = active();
         return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "chief",
           inputs: [...store.topics.inputStore.query("deliveryExecution", c.status.execution!.id).map(i => ({
-            id: i.metadata.name, deliveryId: i.status.assess?.deliveryId ?? `input:${i.metadata.uid}`, initial: !i.status.assess?.deliveryId && i.status.assess?.startedAt === c.status.execution!.startedAt,
+            id: i.metadata.name,
             ongoingUid: typeof i.spec.observation?.ongoingUid === "string" ? i.spec.observation.ongoingUid : undefined,
             summaryOwnerUid: i.spec.origin === "aide:summary" ? SummaryOwnerSchema.parse(i.spec.observation?.summaryOwner).uid : undefined,
             origin: i.spec.origin, text: inputPreview(i, Math.floor(policy.contextChars / 8)),
           })), ...store.resources.list<BatchSpec, BatchStatus>(BATCH_TYPE, { matchIndex: { name: "deliveryExecution", value: c.status.execution!.id } }).flatMap(batch => {
             const members = store.topics.inputStore.query("batch", batch.metadata.uid);
             return chiefPreviews(members, Math.floor(policy.contextChars / 8)).map(item => ({
-              id: item.inputId, deliveryId: batch.status.assess?.deliveryId ?? `batch:${batch.metadata.uid}`,
-              initial: !batch.status.assess?.deliveryId && batch.status.assess?.startedAt === c.status.execution!.startedAt,
+              id: item.inputId,
               origin: members[0]!.spec.origin, text: item.description,
             }));
           }) ] };

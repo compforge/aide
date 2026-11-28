@@ -13,17 +13,21 @@ export async function preparedInputs(resources: ResourceReader, owner: Readonly<
     { name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, InputAttention.Normal]) },
     ...(["aide:organize", "aide:followup", "aide:curate", "aide:summary"] as const).map(origin => ({ name: "assessReadyArrival", value: JSON.stringify([owner.metadata.uid, origin]) }))];
   for (const matchIndex of queues) {
-    const page = await resources.page<InputSpec, InputStatus>(INPUT_TYPE, { namespace: owner.metadata.namespace, matchIndex, limit: Math.min(10, limit) });
-    for (const input of page.items) {
-      if (!deliveryRetryDue(input.status.assess, retryDelayMs) || input.metadata.deletionTimestamp || input.status.batchId || inputExpired(input) || deliveryFinished(input.status.assess)
-        || input.status.assess?.executionId || result.some(i => i.metadata.uid === input.metadata.uid)) continue;
-      const internal = isInternalInput(input.spec);
-      if (businessOnly && internal) return result;
-      if (internal) return result.length ? result : [input];
-      if (result.length && result[0]!.spec.origin !== input.spec.origin) return result;
-      result.push(input);
-      if (result.length >= limit) return result;
-    }
+    let cursor = "";
+    do {
+      const page = await resources.page<InputSpec, InputStatus>(INPUT_TYPE, { namespace: owner.metadata.namespace, matchIndex, continue: cursor, limit: 10 });
+      for (const input of page.items) {
+        if (!deliveryRetryDue(input.status.assess, retryDelayMs) || input.metadata.deletionTimestamp || input.status.batchId || inputExpired(input) || deliveryFinished(input.status.assess)
+          || input.status.assess?.executionId || result.some(i => i.metadata.uid === input.metadata.uid)) continue;
+        const internal = isInternalInput(input.spec);
+        if (businessOnly && internal) return result;
+        if (internal) return result.length ? result : [input];
+        if (result.length && result[0]!.spec.origin !== input.spec.origin) return result;
+        result.push(input);
+        if (result.length >= limit) return result;
+      }
+      cursor = page.metadata.continue;
+    } while (cursor);
   }
   return result;
 }

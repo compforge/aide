@@ -6,7 +6,7 @@ import { ResourceRefSchema } from "../topic/ref.ts";
 import { isGateTopic } from "../topic/boundary.ts";
 import { readTopicInScope } from "../topic/tree.ts";
 import type { TopicResource } from "../topic/model.ts";
-import { ONGOING_TYPE, OngoingSpecSchema, OngoingStatusSchema, ongoingView, type OngoingSpec, type OngoingStatus } from "./model.ts";
+import { DEFAULT_CHECK_INTERVAL_MS, ONGOING_TYPE, OngoingSpecSchema, OngoingStatusSchema, ongoingView, type OngoingSpec, type OngoingStatus } from "./model.ts";
 
 const UpdateSchema = z.object({
   ongoingId: z.string().min(1).optional(), version: z.string().min(1).optional(), title: OngoingSpecSchema.shape.title.optional(),
@@ -36,7 +36,7 @@ export async function upsertOngoing(resources: ResourceClient, actor: TopicResou
     const existing = await resources.get<OngoingSpec, OngoingStatus>(ref);
     if (existing) return ongoingView(existing);
     try {
-      return ongoingView(await resources.create(ONGOING_TYPE, { name: id, spec, status: { writer, updatedAt, nextCheckAt: args.checkAt ?? new Date(now.getTime() + 3_600_000).toISOString(), ...(args.progress ? { progress: args.progress } : {}) } }));
+      return ongoingView(await resources.create(ONGOING_TYPE, { name: id, spec, status: { writer, updatedAt, nextCheckAt: args.checkAt ?? new Date(now.getTime() + DEFAULT_CHECK_INTERVAL_MS).toISOString(), ...(args.progress ? { progress: args.progress } : {}) } }));
     } catch (error) {
       if (!(error instanceof ResourceAlreadyExists) && !(error instanceof Error && error.name === "ResourceAlreadyExists")) throw error;
       return ongoingView(await readOngoing(resources, actor, id));

@@ -69,14 +69,14 @@ plugins/personal/
   definitions.ts           # Host 资源定义组装
   aide.ts                  # Host 应用服务：入口、执行 action、恢复与角色工厂装配
   chief/                   # root Input/Batch 选择、接纳、执行与完成事务
-    reconcile.ts           # 独立 intake / agent Controller；保持运行中投递能力
-    intake.ts              # 从就绪 Input/Batch 选择待办并通知运行中的 Chief
+    reconcile.ts           # 归属刷新和串行接纳；root 空闲时调用秘书选单
     queue.ts               # 独立 Input 优先级与到期重试选择
     delivery.ts            # 按 Pi 用户消息记录 Chief 投递事实
     workload.ts            # Chief 完成事实与 Review 水位写入
     agent/                 # Host 加载：session 工厂、提示词、工具与背景
   secretary/               # 确定性安排后续工作，无 Agent 和独立 CRD
-    reconcile.ts           # 角色注册、资源观察、空检查与过时请求取消
+    reconcile.ts           # 按 root 闲忙和资源现状选单
+    intake.ts              # 查询已就绪的独立 Input 与 Batch
     batching.ts            # 按数量和等待时间选择 Deferred 材料
     maintenance.ts         # 直属容量检查与维护议题
     input.ts               # 维护 Input 创建、去重与准备阶段冷却
@@ -140,7 +140,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 按业务职责在 plugin package 内组织模块：CRD 的模型、事务约束和生命周期就近放置；Chief / Secretary 等独立角色拥有自己的目录，即使状态存储在 Topic。Task / Routine 等兼具角色与资源的模块保持合一。Agent 是角色内部能力，放在角色的 agent/ 子目录并由 Host 工厂加载，Runner 入口不得运行时导入它；跨角色共享执行机制放在 execution/。ResourceDefinition 集中声明 Schema、校验、Printer、索引与保留策略；所有写入在存储事务内校验，提交后通知 Watch。
 - 资源身份按插件实例与 namespace 组织，引用固定 UID。同一 Controller 对同一资源串行；主资源纯 status 更新不自动唤醒自身，协作方显式声明 Watch。依赖其它资源的容量资格通过 retention.canEvict 在实际淘汰事务内重查。资源所有者决定能否释放，Host 写入只检查容量并通知独立 GC；GC 对合格 owner tree 原子请求删除，再沿 Controller / finalize 生命周期释放容量。
 - Operator 通过 Harness interface / verb 操作原生 agent loop，恢复参数由 Operator 自己保存。Personal 的 status.agent 只是调用参数；Harness verb 不读写 CRD。原生持久化、历史与恢复属于 Harness，实时投影和诊断日志不承担恢复。
-- Secretary 是 Topic 上独立的确定性 Reconcile，不调用 Agent；按数量/等待时间准备批次和内部维护 Input，Chief 只关注抽到的非 Deferred Input／Batch，负责工具选择、Agent 执行与结果。Secretary 旁观处理量、等待时间与 pressure，工作产物是 Input／Batch；Immediate／Normal 直接交给 Chief。每个成功投递的 Input／Batch 计一次 Chief 工作量（包括维护 Input），Task／Routine 普通状态不计入。Batch 是独立 CRD，成员关系只保存在 Input.status.batchId；Chief 接纳独立 Input 或 Batch，成员集合在归组后固定，当前仅包含 Deferred；投递事件写 Batch 回执，Input Reconcile 投影成员投递状态，Work 办理回执保持独立。职责见 [Secretary](docs/personal/secretary.md)，批次契约见 [Batch](docs/personal/input.md#batch)。
+- Secretary 按 root 的执行状态选单。Chief 忙时继续按数量或最早等待时间封 Deferred Batch。空闲时一次选一个业务 Input、就绪 Batch 或内部维护事项。只有选中的维护事项生成 Input。每个成功投递的 Input／Batch 计一次 Chief 工作量（包括维护 Input），Task／Routine 普通状态不计入。Batch 是独立 CRD，成员关系只保存在 Input.status.batchId；Chief 接纳独立 Input 或 Batch，成员集合在归组后固定，当前仅包含 Deferred；投递事件写 Batch 回执，Input Reconcile 投影成员投递状态，Work 办理回执保持独立。职责见 [Secretary](docs/personal/secretary.md)，批次契约见 [Batch](docs/personal/input.md#batch)。
 - Route、Chief、Task、Routine、Weave Agent 只由各自对应的 Reconcile 触发，包括 prompt、steer 与 followUp；协作组件和 Agent 工具通过资源变化协作，不直接触发其它角色。
 - Input、Task、Routine 通过 status.topic 保存唯一且可调整的材料 Topic UID 引用；Input.assess.topic 保存未领取待办的最终一致负责人缓存，领取后保留实际执行归属，Input.assess 保存 Chief 接纳 executionId 及投递时间，自动 prompt / steer / followUp 在提交前通过资源事务竞争接纳；Topic 保存 Chief 执行与原生会话。Route 保存首次路由回执，Chief 在树内整理归属，Weave 只改变父子关系。
 - 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。Chief 未提交终态结果的 Input／Batch 在执行释放后重试，已有终态结果保持不变；Work 的副作用恢复由其自身契约负责。

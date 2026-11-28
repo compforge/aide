@@ -287,7 +287,7 @@ test(`review request rolls back on ${race} at commit`, async t => {
   await assert.rejects(createMaintenanceInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:curate"), race === "schedule-failure" ? /unknown|Unrecognized/ : /eligible root/);
   assert.equal(f.aide.topics.inputStore.list().length, 0);
   assert.equal(f.read().status.reviewCheckedAt ?? null, null);
-  assert.equal(f.read().status.maintenanceRequests, undefined);
+  assert.equal(f.read().status.maintenanceChecks, undefined);
 });
 
 for (const sameDue of [true, false])
@@ -430,7 +430,7 @@ test("stored per-Note review metadata is discarded without changing content or a
   const names = noteTools(f.resources, f.read).map(t => t.name);
   assert.ok(!names.includes("review_notes"));
   assert.ok(names.includes("prune_note")); assert.ok(names.includes("retire_note"));
-  assert.equal(await reconcileNote(f.context, before), undefined);
+  await reconcileNote(f.context, before);
   assert.deepEqual(await f.get(n.noteId), before);
 });
 
@@ -557,6 +557,26 @@ test("Ongoing checks have an independent identity, one durable request and one p
   assert.equal(await prepareOngoingCheck(f.context, await read(), policy, due), undefined);
 });
 
+test("Chief can ask about the current question it revised in the same followup", async t => {
+  const f = await setup(t);
+  await fixtureMe(f.aide);
+  const matter = await upsertOngoing(f.resources, f.read(), {
+    title: "Sign-off", question: "Is sign-off complete?", checkAt: new Date(0).toISOString(),
+  }, "signoff");
+  const read = () => readOngoing(f.resources, f.read(), matter.id);
+  await prepareOngoingCheck(f.context, await read(), topicPolicy());
+  const request = f.aide.topics.inputStore.get((await read()).status.followupInputId!)!;
+  await deliverInput(f.resources, f.read(), "live", request.metadata.name);
+  const question = "When is sign-off scheduled?";
+  await upsertOngoing(f.resources, f.read(), { ongoingId: matter.id, version: (await read()).metadata.resourceVersion, question }, "revise");
+  const ask = () => f.aide.topics.say("knowledge", undefined, question, "live", {
+    workId: matter.id, purpose: "question", to: { me: true }, inputIds: [request.metadata.name] });
+  const first = await ask();
+  assert.deepEqual(await ask(), first);
+  assert.equal(f.aide.topics.outputStore.get(first.outputId)?.spec.work?.uid, matter.uid);
+  assert.equal(f.aide.outputs().length, 1);
+});
+
 test("new material and a due appointment share one followup and one question opportunity", async t => {
   const f = await setup(t), work = f.aide.work("knowledge");
   const matter = await work.create({ kind: "ongoing", title: "Verify approval", checkAt: "2024-01-01T00:00:00.000Z" });
@@ -616,10 +636,14 @@ test("startup converts existing Ongoing checks without rearming a consumed appoi
   const saved = await readOngoing(f.resources, f.read(), matter.id);
   assert.equal(saved.status.followupInputId, priorId);
   assert.equal(saved.status.nextCheckAt, matter.checkAt);
-  assert.equal(await prepareOngoingCheck(f.context, saved, topicPolicy(), Date.parse(matter.checkAt!) + 1), undefined);
+  await prepareOngoingCheck(f.context, saved, topicPolicy(), Date.parse(matter.checkAt!) + 1);
+  const renewed = await readOngoing(f.resources, f.read(), matter.id);
+  assert.equal(renewed.status.nextCheckAt, new Date(Date.parse(matter.checkAt!) + 3_600_000).toISOString());
+  assert.equal(renewed.status.followupInputId, undefined);
+  assert.ok(!f.aide.topics.inputStore.list().some(i => i.spec.origin === "aide:followup"));
 });
 
-test("a time-only Ongoing check can complete silently and does not repeat the consumed plan", async t => {
+test("delivered time-only checks schedule the next hour once and stay silent", async t => {
   const f = await setup(t);
   const matter = await upsertOngoing(f.resources, f.read(), { title: "Awaiting approval" }, "approval");
   const read = () => readOngoing(f.resources, f.read(), matter.id);
@@ -631,7 +655,16 @@ test("a time-only Ongoing check can complete silently and does not repeat the co
   await deliverInput(f.resources, f.read(), "live", request.metadata.name);
   assert.equal((await read()).status.closure, undefined);
   assert.equal(f.aide.outputs().length, 0);
-  assert.equal(await prepareOngoingCheck(f.context, await read(), topicPolicy(), due + 86_400_000), undefined);
+  const delivered = f.aide.topics.inputStore.get(request.metadata.name)!.status.assess!.completedAt!;
+  const next = Date.parse(delivered) + 3_600_000;
+  assert.equal((await read()).status.nextCheckAt, new Date(next).toISOString());
+  assert.equal((await read()).status.followupInputId, undefined);
+  await deliverInput(f.resources, f.read(), "live", request.metadata.name);
+  assert.equal((await read()).status.nextCheckAt, new Date(next).toISOString());
+  assert.equal((await prepareOngoingCheck(f.context, await read(), topicPolicy(), next - 1))?.requeueAfterMs, 1);
+  const second = await prepareOngoingCheck(f.context, await read(), topicPolicy(), next);
+  assert.notEqual(second?.input?.metadata.name, request.metadata.name);
+  assert.ok(second?.input);
 });
 
 test("curating or retiring evidence leaves its Ongoing open; updated plans fence stale writes", async t => {
@@ -828,9 +861,6 @@ test("evidence that a matter is still ongoing settles the old check without aski
   const followup = { question: "Did the scheduled sign-off complete?", checkAt: new Date(Date.now() + 86_400_000).toISOString() };
   await upsertOngoing(f.resources, f.read(), { ongoingId: matter.id, version: (await read()).metadata.resourceVersion,
     progress: "Owner confirmed review and scheduled sign-off for tomorrow", ...followup }, "progress");
-  await fixtureMe(f.aide);
-  await assert.rejects(f.aide.topics.say("knowledge", undefined, "Has sign-off happened?", "live", {
-    purpose: "question", workId: matter.id, to: { me: true }, inputIds: [request.metadata.name] }), /no longer matches/);
   await deliverInput(f.resources, f.read(), "live", request.metadata.name);
   const updated = await read();
   assert.equal(updated.status.closure, undefined);
@@ -839,17 +869,15 @@ test("evidence that a matter is still ongoing settles the old check without aski
   assert.equal(f.aide.outputs().length, 0);
 });
 
-test("at the dormancy deadline one final Note batch supersedes an unclaimed routine review", async t => {
+test("at the dormancy deadline one final Note batch covers still-pending material", async t => {
   const { reconcileSecretary } = await import("../plugins/personal/secretary/reconcile.ts");
   const f = await setup(t);
   const draft = await f.note({ nature: "semantic", text: "New material for the next review" }, "closeout");
   const at = new Date().toISOString(), policy = topicPolicy();
-  const review = await createMaintenanceInput(f.context, f.read(), at, await maintenanceAgenda(f.resources, []));
   await f.resources.patchStatus(f.read(), { execution: null, lastInputAt: new Date(Date.now() - 901_000).toISOString() });
   await reconcileSecretary(f.context, f.read(), policy);
   const requests = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate");
-  assert.equal(requests.length, 2);
-  assert.equal(f.aide.topics.inputStore.get(review.metadata.name)!.status.assess?.result?.disposition, "cancelled");
+  assert.equal(requests.length, 1);
   const closeout = requests.find(i => i.spec.observation?.trigger === "notes_changed")!;
   assert.deepEqual(closeout.spec.observation?.notes, [draft]);
   await f.resources.patchStatus(f.read(), { execution: { id: "last", startedAt: at } });

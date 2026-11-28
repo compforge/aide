@@ -178,14 +178,15 @@ export class TopicStore {
       const topicUid = matter?.spec.topic.uid ?? delegated?.status.topic.uid;
       if (!work || work.metadata.deletionTimestamp || owner && owner.metadata.uid !== work.metadata.uid || !this.scope(initial.metadata.uid).some(t => t.metadata.uid === topicUid))
         throw new Error("Work is unavailable in this scope");
-      if (asking && (!matter || matter.status.closure || reminders.some(i => i.spec.observation?.ongoingUid !== matter.metadata.uid
-        || (i.spec.observation?.question === undefined ? matter.status.followupInputId !== i.metadata.name
-          : i.spec.observation.question !== (matter.spec.question ?? null)))))
-        throw new Error("Question no longer matches an open Ongoing");
+      if (asking && (!matter || matter.status.closure)) throw new Error("Question requires an open Ongoing");
+      if (asking && reminders.some(i => i.spec.observation?.ongoingUid !== matter?.metadata.uid))
+        throw new Error("Use the Ongoing assigned to this followup");
       return { work, question: matter?.spec.question };
     };
     const subject = readSubject();
-    const legacy = reminders.find(i => i.spec.observation?.question === undefined);
+    // Legacy questions used the reminder name as their Output identity.
+    const legacy = reminders.find(i => this.outputStore.get(i.metadata.name)?.spec.work?.uid === subject?.work.metadata.uid
+      || this.outputStore.storage.receipt(`output:${i.metadata.name}`));
     const id = legacy?.metadata.name ?? (asking && subject ? digest([subject.work.metadata.uid, subject.question ?? null, evidence.map(i => i.metadata.uid).sort()])
       : options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID());
     const previous = this.outputStore.get(id);

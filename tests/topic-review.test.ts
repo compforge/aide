@@ -372,7 +372,8 @@ test("Web review toggle persists independently of periodic wakeup configuration"
   assert.equal(rows.items.find(row => row.id === "root")!.review.enabled, false);
   assert.equal(f.read().status.idleReviewCount, 0);
   assert.equal(f.read().status.reviewCheckedAt, null);
-  assert.equal((await f.run())!.requeueAfterMs, 60000, "Disabling review does not disable periodic reconciliation");
+  const next = (await f.run())!.requeueAfterMs;
+  assert.ok(next > 0 && next <= 60000, "Periodic reconciliation remains active");
   await f.input("normal", InputAttention.Normal); await f.run(); assert.equal(f.calls.length, 1);
   await f.aide.setTopicReview("root", true); await f.run(); assert.equal(f.calls.length, 1);
 });
@@ -400,18 +401,16 @@ test("Business Inputs precede capacity maintenance even when idle review is disa
   await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Immediate);
   await f.run({ maxUnfiledInput: 1 });
-  assert.equal(f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:organize")!.status.assess?.executionId, undefined,
-    "Secretary can prepare maintenance while business retains priority");
-  assert.ok(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt);
+  assert.ok(!f.aide.topics.inputStore.list().some(i => i.spec.origin === "aide:organize"));
   assert.ok(f.aide.topics.inputStore.get("two")!.status.assess?.completedAt);
-  assert.ok(f.calls[0]!.prompt.indexOf("two") < f.calls[0]!.prompt.indexOf("one"));
-  await f.run();
-  assert.equal(f.calls.length, 2);
+  assert.equal(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt, undefined);
+  await f.run(); await f.run();
+  assert.equal(f.calls.length, 3);
   const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:organize")!;
   assert.ok(request.status.assess?.completedAt);
 });
 
-test("Immediate intake can steer a running organization pass", async t => {
+test("Immediate intake waits for a running organization pass", async t => {
   const f = await fixture(t);
   for (const name of ["a", "b"]) await createWithSummary(f.resources, TOPIC_TYPE, { name, spec: { id: name, parentRef: resourceRef(f.read()) }, status: { summary: "", receipts: [] } });
   const requests: unknown[] = [];
@@ -423,7 +422,7 @@ test("Immediate intake can steer a running organization pass", async t => {
     } } } as unknown as ReconcileContext, f.read());
   };
   await f.run({ maxChildren: 1 });
-  assert.deepEqual(requests, [{ name: "submit_topic", args: { inputId: "arrival", inputIds: ["arrival"], operation: "steer" } }]);
+  assert.deepEqual(requests, []);
   f.hooks.beforeAssess = undefined;
   await f.run();
   assert.ok(f.aide.topics.inputStore.get("arrival")!.status.assess?.completedAt);
@@ -431,10 +430,10 @@ test("Immediate intake can steer a running organization pass", async t => {
 
 test("Idle timer cannot bypass capacity cooldown when an organization pass makes no progress", async t => {
   const f = await fixture(t);
-  await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal); await f.run();
-  await f.run({ maxUnfiledInput: 1 }); assert.equal(f.calls.length, 2);
+  await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal); await f.run(); await f.run();
+  await f.run({ maxUnfiledInput: 1 }); assert.equal(f.calls.length, 3);
   await f.due(); await f.run();
-  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls.length, 3);
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize").length, 1);
 });
 
@@ -446,7 +445,7 @@ test("A persisted pressure request waits for business without duplicate maintena
   await f.run({ maxUnfiledInput: 1 });
   assert.equal(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.executionId, undefined);
   assert.ok(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt);
-  await f.run();
+  await f.run(); await f.run();
   assert.ok(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.completedAt);
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:organize").length, 1);
 });
@@ -454,7 +453,7 @@ test("A persisted pressure request waits for business without duplicate maintena
 test("Failed capacity execution waits to retry while new business is processed next", async t => {
   const f = await fixture(t);
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
-  await f.run();
+  await f.run(); await f.run();
   await f.run({ maxUnfiledInput: 1 }, true);
   const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:organize")!;
   assert.equal(request.status.assess?.executionId, undefined);
@@ -475,7 +474,7 @@ test("Chief activation keeps its character and admission budgets with large pend
   }
   await f.run({ contextChars: 4096 });
   assert.ok(f.calls[0]!.prompt.length <= 4096);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.completedAt).length, 10);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.completedAt).length, 1);
 });
 
 async function expireMaintenance(f: Awaited<ReturnType<typeof fixture>>) {
@@ -625,15 +624,13 @@ test("business inputs run ahead of Note pressure and resolved pressure requests 
   for (let i = 0; i < 2; i++) references.push(await upsertTopicNote(f.resources, f.read(), "write", { nature: "semantic", text: `n-${i}` }, String(i)));
   await f.resources.patchStatus(f.read(), { execution: null });
   await f.input("business", InputAttention.Immediate);
-  await f.run();
-  assert.equal(f.calls.length, 1); assert.ok(!f.calls[0]!.prompt.includes("Note consolidation"));
-  const pending = await createMaintenanceInput(f.context, f.read(), new Date().toISOString(), await maintenanceAgenda(f.resources, []), "aide:curate", "note_pressure");
+  assert.equal((await reconcileSecretary(f.context, f.read())).intake?.inputs[0]?.metadata.name, "business");
   await f.resources.patchStatus(f.read(), { execution: { id: "reduce", startedAt: new Date().toISOString() } });
   await retireNote(f.resources, f.read(), { noteId: references[0]!.noteId, version: references[0]!.version, reason: "duplicate" });
   await f.resources.patchStatus(f.read(), { execution: null });
   await f.run();
   assert.equal(f.calls.length, 1);
-  assert.ok(f.aide.topics.inputStore.get(pending.metadata.name)!.status.assess?.completedAt);
+  assert.ok(!f.aide.topics.inputStore.list().some(i => i.spec.origin === "aide:curate"));
 });
 
 /** @case Updating a Note during scheduled review cannot schedule another immediate review. */

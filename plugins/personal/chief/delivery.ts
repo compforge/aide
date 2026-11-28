@@ -11,6 +11,7 @@ import { SummaryOwnerSchema } from "../input/review.ts";
 import type { ResourceContext } from "../context.ts";
 import type { TopicResource, TopicStatus } from "../topic/model.ts";
 import { commitStatus } from "../status.ts";
+import { ONGOING_TYPE, type OngoingResource, nextCheckAfterDelivery } from "../ongoing/model.ts";
 import { inputOutcome } from "./input-outcome.ts";
 import { NOTE_TYPE, noteVersion, noteMaterial, type NoteResource } from "../note/model.ts";
 import { completeChiefWork } from "./workload.ts";
@@ -47,6 +48,16 @@ export async function recordDelivery(resources: ResourceClient, owner: TopicReso
               if (material !== note.status.curationDelivery?.material) writes.push({ operation: "patchStatus", resource: note,
                 patch: { curationDelivery: { inputUid: input.metadata.uid, material } } });
             }
+          }
+        }
+        if (input.spec.origin === "aide:followup") {
+          const observation = input.spec.observation;
+          if (typeof observation?.ongoingId === "string") {
+            const matter = await resources.get<OngoingResource["spec"], OngoingResource["status"]>({
+              ...ONGOING_TYPE, namespace: input.metadata.namespace, name: observation.ongoingId });
+            const nextCheckAt = matter && nextCheckAfterDelivery(matter, input, at);
+            if (matter && nextCheckAt) writes.push({ operation: "patchStatus", resource: matter,
+              patch: { followupInputId: undefined, nextCheckAt } });
           }
         }
         if (input.spec.origin === "aide:summary") {

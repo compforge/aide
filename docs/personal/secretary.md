@@ -4,13 +4,13 @@
 
 Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为可处理的待办，像秘书为老板安排工作日程。日程随资源事实变化持续更新，不绑定自然日。它决定何时准备哪些请求，业务判断与执行由 Chief 负责。
 
-角色的本质是 Reconciler。Secretary 运行在 Topic 的具名 `secretary` Controller 中，独立于 Chief 的执行，因此 Chief 忙时仍可准备后续待办。它通过资源读写协作，不调用 Agent、不领取 Chief execution，也没有独立的 Secretary CRD 或会话。
+Secretary 通过资源 Watch 和定时协调工作。独立的 secretary Controller 负责 Deferred 归组和压力观测，领域 agent Controller 在同一 root 的串行执行边界内调用秘书选单并接纳结果。
 
 ## 输入与产物
 
 | 观察到的事实 | 准备的待办 |
 | --- | --- |
-| Deferred Input 的数量与最早等待时间达到阈值 | 创建独立 Batch，将兼容的原始 Input 归入固定批次 |
+| 同组 Deferred Input 达到数量阈值，或最早一条等到时限 | 创建独立 Batch，将兼容的原始 Input 归入固定批次 |
 | Topic 的直属未归集 Input、Work 或 child 数量超限 | 创建一条 `aide:organize` Input，请 Chief 一起整理主题结构和材料归属 |
 | Weave 结构版本变化或 Note 容量压力 | 创建 `aide:curate` Input，请 Chief 检查并维护认识 |
 | Chief 完成量达到阈值，或待回顾活动等待达到时限 | 创建 `aide:curate` Input；本轮覆盖请求创建时的完成水位 |
@@ -22,7 +22,7 @@ Secretary 是与 Chief 配套的确定性角色，负责把当前材料整理为
 
 领域根 Topic 的 `status.phase` 取 `active` 或 `dormant`，覆盖整棵职责树。Channel、Source 和 Gate 转交的用户请求按原始到达时间更新 `lastInputAt`。用户主动补充 Ongoing 也算外部活动。秘书的内部 Input 和 Chief 的办理决定保持现有活动时间。
 
-距最后一次外部活动满 `topic.dormantAfterSeconds`（默认 900 秒），Chief 的执行结束，业务 Input 与 Batch 排空后，领域可以静默。有尚未投递的普通 Note 时，秘书可在当前活跃期结束前安排最后一批整理。静默期间暂停 Curate、Organize 和该领域负责的 Summary 复核。已承诺的 Ongoing 仍按计划跟进。执行中的业务可以接收新业务，例行维护等待独立的空闲轮次。仍在秘书处积攒的 Deferred 材料先按 Batch 策略归组。
+距最后一次外部活动满 `topic.dormantAfterSeconds`（默认 900 秒），Chief 执行结束且业务清空后，领域可以静默。秘书可在此之前安排最后一批 Note 整理。静默暂停 Curate、Organize、Summary，已承诺的 Ongoing 仍按计划跟进。
 
 外部 Input 唤醒领域后，在下一次 Chief prompt 前评估一次当前 Pi session 的上下文。达到 `topic.wakeCompactTokens`（默认 128000）时，Pi 生成历史摘要并按其近期消息预算保留原文。Chief 可按 ID 回读仍在职责树内的 Input。压缩使用现有 Usage 记录，失败时记录原因并继续处理原请求。进入静默本身不调用模型、不释放 session；长期空闲的 session 沿用原有回收策略。
 
@@ -38,11 +38,11 @@ Summary 请求投递时记录对象的轮转时间 `summaryReviewedAt`；正文�
 
 ## Reconciler
 
-资源 Watch 唤醒 Secretary，周期协调补齐漏掉的通知与时间阈值。Secretary 从索引查询当前待办、Batch、Topic 结构和 Note 压力，去重已有请求，取消已过时的未接纳安排，再准备需要的新任务。检查时间、各类维护请求的身份与需求指纹、冷却及退避保存在 Topic 调度状态中。普通 Immediate／Normal Input 直接交给 Chief；Secretary 旁观处理事实，不是所有 Input 的前置关卡。
+资源变更、定时到期以及 root 清除 status.execution 都能触发协调。秘书重读该 root，忙时只做备料。空闲时先选一条就绪业务 Input 或一个 Batch，再检查到期或有新材料的 Ongoing、待整理的 Note 和领域结构。到达复核时刻时，Summary 也可作为本轮工作。选中内部工作后才创建 Input，由该 root 的 Chief 接纳。
 
 ### Deferred 归组
 
-当前 Batch 仅用于 Deferred Input。Secretary 按 `topic.deferred.count` 与 `maxWaitSeconds` 判断是否归组，保留各成员的来源、原 attention 和权限依据；Batch 按 Normal 优先级交给 Chief。Immediate、Normal、内部维护及显式 handoff 保持独立 Input。
+Deferred Input 按兼容条件归组。无论 Chief 忙闲，达到 `topic.deferred.count` 或最早一条等到 `maxWaitSeconds` 即可封批。封批前材料保留在原 Input，封批事务固定成员。已封好的 Batch 等 Chief 空闲后作为一项工作投递，晚到的材料归下一批。
 
 成员归组与 Batch 就绪在同一事务中提交。`Input.status.batchId` 是成员关系的唯一记录，`batchAt` 记录归组时间；Batch 创建并完成归组后，后到材料留待下一批。成员兼容性、准备中断、容量不足与保留规则由 [Batch](input.md#batch) 定义。
 
@@ -50,19 +50,19 @@ Summary 请求投递时记录对象的轮转时间 `summaryReviewedAt`；正文�
 
 维护任务使用普通 Input：origin 标记请求类型，text 描述任务，curate 的 `observation.review` 保存请求时的 Chief 完成水位、结构通知版本和压力依据。创建请求时确定 Topic 归属；负责人分派随当前 Topic tree 收敛到 root。
 
-同一 Topic、同一维护 origin 的排队、执行和可重试请求共同参与去重。一轮完成后，后续周期或新变化产生新的 Input；已消失且尚未接纳的请求可取消。完整参数见[配置](../configuration.md#topic-消费策略)。
+已选中的 Input 保留稳定身份，投递失败按原回执恢复。尚未选中的需求继续由 Ongoing、Note 和 Topic 表达。
 
-每个 Topic 的 Secretary Reconcile 检查自己的直属容量，root 与非 root 使用相同机制。直属 Input 移入移出、完成或删除，以及 child 创建、删除和换 parent，会唤醒受影响节点；周期协调兜底。查询按索引读取至阈值加一，最多携带 8 条材料或 child 的标识，不为判断超限读取全部对象。
+Secretary 在领域 root 选单时检查子树各 Topic 的直属容量。直属 Input 移入移出、完成或删除，以及 child 创建、删除和换 parent，会唤醒受影响节点；周期协调兜底。查询按索引读取至阈值加一，最多携带 8 条材料或 child 的标识，不为判断超限读取全部对象。
 
 | origin | 触发与目的 |
 | --- | --- |
-| aide:organize | 任一直属容量超限时，汇总 Input、Work、child 的计数与样本。所有超限都消失后可取消尚未接纳的议程 |
-| aide:followup | 跟进需要回应的事项；按开放 Ongoing 保存的 `checkAt` 一次性调度，核实具体问题或复核事项是否仍需跟进 |
+| aide:organize | 直属容量超限时，汇总本次待整理的 Input、Work 和 child |
+| aide:followup | 开放 Ongoing 到期或收到新材料时核实现状。到期检查投递成功后，默认一小时后再次检查 |
 | aide:curate | 普通 Note 的改动达到批量或等待上限，或工作量、子摘要、结构与预算变化需要梳理；Chief 据此核对普通 Note 和相关 Task、Routine、Ongoing |
 
-内置请求复用 Input，status.topic 指向目标节点，未领取时 status.assess.topic 收敛到当前 root，领取后保留实际负责人。origin 决定 Chief 的工具与处理路径，text 描述任务。Secretary 统一准备 Curate／Followup／Organize，每个节点、每种 origin 最多一条未完成请求；可重试失败仍处理原 Input。创建与请求记账原子提交，结果与完成水位原子提交，无需二次结算。`maintenanceRequests` 保留请求身份、时间、需求指纹与尝试次数；`notes_changed` 按各 Note 的 `status.curateAt` 选取到期材料；其余触发的同一需求从 `capacityCooldownSeconds`（默认 60 秒）指数退避到 2 小时（基础冷却更长时保留基础冷却），新需求重新安排。已完成 Input 回收后仍可从 Topic 保留的事实继续调度。
+内置 Input 的 origin 决定工具范围，status.topic 指向目标节点。普通 Note 依据 curateAt 和已投递内容选择，组织压力和回顾压力依据 maintenanceChecks 中的检查时间、证据指纹和尝试次数限频。相同压力最多退避到两小时。
 
-maxUnfiledInput 统计直属、无 topicKey、未删除的业务 Input，包含已研判材料；三类内置 Input 排除。maxInput 字段暂时保留，不参与策略。maxChildren 统计直属有效 child。归集到 child 后，该 child 同样检查阈值并请求 root 继续整理；已完成回执不重置。容量触发独立于静默回顾退避，执行前重查需求，已消失则直接完成请求。提示每轮至多处理 8 条材料或直属 child；这是 Agent 执行要求，不是工具调用次数硬配额，整体激活提示还受 contextChars 限制。
+maxUnfiledInput 统计直属、无 topicKey、未删除的业务 Input，包含已研判材料；三类内置 Input 排除。maxInput 字段暂时保留，不参与策略。maxChildren 统计直属有效 child。归集到 child 后，该 child 同样检查阈值并请求 root 继续整理；已完成回执不重置。容量触发独立于静默回顾退避，需求在选单前消失时，本轮跳过。提示每轮至多处理 8 条材料或直属 child；这是 Agent 执行要求，不是工具调用次数硬配额，整体激活提示还受 contextChars 限制。
 
 ### 工作量与时间窗口
 
@@ -84,7 +84,7 @@ Topic 配置区分 `trigger.intervalSeconds`（默认 60 秒，固定唤醒 Reco
 
 ## 与 Chief 及其它角色协作
 
-Chief Reconcile 关注抽到的非 Deferred Input／Batch，按其 origin、attention 和权限选择工具并触发 Agent，把当前待办处理好。Secretary 关注更多资源事实，它的工作产物是新的 Input 或就绪 Batch。Chief 使用 Agent 作判断；运行时将投递回执、Chief 工作量与本次 Curate 覆盖水位在同一事务中提交。Chief 不决定下一次维护何时发生，也不在执行结束时重置秘书的退避。
+秘书负责选单，Chief 按本轮 Input 的 origin 和授权范围办理。运行时同时提交投递回执、Chief 工作量与对应维护水位。
 
 Secretary 观察 Chief 已持久化的完成事实，后续需求产生新 Input。结果写入与重试由 [Chief](chief.md#完成与重试) 负责，Batch 成员结果由 Input Reconcile 投影；这些完成路径无需秘书再次确认。
 
@@ -92,7 +92,7 @@ Route 负责初始 Topic 归属，Weave 负责 Topic 之间的组织关系，Tas
 
 ## 实现入口
 
-- [Secretary Reconcile](../../plugins/personal/secretary/reconcile.ts)：待办准备、空检查与过时请求取消。
+- [Secretary Reconcile](../../plugins/personal/secretary/reconcile.ts) 汇集 root 当前候选并选出一项。
 - [Batch 准备](../../plugins/personal/secretary/batching.ts)：Deferred 归组与未接纳 Batch 协调。
 - [维护请求](../../plugins/personal/secretary/input.ts)与[容量检查](../../plugins/personal/secretary/maintenance.ts)：请求去重、触发证据与准备阶段冷却。
 - [Chief 投递事务](../../plugins/personal/chief/delivery.ts)同时提交投递回执和[工作量记录](../../plugins/personal/chief/input-outcome.ts)。

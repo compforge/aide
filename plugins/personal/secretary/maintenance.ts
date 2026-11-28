@@ -61,5 +61,5 @@ export async function ensureOrganizationInput(context: import("@compforge/aide-p
     facts.work > policy.maxWork && [facts.work, facts.workIds, policy.maxWork],
     facts.children > policy.maxChildren && [facts.children, facts.childUids, policy.maxChildren],
   ]);
-  await tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:organize", "capacity", undefined, policy, fingerprint);
+  return tryCreateMaintenanceInput(context, topic, new Date().toISOString(), agenda, "aide:organize", "capacity", undefined, policy, fingerprint);
 }

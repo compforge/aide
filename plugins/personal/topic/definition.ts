@@ -72,7 +72,8 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
       chiefWorkload: ChiefWorkloadSchema.optional(),
-      maintenanceRequests: z.partialRecord(z.enum(["aide:curate", "aide:followup", "aide:organize"]), z.object({ checkedAt: z.string().datetime(), inputId: z.string(), fingerprint: z.string(), attempts: z.number().int().nonnegative().max(14) }).strict()).optional(),
+      maintenanceRequests: z.unknown().optional(),
+      maintenanceChecks: z.partialRecord(z.enum(["aide:curate", "aide:organize"]), z.object({ checkedAt: z.string().datetime(), fingerprint: z.string(), attempts: z.number().int().nonnegative().max(14) }).strict()).optional(),
       notePressure: NotePressureSchema.optional(),
       // Discard the retired queue when decoding older Topic resources.
       noteReviewQueue: z.unknown().optional(),
@@ -83,14 +84,15 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       phase: z.enum(["active", "dormant"]).optional(), compactOnWake: z.boolean().optional(), closeoutFor: z.iso.datetime().optional(),
       lastInputAt: z.string().datetime().optional(),
       summaryCheckAt: z.iso.datetime().optional(),
-      reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict().transform(({ noteReviewQueue: _queue, ...status }) => status) },
+      reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict().transform(({ noteReviewQueue: _queue, maintenanceRequests: _requests, ...status }) => status) },
   validator: { create: (resource, context) => { validateSummary(resource, context); validateDefault(resource, context); guardTopicOrganization(resource, context); }, update: (previous, current, context) => {
     guardContext(previous, current, context);
     if (isRootTopic(current)) {
       const sleeping = current.status.phase === "dormant" && previous.status.phase !== "dormant";
       const origin = current.status.execution?.inputOrigin;
       const maintenance = origin && isInternalInput({ origin }) && previous.status.execution?.id !== current.status.execution?.id;
-      if ((sleeping && current.status.execution) || ((sleeping || maintenance) && queuedBusiness(current, context, sleeping)))
+      // A later arrival belongs to the next selection. Only the transition to dormancy needs an empty domain.
+      if (sleeping && (current.status.execution || queuedBusiness(current, context)))
         throw new Error("Chief has queued business");
       if (maintenance && origin !== "aide:followup" && current.status.phase === "dormant") throw new Error("Chief is dormant");
     }
