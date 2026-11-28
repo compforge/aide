@@ -4,10 +4,10 @@ import { INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
 import { topicSubtree } from "../topic/tree.ts";
 import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 import { z } from "zod";
-import { requireProcessingRoot, requireTopic } from "../topic/ownership.ts";
+import { requireTopic } from "../topic/ownership.ts";
 import { isRootTopic } from "../topic/boundary.ts";
 import { topicReview } from "../topic/review.ts";
-import type { ResourceValidationContext } from "@compforge/aide-plugin";
+import { ResourceVersionConflict, type ResourceValidationContext } from "@compforge/aide-plugin";
 
 export const SummaryOwnerSchema = SubjectSchema.extend({ kind: z.enum(["Topic", "Person", "Address"]) });
 
@@ -30,8 +30,9 @@ export function validateReviewRequest(input: { metadata: { name: string }; spec:
   reviewEvidence(input.spec);
   const topic = requireTopic(input.status.topic, context);
   if (input.spec.originRef?.uid !== topic.metadata.uid) throw new Error("Internal Input target changed");
-  if (input.spec.origin !== "aide:followup" && requireProcessingRoot(input.status.topic, context).status.phase === "dormant")
-    throw new Error("Chief is dormant");
+  if (input.spec.origin === "aide:stow" && (!isRootTopic(topic) || topic.status.execution
+    || !topic.status.agent?.sessionId || topic.status.agent.sessionId !== input.spec.observation?.sessionId
+    || topic.status.agent.promptTokens !== input.spec.observation?.promptTokens)) throw new ResourceVersionConflict("Stow observation has changed");
   if (input.spec.origin === "aide:summary") {
     const ref = SummaryOwnerSchema.parse(input.spec.observation?.summaryOwner);
     const owner = context.get(ref, ref.uid);
@@ -43,8 +44,8 @@ export function validateReviewRequest(input: { metadata: { name: string }; spec:
       if (root.metadata.uid !== topic.metadata.uid) throw new Error("Summary review Topic moved");
     } else if (!topic.spec.default) throw new Error("Shared Summary reviews belong to the default Chief");
     // The indexes and execution are read in the same transaction that hands the Input to Chief.
-    const queued = (name: string, uid: string) => context.list(INPUT_TYPE, { matchIndex: { name, value: uid } })
-      .some(other => other.metadata.name !== input.metadata.name);
+    const queued = (name: string, uid: string) => context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name, value: uid } })
+      .some(other => other.metadata.name !== input.metadata.name && other.spec.origin !== "aide:stow");
     const children = (parent: TopicResource) => context.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
       { matchIndex: { name: "parent", value: parent.metadata.uid } });
     if (topic.status.execution || queued("assignedPending", topic.metadata.uid)

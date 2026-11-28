@@ -59,7 +59,7 @@ export async function moveMaterial(resources: ResourceClient, actor: TopicResour
     { operation: "patchStatus", resource: material, patch: { topic: resourceRef(target), organization,
       ...(assessment && !assessment.executionId && !assessment.completedAt ? { assess: unassigned } : {}) } },
     ...(args.kind === "Input" && externalInput(material.spec as InputSpec) ? [{ operation: "patchStatus" as const, resource: target,
-      patch: { lastInputAt: [target.status.lastInputAt ?? target.metadata.creationTimestamp, material.metadata.creationTimestamp].sort().at(-1)! } }] : []),
+      patch: { lastInputAt: [target.status.lastInputAt ?? "", material.metadata.creationTimestamp].sort().at(-1)! } }] : []),
   ]);
   return (await resources.get<InputSpec | WorkResource["spec"], InputStatus | WorkResource["status"]>(resourceRef(material)))!;
 }

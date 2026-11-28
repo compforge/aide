@@ -20,7 +20,7 @@ export function topicWatch(context: PluginContext): Watch {
       if (a.spec.parentRef?.uid !== b.spec.parentRef?.uid || a.status.weaveRevision !== b.status.weaveRevision
         || !isDeepStrictEqual(a.status.notePressure, b.status.notePressure)
         || a.metadata.deletionTimestamp !== b.metadata.deletionTimestamp) return rootRequests(b, a);
-      return a.status.phase !== b.status.phase || a.status.execution?.id !== b.status.execution?.id || a.status.lastInputAt !== b.status.lastInputAt
+      return a.status.execution?.id !== b.status.execution?.id || a.status.lastInputAt !== b.status.lastInputAt
         || a.status.chiefWorkload?.completed !== b.status.chiefWorkload?.completed
         ? [{ name: b.metadata.name, namespace: b.metadata.namespace }] : [];
     } } };

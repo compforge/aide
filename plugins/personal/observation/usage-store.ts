@@ -71,7 +71,7 @@ export class UsageStore {
     } else if (entry.type === "usage" || entry.type === "compaction" || entry.type === "branch_summary") {
       const model = entry.type === "usage" ? { provider: entry.provider, model: entry.model } : { provider: "unknown", model: "unknown" };
       this.insert(session, role, { id: entry.id, at, ...model,
-        auxiliary: entry.type === "usage" ? entry.kind : entry.type, tokens: reportedTokens(entry.usage) });
+        origin: role === "chief" ? origin : undefined, auxiliary: entry.type === "usage" ? entry.kind : entry.type, tokens: reportedTokens(entry.usage) });
     }
   }
 

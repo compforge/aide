@@ -72,7 +72,7 @@ Batch 是 Personal 的独立 CRD，对 Chief 表现为一条特殊的输入：�
 
 Input 保存原始事实、origin、attention、权限依据与 Work 办理回执。成员关系的唯一事实是 `Input.status.batchId`，值为 Batch UID；`batchAt` 记录归组时间，两者一起写入，归组后不可修改。Batch 不保存 inputRefs、inputIds 或成员计数，成员通过 Input 的 batch 索引查询。
 
-[Secretary](secretary.md) 按 `topic.deferred.count` 和 `maxWaitSeconds` 检查数量与最早等待时间。同一来源、originId、材料 Topic、Address、sender、分类与授权上下文的 Deferred Input 可以组批，每批最多 10 条。Batch.spec 保存处理 Topic、attention 和 oldestAt，当前 attention 为 Normal。批次是 Normal 调度项，原 Input 仍为 Deferred；组批不会扩大权限，也不会获得 steer 资格。
+[Secretary](secretary.md) 按 `topic.deferred.count` 和 `maxWaitSeconds` 检查数量与最早等待时间。同一来源、originId、材料 Topic、Address、sender、分类与授权上下文的 Deferred Input 可以组批，每批最多 10 条。Batch.spec 保存处理 Topic、attention 和 oldestAt，当前 attention 为 Normal。同级的 Batch 与独立 Normal Input 按各自的 metadata.creationTimestamp 排序。批次是 Normal 调度项，原 Input 仍为 Deferred；组批不会扩大权限，也不会获得 steer 资格。
 
 创建并完成归组后成员固定：1、2、3 组成 Batch A 后，到来的 4 留在待办，不能追加进 A；A 排队、执行和终结都不改变成员身份。Immediate 优先进入；运行中最多有一个尚未完成的 Batch，其余 Batch 等待。批次配额不足时保留原始 Deferred 待办并定时重试，不走第二套提级机制。
 
@@ -82,7 +82,7 @@ Input 保存原始事实、origin、attention、权限依据与 Work 办理回�
 - ready：固定成员的批次可被 Chief 接纳。事务内检查成员和真实处理归属，防止与独立研判并发重复领取。
 - running：Chief 原子更新 Topic execution 与 Batch 回执。成员不领取独立 execution，不进入独立调度。
 - completed：运行时确认 Batch 已进入 Chief 上下文。成员可继续作为 Work 的来源材料。
-- failed：无法确认已派发材料的投递结果时，保存错误证据并停止自动重投。明确未投递的 Batch 退回 ready，按下次可投递时间参与排序。
+- failed：无法确认已派发材料的投递结果时，保存错误证据并停止自动重投。明确未投递的 Batch 退回 ready，等待重试冷却结束后按原创建时间参与排序。
 - cancelled：Secretary 在接纳前发现材料过期或处理归属失效时取消安排。成员关系仍保留，并通过回填得到取消原因。
 
 Input Reconcile 监听 Batch 终态，按 batchId 将完成或失败回执投影到成员 assess。回填可重复执行，重启后仍能继续；Chief 不等待或逐条写成员回执。运行中的执行身份直接以 Batch 为准，不能依赖异步投影。

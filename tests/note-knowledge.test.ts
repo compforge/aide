@@ -869,20 +869,13 @@ test("evidence that a matter is still ongoing settles the old check without aski
   assert.equal(f.aide.outputs().length, 0);
 });
 
-test("at the dormancy deadline one final Note batch covers still-pending material", async t => {
+test("window expiry preserves pending Notes without forcing a final curation", async t => {
   const { reconcileSecretary } = await import("../plugins/personal/secretary/reconcile.ts");
   const f = await setup(t);
-  const draft = await f.note({ nature: "semantic", text: "New material for the next review" }, "closeout");
-  const at = new Date().toISOString(), policy = topicPolicy();
-  await f.resources.patchStatus(f.read(), { execution: null, lastInputAt: new Date(Date.now() - 901_000).toISOString() });
-  await reconcileSecretary(f.context, f.read(), policy);
-  const requests = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:curate");
-  assert.equal(requests.length, 1);
-  const closeout = requests.find(i => i.spec.observation?.trigger === "notes_changed")!;
-  assert.deepEqual(closeout.spec.observation?.notes, [draft]);
-  await f.resources.patchStatus(f.read(), { execution: { id: "last", startedAt: at } });
-  await deliverInput(f.resources, f.read(), "last", closeout.metadata.name);
-  await f.resources.patchStatus(f.read(), { execution: null });
-  await reconcileSecretary(f.context, f.read(), policy);
-  assert.equal(f.read().status.phase, "dormant");
+  await f.note({ nature: "semantic", text: "Evidence for a later review" }, "draft");
+  const policy = topicPolicy({ curation: { count: 1 } });
+  await f.resources.patchStatus(f.read(), { execution: null, lastInputAt: new Date(Date.now() - 1801_000).toISOString() });
+  assert.equal((await reconcileSecretary(f.context, f.read(), policy)).intake, undefined);
+  await f.resources.patchStatus(f.read(), { lastInputAt: new Date().toISOString() });
+  assert.equal((await reconcileSecretary(f.context, f.read(), policy)).intake?.inputs[0]?.spec.origin, "aide:curate");
 });

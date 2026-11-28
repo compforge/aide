@@ -1537,52 +1537,57 @@ test("Chief Summary tools edit only the owner of the admitted Input", async t =>
   assert.deepEqual(written, [args[2]]);
 });
 
-test("Chief wake compacts before business delivery and keeps the session usable if compaction fails", { timeout: 30_000 }, async t => {
+test("Stow compacts an observed large prompt without asking the model for another business answer", { timeout: 30_000 }, async t => {
   const { ConfigSchema } = await import("../src/config.ts");
-  let summaries = 0, rejectSummary = false;
+  let summaries = 0, business = 0, tokens = 1000, rejectSummary = false;
   const fixture = await setup(t, request => {
     if ((request.messages as { content: unknown }[]).some(m => messageText(m.content).includes("context summarization assistant"))) {
       summaries++;
       return { text: "Historical checkpoint for earlier work", stop: rejectSummary ? "length" : "stop" };
     }
-    return { text: "Choose the blue option or the green option.", usage: { prompt_tokens: 4000, completion_tokens: 10, total_tokens: 4010 } };
+    business++;
+    return { text: "Choose the blue option or the green option.", usage: { prompt_tokens: tokens, completion_tokens: 10, total_tokens: tokens + 10 } };
   });
   const pi = fixture.config.config;
-  const aide: Aide = new Aide(join(fixture.config.cwd, "wake-home"), { cwd: fixture.config.cwd, timezone: "UTC",
-    config: ConfigSchema.parse({ plugins: { personal: { topic: { wakeCompactTokens: 1000 } } } }), defaultHarnessConfig: { id: "default", harness: "pi" },
+  const aide: Aide = new Aide(join(fixture.config.cwd, "stow-home"), { cwd: fixture.config.cwd, timezone: "UTC",
+    config: ConfigSchema.parse({ plugins: { personal: { topic: { stowPromptTokens: 1000 } } } }), defaultHarnessConfig: { id: "default", harness: "pi" },
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness }, chiefSession: aide.chiefSession(ports.scope, {
       ...pi, settings: { ...pi.settings, compaction: { enabled: false, keepRecentTokens: 500, reserveTokens: 1500 } },
     }) }),
   }, pino({ level: "silent" }));
   t.after(() => aide.close());
   await aide.start();
-  const resources = aide.runtime.plugins.resourceClient("personal");
-  await aide.topics.ensure("wake");
+  await aide.topics.ensure("stow");
   const send = async (id: string, text: string) => {
-    await aide.topics.submit(id, { topicId: "wake", origin: "source", originId: "fixture", text });
+    await aide.topics.submit(id, { topicId: "stow", origin: "source", originId: "fixture", text });
     await aide.settled();
-    assert.ok(aide.topics.inputStore.get(id)!.status.assess?.completedAt, JSON.stringify(aide.topics.inputStore.get(id)!.status));
+    assert.ok(aide.topics.inputStore.get(id)!.status.assess?.completedAt);
   };
+  const topic = () => aide.topics.resource("stow")!;
+  const requests = () => aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:stow");
   await send("old", "Old evidence ".repeat(500));
+  const sessionId = topic().status.agent!.sessionId;
+  assert.equal(topic().status.agent!.promptTokens, 1000);
+  assert.equal(requests().length, 0);
+  tokens = 4000;
   await send("recent", "Which option, A or B?");
-  const topic = () => aide.topics.resource("wake")!;
-  const session = topic().status.agent!.sessionId;
-  await resources.patchStatus(topic(), { phase: "dormant" });
-  await send("answer", "Use option B");
   assert.ok(summaries > 0);
-  const afterWake = summaries;
-  assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Historical checkpoint/);
-  assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Use option B/);
-  assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Choose the blue option or the green option/);
-  await send("more", "More evidence");
-  assert.equal(summaries, afterWake);
-  await resources.patchStatus(topic(), { phase: "dormant" });
+  assert.equal(business, 2);
+  assert.equal(requests().length, 1);
+  assert.ok(requests()[0]!.status.assess?.completedAt);
+  assert.equal(topic().status.agent!.promptTokens, undefined);
+  assert.equal(topic().status.chiefWorkload?.completed, 2);
   rejectSummary = true;
-  await send("after-failure", "Continue processing after wake");
-  assert.ok(summaries > afterWake);
-  assert.equal(topic().status.agent!.sessionId, session);
-  assert.equal(topic().status.compactOnWake, false);
+  await send("more", "More evidence ".repeat(500));
+  assert.equal(requests().length, 2);
+  assert.equal(business, 3);
+  assert.equal(topic().status.agent!.sessionId, sessionId);
+  tokens = 600;
+  await send("answer", "Use option B");
+  assert.equal(topic().status.agent!.promptTokens, 600);
+  assert.equal(requests().length, 2);
 });
+
 
 test("Chief can retrieve an earlier Input after curate compacts its history", { timeout: 30_000 }, async t => {
   let recall = false, lookup = 0;
@@ -1613,6 +1618,7 @@ test("Chief can retrieve an earlier Input after curate compacts its history", { 
   const beforeReview = fixture.requests.length;
   await send("zone-review", "aide:curate", "Review receipt records");
   assert.equal(fixture.requests.length, beforeReview + 1);
+  assert.equal(aide.topics.resource("zone")!.status.agent!.promptTokens, undefined);
   const review = JSON.stringify(fixture.requests.at(-1)!.messages);
   assert.match(review, /ZC746/);
   assert.match(review, /Review receipt records/);

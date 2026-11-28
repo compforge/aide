@@ -1,4 +1,3 @@
-import { queuedBusiness } from "./activity.ts";
 import { ONGOING_TYPE } from "../ongoing/model.ts";
 import { ChiefWorkloadSchema } from "./workload.ts";
 import { isGateTopic, isRootTopic, isProcessingRoot } from "./boundary.ts";
@@ -27,7 +26,7 @@ import { TOPIC_TYPE, TopicDeletionBlocked, DEFAULT_TOPIC_ID, GATE_TOPIC_ID, type
 import { LoopExecutionSchema } from "../execution/loop.ts";
 import { ResourceRefSchema } from "../topic/ref.ts";
 import { BATCH_TYPE } from "../batch/model.ts";
-import { INPUT_TYPE, isInternalInput, type InputSpec, type InputStatus } from "../input/model.ts";
+import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { DELEGATED_WORK_TYPES, type WorkResource } from "../work/resources.ts";
 import { understandingVersion } from "./tree.ts";
 /** @spec Default is a system-owned singleton; ordinary Topics cannot adopt or relinquish that role.
@@ -81,21 +80,13 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       assignmentRefresh: z.object({ version: z.string(), cursor: z.string(), complete: z.boolean() }).strict().optional(),
       yieldToInput: z.boolean().optional(),
       idleReviewReset: z.object({ at: z.string().datetime(), previousCount: z.number().int().nonnegative() }).strict().nullable().optional(),
+      // Decode retired scheduling fields from persisted Topics and drop them below.
       phase: z.enum(["active", "dormant"]).optional(), compactOnWake: z.boolean().optional(), closeoutFor: z.iso.datetime().optional(),
       lastInputAt: z.string().datetime().optional(),
       summaryCheckAt: z.iso.datetime().optional(),
-      reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict().transform(({ noteReviewQueue: _queue, maintenanceRequests: _requests, ...status }) => status) },
+      reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.extend({ promptTokens: z.number().int().nonnegative().optional(), stowInputId: z.string().optional() }).optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict().transform(({ phase: _phase, compactOnWake: _wake, closeoutFor: _closeout, noteReviewQueue: _queue, maintenanceRequests: _requests, ...status }) => status) },
   validator: { create: (resource, context) => { validateSummary(resource, context); validateDefault(resource, context); guardTopicOrganization(resource, context); }, update: (previous, current, context) => {
     guardContext(previous, current, context);
-    if (isRootTopic(current)) {
-      const sleeping = current.status.phase === "dormant" && previous.status.phase !== "dormant";
-      const origin = current.status.execution?.inputOrigin;
-      const maintenance = origin && isInternalInput({ origin }) && previous.status.execution?.id !== current.status.execution?.id;
-      // A later arrival belongs to the next selection. Only the transition to dormancy needs an empty domain.
-      if (sleeping && (current.status.execution || queuedBusiness(current, context)))
-        throw new Error("Chief has queued business");
-      if (maintenance && origin !== "aide:followup" && current.status.phase === "dormant") throw new Error("Chief is dormant");
-    }
     if (current.status.reclamation && !isDeepStrictEqual(previous.status.reclamation, current.status.reclamation)) {
       requireContentWriter(current, current.status.reclamation.writer, context);
       if (current.status.reclamation.version !== reclamationVersion(current, context))

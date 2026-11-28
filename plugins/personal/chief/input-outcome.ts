@@ -7,6 +7,7 @@ import { completeChiefWork } from "./workload.ts";
  * @case tests/topic-secretary.test.ts
  */
 export function inputOutcome(input: Input, owner: TopicResource, at: string): Partial<TopicStatus> {
+  if (input.spec.origin === "aide:stow") return {};
   const evidence = input.spec.originRef?.uid === owner.metadata.uid ? reviewEvidence(input.spec) : undefined;
   return { chiefWorkload: completeChiefWork(owner, at, input.spec.origin === "aide:curate" || input.spec.origin === "aide:summary", evidence),
     ...(evidence ? { notifiedWeaveRevision: Math.max(owner.status.notifiedWeaveRevision ?? 0, evidence.weaveRevision) } : {}),

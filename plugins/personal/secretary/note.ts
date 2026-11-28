@@ -11,17 +11,14 @@ import { digest } from "../identity.ts";
  * @case tests/note-knowledge.test.ts
  * @link docs/personal/note.md
  */
-export async function prepareNoteMaintenance(context: PluginContext, note: NoteResource, policy: TopicPolicy, now = Date.now(), closeout = false, expectedRoot?: string) {
+export async function prepareNoteMaintenance(context: PluginContext, note: NoteResource, policy: TopicPolicy, now = Date.now(), expectedRoot?: string) {
   if (note.metadata.deletionTimestamp || note.status.retired || note.spec.summaryOf) return;
   const since = pendingCuration(note);
   if (!since || note.status.curationDelivery?.material === noteMaterial(note.spec)) return;
   const at = new Date(now).toISOString();
   if (note.status.curateAt && note.status.curateAt > at) return { requeueAfterMs: Date.parse(note.status.curateAt) - now };
   const topic = await noteRoot(context, note);
-  if (!topic || expectedRoot && topic.metadata.uid !== expectedRoot || !isRootTopic(topic) || topic.status.phase === "dormant") return;
-  const activity = topic.status.lastInputAt ?? topic.metadata.creationTimestamp;
-  closeout ||= now >= Date.parse(activity) + policy.dormantAfterSeconds * 1000;
-  if (closeout && topic.status.closeoutFor === activity) return;
+  if (!topic || expectedRoot && topic.metadata.uid !== expectedRoot || !isRootTopic(topic)) return;
   // Give an unchanged Note a full curation window before it can consume another Chief turn.
   const cooldown = Math.max(policy.capacityCooldownSeconds, policy.curation.maxWaitSeconds);
   let next: number;
@@ -34,7 +31,7 @@ export async function prepareNoteMaintenance(context: PluginContext, note: NoteR
   if (batch.length < 8 && !batch.some(item => item.metadata.uid === note.metadata.uid)) batch.push(note);
   const oldest = Math.min(...batch.map(item => Date.parse(pendingCuration(item)!)));
   const due = batch.length >= policy.curation.count ? now : oldest + policy.curation.maxWaitSeconds * 1000;
-  if (closeout || due <= now) {
+  if (due <= now) {
     if (batch.length < 8) {
       const offered = await context.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, {
         matchIndex: { name: "offeredCuration", value: note.spec.subject.uid }, limit: 8 - batch.length, direction: "asc" });
@@ -46,7 +43,7 @@ export async function prepareNoteMaintenance(context: PluginContext, note: NoteR
     const notes = batch.map(item => ({ noteId: item.metadata.name, version: noteVersion(item) }));
     const instructions = `Start with these changed ordinary Notes, then look for related evidence and duplicates: ${notes.map(item => item.noteId).join(", ")}.`;
     const input = await tryCreateMaintenanceInput(context, topic, at, await maintenanceAgenda(context.resources, [], policy),
-      "aide:curate", "notes_changed", { notes: batch, instructions, cooldownSeconds: cooldown, ...(closeout ? { closeoutFor: activity } : {}) }, policy, digest(notes));
+      "aide:curate", "notes_changed", { notes: batch, instructions, cooldownSeconds: cooldown }, policy, digest(notes));
     return { input, requeueAfterMs: policy.capacityCooldownSeconds * 1000 };
   } else next = due;
   return { requeueAfterMs: Math.min(Math.max(1, next - now), 2_147_483_647) };

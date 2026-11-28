@@ -236,7 +236,7 @@ test("a new Chief session takes over an Ongoing from CRD progress, question and 
   const resources = aide.runtime.plugins.resourceClient("personal");
   const root = await aide.topics.ensure("me");
   const startedAt = new Date().toISOString();
-  const writer = await resources.patchStatus(root, { agent: { harness: "chief", sessionId: "previous-chief" }, execution: { id: "seed", startedAt } });
+  const writer = await resources.patchStatus(root, { lastInputAt: startedAt, agent: { harness: "chief", sessionId: "previous-chief" }, execution: { id: "seed", startedAt } });
   await upsertTopicNote(resources, writer, "seed", { nature: "semantic", name: "Metrics sign-off", text: "Owner signed off on the final metrics" }, "decision");
   const receipt = await upsertOngoing(resources, writer, { title: "Metrics await sign-off",
     progress: "Metrics submitted for review", question: "Has the owner signed off?", checkAt: startedAt }, "metrics");

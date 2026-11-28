@@ -17,12 +17,13 @@ const interval = 15 * 60_000;
 function schedule(f: Awaited<ReturnType<typeof secretaryFixture>>) {
   const gate = () => f.aide.topics.resource("gate")!;
   const start = Math.floor(Date.parse(gate().metadata.creationTimestamp) / interval) * interval;
+  f.policy.workWindowSeconds = 7200;
   return {
     tick: async (minutes: number) => {
       const now = start + minutes * 60_000;
-      await checkSummary(f.context, gate(), now);
-      for (const root of [f.root(), await ensureDefaultTopic(f.resources)]) await checkSummary(f.context, gate(), now, root);
-      return (await checkSummary(f.context, gate(), now)).requeueAfterMs;
+      await checkSummary(f.context, gate(), now, undefined, f.policy);
+      for (const root of [f.root(), await ensureDefaultTopic(f.resources)]) await checkSummary(f.context, gate(), now, root, f.policy);
+      return (await checkSummary(f.context, gate(), now, undefined, f.policy)).requeueAfterMs;
     },
     requests: () => f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:summary"),
   };
@@ -80,6 +81,7 @@ test("Shared Person and Address become eligible from ordinary Notes and rotate i
     people: [resourceRef(person)], addresses: [resourceRef(address)] }, "draft");
   await f.resources.patchStatus(f.root(), { execution: null, summaryReviewedAt: new Date().toISOString() });
   const shared = await ensureDefaultTopic(f.resources), seen = new Set<string>();
+  await f.resources.patchStatus(shared, { lastInputAt: new Date().toISOString() });
   for (const minutes of [15, 30]) {
     await s.tick(minutes);
     const request = s.requests().find(i => !i.status.assess?.completedAt)!;

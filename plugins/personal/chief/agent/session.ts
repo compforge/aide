@@ -1,7 +1,7 @@
-import { retryOnConflict } from "@compforge/aide-plugin";
-import { compactOnWake } from "./wake.ts";
+import { inWorkWindow } from "../../topic/activity.ts";
+import { preparedIntake } from "../../secretary/intake.ts";
 import { confirmCuratedNotes, type NoteConfirmation } from "../../note/confirm.ts";
-import { bindInputDelivery } from "../delivery.ts";
+import { bindInputDelivery, recordDelivery } from "../delivery.ts";
 import { readOngoing } from "../../ongoing/service.ts";
 import { BATCH_TYPE, type BatchSpec, type BatchStatus } from "../../batch/model.ts";
 import { chiefPreviews } from "../inputs.ts";
@@ -70,7 +70,22 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
       return readChiefInput(store, c, id, offset, policy.maxChars);
     }, confirm, notes => mailSender.cite(active().status.execution!.id, notes));
     let inputOrigin: import("../../input/model.ts").InputOrigin = "chief";
-    const session = await createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, inputBinding: {
+    const session = await createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config: { ...config,
+      observeEntry(scope, sessionId, entry, origin) {
+        config.observeEntry?.(scope, sessionId, entry, origin);
+        let promptTokens: number | null;
+        if (entry.type === "compaction" || entry.type === "branch_summary") promptTokens = null;
+        else if (entry.type === "message" && entry.message.role === "assistant") {
+          const u = entry.message.usage;
+          const measured = u.input + u.cacheRead + u.cacheWrite;
+          promptTokens = Number.isSafeInteger(measured) && measured > 0 ? measured : null;
+        } else return;
+        const current = store.topics.resource(topicId);
+        if (!current || current.metadata.uid !== ref.uid || current.status.agent?.sessionId !== sessionId
+          || (!current.status.agent.stowInputId && (current.status.agent.promptTokens ?? null) === promptTokens)) return;
+        store.resources.patchStatus(TOPIC_TYPE, current.metadata.name, { agent: { promptTokens, stowInputId: null } },
+          { expectedUid: current.metadata.uid, expectedResourceVersion: current.metadata.resourceVersion });
+      } }, inputBinding: {
       onUsageError: err => log.warn({ err, topicId }, "Chief usage origin unavailable"),
       read: () => {
         const c = active();
@@ -109,14 +124,28 @@ export function chiefSession(scope: ExecutionScope, config: PiConfig, dependenci
       }
     });
     bindInputDelivery(session, active, plugins.resourceClient("personal"), log);
-    return Object.assign(session, { async preparePrompt() {
-      const claimed = await retryOnConflict(async () => {
-        const current = active();
-        if (!current.status.compactOnWake) return false;
-        await plugins.resourceClient("personal").patchStatus(current, { compactOnWake: false }, { resourceVersion: current.metadata.resourceVersion });
+    return Object.assign(session, { async handlePrompt() {
+      const topic = active(), execution = topic.status.execution!;
+      if (execution.inputOrigin !== "aide:stow") return false;
+      const resources = plugins.resourceClient("personal");
+      const [input] = store.topics.inputStore.query("deliveryExecution", execution.id);
+      if (input?.spec.origin !== "aide:stow") throw new Error("Stow requires its admitted Input");
+      const ready = await preparedIntake(resources, topic, false, policy.trigger.intervalSeconds * 1000);
+      const current = active();
+      const eligible = inWorkWindow(current, policy) && !ready.inputs.length
+        && input.spec.observation?.sessionId === session.sessionId && current.status.agent?.sessionId === session.sessionId
+        && input.spec.observation?.lastInputAt === current.status.lastInputAt && current.status.agent.stowInputId === input.metadata.name
+        && (current.status.agent.promptTokens ?? 0) > policy.stowPromptTokens;
+      if (!await recordDelivery(resources, current, execution.id, execution.id)) return true;
+      if (!eligible) {
+        log.info({ topicId, sessionId: session.sessionId, inputId: input.metadata.name }, "Skipped superseded Chief Stow");
         return true;
-      });
-      if (claimed) await compactOnWake(session, policy.wakeCompactTokens, log);
+      }
+      session.sessionManager.appendCustomEntry("aide.usage-origin", { origin: "aide:stow" });
+      const result = await session.compact("Preserve open questions, decisions and relevant Input, Work and Note IDs for retrieval.");
+      log.info({ topicId, sessionId: session.sessionId, inputId: input.metadata.name, promptTokens: input.spec.observation?.promptTokens,
+        tokensAfter: result.estimatedTokensAfter }, "Chief Stow compacted session");
+      return true;
     } });
   };
 }
